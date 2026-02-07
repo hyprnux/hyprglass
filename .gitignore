@@ -1,0 +1,22 @@
+# Compiled plugin
+*.so
+
+# Generated files
+# src/shaders.hpp
+
+# Build artifacts
+*.o
+*.d
+build/
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Debug
+*.dwo
+*.pdb

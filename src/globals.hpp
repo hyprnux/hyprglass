@@ -1,0 +1,36 @@
+#pragma once
+
+#include <hyprland/src/plugins/PluginAPI.hpp>
+#include <hyprland/src/render/Shader.hpp>
+#include <memory>
+#include <vector>
+
+class CLiquidGlassDecoration;
+
+struct SGlobalState {
+    std::vector<WP<CLiquidGlassDecoration>> decorations;
+    SShader                                  shader;
+    float                                    startTime = 0.0f;
+    bool                                     shaderInitialized = false;
+
+    // Shader uniform locations
+    GLint locTime                  = -1;
+    GLint locBlurStrength          = -1;
+    GLint locRefractionStrength    = -1;
+    GLint locChromaticAberration   = -1;
+    GLint locFresnelStrength       = -1;
+    GLint locSpecularStrength      = -1;
+    GLint locGlassOpacity          = -1;
+    GLint locEdgeThickness         = -1;
+    GLint locFullSizeUntransformed = -1;
+};
+
+inline HANDLE                        PHANDLE = nullptr;
+inline std::unique_ptr<SGlobalState> g_pGlobalState;
+
+inline const char* PLUGIN_NAME        = "liquid-glass";
+inline const char* PLUGIN_DESCRIPTION = "Apple-style Liquid Glass effect";
+inline const char* PLUGIN_AUTHOR      = "Hyprnux";
+inline const char* PLUGIN_VERSION     = "1.0.0";
+
+void initShaderIfNeeded();
