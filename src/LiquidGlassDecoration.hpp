@@ -29,9 +29,11 @@ class CLiquidGlassDecoration : public IHyprWindowDecoration {
     CFramebuffer m_sampleFB;
     Vector2D     m_samplePaddingRatio;
 
-    static constexpr int SAMPLE_PADDING_PX = 40;
+    static constexpr int SAMPLE_PADDING_PX = 60;
+    CFramebuffer         m_blurTmpFB;
 
     void sampleBackground(CFramebuffer& sourceFB, CBox box);
+    void blurBackground(float radius, int iterations);
     void applyLiquidGlassEffect(CFramebuffer& sourceFB, CFramebuffer& targetFB,
                                  CBox& rawBox, CBox& transformedBox, float windowAlpha);
 

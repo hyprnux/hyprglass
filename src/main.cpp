@@ -62,6 +62,30 @@ void initShaderIfNeeded() {
 
     g_pGlobalState->shader.createVao();
 
+    // Compile blur shader
+    GLuint blurProg = g_pHyprOpenGL->createProgram(
+        g_pHyprOpenGL->m_shaders->TEXVERTSRC,
+        loadShader("gaussianblur.frag"),
+        true
+    );
+
+    if (blurProg == 0) {
+        HyprlandAPI::addNotification(PHANDLE,
+            std::format("[{}] Failed to compile blur shader", PLUGIN_NAME),
+            CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+        return;
+    }
+
+    g_pGlobalState->blurShader.program = blurProg;
+    g_pGlobalState->blurShader.uniformLocations[SHADER_PROJ]       = glGetUniformLocation(blurProg, "proj");
+    g_pGlobalState->blurShader.uniformLocations[SHADER_POS_ATTRIB] = glGetAttribLocation(blurProg, "pos");
+    g_pGlobalState->blurShader.uniformLocations[SHADER_TEX_ATTRIB] = glGetAttribLocation(blurProg, "texcoord");
+    g_pGlobalState->blurShader.uniformLocations[SHADER_TEX]        = glGetUniformLocation(blurProg, "tex");
+    g_pGlobalState->locBlurDirection = glGetUniformLocation(blurProg, "direction");
+    g_pGlobalState->locBlurRadius    = glGetUniformLocation(blurProg, "blurRadius");
+    g_pGlobalState->blurShader.createVao();
+    g_pGlobalState->blurShaderInitialized = true;
+
     auto now = std::chrono::steady_clock::now();
     g_pGlobalState->startTime = std::chrono::duration<float>(now.time_since_epoch()).count();
 
@@ -123,12 +147,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:enabled", Hyprlang::INT{1});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:blur_strength", Hyprlang::FLOAT{1.0});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:refraction_strength", Hyprlang::FLOAT{0.5});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:refraction_strength", Hyprlang::FLOAT{0.6});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:chromatic_aberration", Hyprlang::FLOAT{0.3});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:fresnel_strength", Hyprlang::FLOAT{0.4});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:specular_strength", Hyprlang::FLOAT{0.4});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:glass_opacity", Hyprlang::FLOAT{0.85});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:edge_thickness", Hyprlang::FLOAT{0.03});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:fresnel_strength", Hyprlang::FLOAT{0.5});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:specular_strength", Hyprlang::FLOAT{0.5});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:glass_opacity", Hyprlang::FLOAT{1.0});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:edge_thickness", Hyprlang::FLOAT{0.08});
 
     for (auto& w : g_pCompositor->m_windows) {
         if (w->isHidden() || !w->m_isMapped)
@@ -158,5 +182,6 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pHyprRenderer->m_renderPass.removeAllOfType("CLiquidGlassPassElement");
 
     g_pGlobalState->shader.destroy();
+    g_pGlobalState->blurShader.destroy();
     g_pGlobalState.reset();
 }

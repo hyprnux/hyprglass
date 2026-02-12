@@ -63,6 +63,60 @@ void CLiquidGlassDecoration::sampleBackground(CFramebuffer& sourceFB, CBox box) 
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
 }
 
+void CLiquidGlassDecoration::blurBackground(float radius, int iterations) {
+    if (radius <= 0.0f || iterations <= 0 || !g_pGlobalState->blurShaderInitialized)
+        return;
+
+    int w = static_cast<int>(m_sampleFB.m_size.x);
+    int h = static_cast<int>(m_sampleFB.m_size.y);
+
+    if (m_blurTmpFB.m_size.x != w || m_blurTmpFB.m_size.y != h)
+        m_blurTmpFB.alloc(w, h, m_sampleFB.m_drmFormat);
+
+    // Save GL state that we modify
+    GLint prevFB = 0, prevVAO = 0;
+    GLint prevViewport[4];
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFB);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
+    glGetIntegerv(GL_VIEWPORT, prevViewport);
+
+    // Fullscreen quad projection: maps VAO positions [0,1] to clip space [-1,1]
+    std::array<float, 9> projMatrix = {
+        2.0f, 0.0f, 0.0f,
+        0.0f, 2.0f, 0.0f,
+       -1.0f,-1.0f, 1.0f,
+    };
+
+    auto& blurShader = g_pGlobalState->blurShader;
+
+    g_pHyprOpenGL->useProgram(blurShader.program);
+    blurShader.setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, projMatrix);
+    blurShader.setUniformInt(SHADER_TEX, 0);
+    glUniform1f(g_pGlobalState->locBlurRadius, radius);
+    glBindVertexArray(blurShader.uniformLocations[SHADER_SHADER_VAO]);
+    glViewport(0, 0, w, h);
+    glActiveTexture(GL_TEXTURE0);
+
+    for (int iter = 0; iter < iterations; iter++) {
+        // H pass: m_sampleFB → m_blurTmpFB
+        glBindFramebuffer(GL_FRAMEBUFFER, m_blurTmpFB.getFBID());
+        m_sampleFB.getTexture()->bind();
+        glUniform2f(g_pGlobalState->locBlurDirection, 1.0f / w, 0.0f);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        // V pass: m_blurTmpFB → m_sampleFB
+        glBindFramebuffer(GL_FRAMEBUFFER, m_sampleFB.getFBID());
+        m_blurTmpFB.getTexture()->bind();
+        glUniform2f(g_pGlobalState->locBlurDirection, 0.0f, 1.0f / h);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+
+    // Restore GL state
+    glBindFramebuffer(GL_FRAMEBUFFER, prevFB);
+    glBindVertexArray(prevVAO);
+    glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+}
+
 void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFramebuffer& targetFB,
                                                       CBox& rawBox, CBox& transformedBox, float windowAlpha) {
     static auto* const PBLUR       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:blur_strength")->getDataStaticPtr();
@@ -160,6 +214,11 @@ void CLiquidGlassDecoration::renderPass(PHLMONITOR pMonitor, const float& a) {
         g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
 
     sampleBackground(*SOURCE, transformBox);
+
+    static auto* const PBLUR = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:blur_strength")->getDataStaticPtr();
+    float blurRadius = static_cast<float>(**PBLUR) * 12.0f;
+    blurBackground(blurRadius, 3);
+
     applyLiquidGlassEffect(m_sampleFB, *SOURCE, wlrbox, transformBox, a);
 }
 

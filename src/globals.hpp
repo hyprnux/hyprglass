@@ -24,6 +24,12 @@ struct SGlobalState {
     GLint locEdgeThickness         = -1;
     GLint locFullSizeUntransformed = -1;
     GLint locUvPadding             = -1;
+
+    // Blur shader
+    SShader blurShader;
+    bool    blurShaderInitialized  = false;
+    GLint   locBlurDirection       = -1;
+    GLint   locBlurRadius          = -1;
 };
 
 inline HANDLE                        PHANDLE = nullptr;
