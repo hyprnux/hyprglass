@@ -16,13 +16,28 @@ void CLiquidGlassPassElement::draw(const CRegion& damage) {
 }
 
 std::optional<CBox> CLiquidGlassPassElement::boundingBox() {
-    return std::nullopt;
+    if (!m_data.deco)
+        return std::nullopt;
+
+    auto window = m_data.deco->getOwner();
+    if (!window)
+        return std::nullopt;
+
+    auto box = window->getWindowMainSurfaceBox();
+    const auto pMonitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
+    if (pMonitor)
+        box.translate(-pMonitor->m_position);
+    return box;
 }
 
 bool CLiquidGlassPassElement::needsLiveBlur() {
-    return false;
+    return true;
 }
 
 bool CLiquidGlassPassElement::needsPrecomputeBlur() {
     return false;
+}
+
+bool CLiquidGlassPassElement::disableSimplification() {
+    return true;
 }

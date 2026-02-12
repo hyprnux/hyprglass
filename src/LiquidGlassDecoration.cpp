@@ -9,6 +9,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprutils/math/Misc.hpp>
 #include <chrono>
+#include <hyprland/src/debug/log/Logger.hpp>
 
 CLiquidGlassDecoration::CLiquidGlassDecoration(PHLWINDOW pWindow)
     : IHyprWindowDecoration(pWindow), m_pWindow(pWindow) {
@@ -29,6 +30,10 @@ void CLiquidGlassDecoration::draw(PHLMONITOR pMonitor, float const& a) {
     if (!**PENABLED)
         return;
 
+    // Force full render pass — simple pass skips background compositing
+    // which we need for the glass x-ray effect
+    g_pHyprOpenGL->m_renderData.simplePass = false;
+
     CLiquidGlassPassElement::SLiquidGlassData data{this, a};
     g_pHyprRenderer->m_renderPass.add(makeUnique<CLiquidGlassPassElement>(data));
 }
@@ -46,10 +51,21 @@ void CLiquidGlassDecoration::sampleBackground(CFramebuffer& sourceFB, CBox box) 
         m_sampleFB.alloc(paddedW, paddedH, sourceFB.m_drmFormat);
     }
 
-    int x0 = static_cast<int>(box.x) - pad;
-    int x1 = static_cast<int>(box.x + box.width) + pad;
-    int y0 = static_cast<int>(box.y) - pad;
-    int y1 = static_cast<int>(box.y + box.height) + pad;
+    int srcX0 = static_cast<int>(box.x) - pad;
+    int srcX1 = static_cast<int>(box.x + box.width) + pad;
+    int srcY0 = static_cast<int>(box.y) - pad;
+    int srcY1 = static_cast<int>(box.y + box.height) + pad;
+
+    // Clamp source coordinates to framebuffer bounds to avoid reading black/undefined pixels
+    int fbW = static_cast<int>(sourceFB.m_size.x);
+    int fbH = static_cast<int>(sourceFB.m_size.y);
+
+    int dstX0 = 0, dstY0 = 0, dstX1 = paddedW, dstY1 = paddedH;
+
+    if (srcX0 < 0) { dstX0 += -srcX0; srcX0 = 0; }
+    if (srcY0 < 0) { dstY0 += -srcY0; srcY0 = 0; }
+    if (srcX1 > fbW) { dstX1 -= (srcX1 - fbW); srcX1 = fbW; }
+    if (srcY1 > fbH) { dstY1 -= (srcY1 - fbH); srcY1 = fbH; }
 
     m_samplePaddingRatio = Vector2D(
         static_cast<double>(pad) / paddedW,
@@ -58,8 +74,8 @@ void CLiquidGlassDecoration::sampleBackground(CFramebuffer& sourceFB, CBox box) 
 
     glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFB.getFBID());
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_sampleFB.getFBID());
-    glBlitFramebuffer(x0, y0, x1, y1, 0, 0,
-                      paddedW, paddedH,
+    glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1,
+                      dstX0, dstY0, dstX1, dstY1,
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
 }
 
@@ -198,6 +214,27 @@ void CLiquidGlassDecoration::renderPass(PHLMONITOR pMonitor, const float& a) {
         : Vector2D();
 
     const auto SOURCE = g_pHyprOpenGL->m_renderData.currentFB;
+
+    {
+        static FILE* dbgFile = fopen("/tmp/liquidglass.log", "a");
+        if (dbgFile) {
+            auto thisboxDbg = PWINDOW->getWindowMainSurfaceBox();
+            CBox dbgBox = thisboxDbg.translate(-pMonitor->m_position + PWINDOW->m_floatingOffset)
+                              .scale(pMonitor->m_scale).round();
+            int cx = static_cast<int>(dbgBox.x + dbgBox.width / 2);
+            int cy = static_cast<int>(dbgBox.y + dbgBox.height / 2);
+            GLubyte pixel[4] = {0};
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, SOURCE->getFBID());
+            glReadPixels(cx, cy, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+            auto solitary = pMonitor->m_solitaryClient.lock();
+            fprintf(dbgFile, "FB=%u sp=%d sol=%d box=(%d,%d %dx%d) pixel@(%d,%d)=(%u,%u,%u,%u)\n",
+                SOURCE->getFBID(), (int)g_pHyprOpenGL->m_renderData.simplePass,
+                (int)(solitary != nullptr),
+                (int)dbgBox.x, (int)dbgBox.y, (int)dbgBox.width, (int)dbgBox.height,
+                cx, cy, pixel[0], pixel[1], pixel[2], pixel[3]);
+            fflush(dbgFile);
+        }
+    }
 
     auto thisbox = PWINDOW->getWindowMainSurfaceBox();
 

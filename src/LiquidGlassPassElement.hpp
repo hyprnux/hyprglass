@@ -20,6 +20,7 @@ class CLiquidGlassPassElement : public IPassElement {
     virtual bool                needsLiveBlur();
     virtual bool                needsPrecomputeBlur();
     virtual std::optional<CBox> boundingBox();
+    virtual bool                disableSimplification();
 
     virtual const char*         passName() {
         return "CLiquidGlassPassElement";

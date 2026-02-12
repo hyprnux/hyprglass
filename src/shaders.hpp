@@ -99,10 +99,9 @@ void main() {
     float cornerAlpha = 1.0 - smoothstep(-1.5, 0.5, cornerSdf);
     if (cornerAlpha < 0.001) discard;
 
-    // Bezel zone from smoothed SDF (smooth normals at corners)
-    float bezelSdf = getBezelSDF(uv);
+    // Bezel zone follows actual window shape (cornerSdf), normals from smoothed SDF
     float bezelWidthPx = edgeThickness * min(fullSize.x, fullSize.y);
-    float bezelFactor = clamp(1.0 + bezelSdf / bezelWidthPx, 0.0, 1.0);
+    float bezelFactor = clamp(1.0 + cornerSdf / bezelWidthPx, 0.0, 1.0);
 
     // Compute bezel displacement (only non-zero in the bezel strip)
     vec2 displacement = vec2(0.0);
