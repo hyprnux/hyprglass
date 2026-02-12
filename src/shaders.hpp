@@ -36,6 +36,7 @@ uniform float fresnelStrength;     // Edge glow intensity (0.0 - 1.0)
 uniform float specularStrength;    // Highlight brightness (0.0 - 1.0)
 uniform float glassOpacity;        // Overall glass opacity (0.0 - 1.0)
 uniform float edgeThickness;       // How thick the refractive edge is (0.0 - 0.3)
+uniform vec2 uvPadding;             // Ratio of padding on each side of the sampled texture
 
 in vec2 v_texcoord;
 layout(location = 0) out vec4 fragColor;
@@ -43,6 +44,17 @@ layout(location = 0) out vec4 fragColor;
 // Constants
 const float PI = 3.14159265359;
 const float AA_EDGE = 0.002; // Anti-aliasing edge softness
+
+// Convert window-space UV [0,1] to padded texture UV
+vec2 windowToTexUV(vec2 wuv) {
+    return wuv * (1.0 - 2.0 * uvPadding) + uvPadding;
+}
+
+// Safe texture sample using window-space UV, remapped to padded texture
+vec4 sampleTex(vec2 wuv) {
+    vec2 tuv = windowToTexUV(wuv);
+    return texture(tex, clamp(tuv, 0.001, 0.999));
+}
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -103,17 +115,12 @@ vec2 getRefractionOffset(vec2 uv, float edgeMask) {
     vec2 fromCenter = uv - center;
     float dist = length(fromCenter);
     
-    // Direction from center, normalized
     vec2 dir = normalize(fromCenter + 0.0001);
     
     // Refraction is stronger at edges (like looking through curved glass)
-    // Use a sine-based curve for more natural glass-like distortion
     float refractionAmount = edgeMask * sin(edgeMask * PI * 0.5);
     
-    // Add subtle wave distortion for liquid feel
-    float wave = sin(dist * 8.0 + time * 0.5) * 0.1 + 1.0;
-    
-    return dir * refractionAmount * refractionStrength * wave;
+    return dir * refractionAmount * refractionStrength;
 }
 
 // ============================================================================
@@ -121,33 +128,32 @@ vec2 getRefractionOffset(vec2 uv, float edgeMask) {
 // ============================================================================
 
 vec3 gaussianBlur(vec2 uv, vec2 texelSize, float strength) {
-    // 9-tap Gaussian blur
-    vec3 result = texture(tex, uv).rgb * 0.1633;
+    vec3 result = sampleTex(uv).rgb * 0.1633;
     
     vec2 off1 = texelSize * strength;
     vec2 off2 = texelSize * strength * 2.0;
     
-    result += texture(tex, uv + vec2(off1.x, 0.0)).rgb * 0.1531;
-    result += texture(tex, uv - vec2(off1.x, 0.0)).rgb * 0.1531;
-    result += texture(tex, uv + vec2(0.0, off1.y)).rgb * 0.1531;
-    result += texture(tex, uv - vec2(0.0, off1.y)).rgb * 0.1531;
-    result += texture(tex, uv + vec2(off2.x, 0.0)).rgb * 0.0561;
-    result += texture(tex, uv - vec2(off2.x, 0.0)).rgb * 0.0561;
-    result += texture(tex, uv + vec2(0.0, off2.y)).rgb * 0.0561;
-    result += texture(tex, uv - vec2(0.0, off2.y)).rgb * 0.0561;
+    result += sampleTex(uv + vec2(off1.x, 0.0)).rgb * 0.1531;
+    result += sampleTex(uv - vec2(off1.x, 0.0)).rgb * 0.1531;
+    result += sampleTex(uv + vec2(0.0, off1.y)).rgb * 0.1531;
+    result += sampleTex(uv - vec2(0.0, off1.y)).rgb * 0.1531;
+    result += sampleTex(uv + vec2(off2.x, 0.0)).rgb * 0.0561;
+    result += sampleTex(uv - vec2(off2.x, 0.0)).rgb * 0.0561;
+    result += sampleTex(uv + vec2(0.0, off2.y)).rgb * 0.0561;
+    result += sampleTex(uv - vec2(0.0, off2.y)).rgb * 0.0561;
     
     return result;
 }
 
 // Simpler 5-tap blur for performance with bounds clamping
 vec3 fastBlur(vec2 uv, vec2 texelSize, float strength) {
-    vec2 off1 = vec2(1.0) * texelSize * strength;
+    vec2 off1 = texelSize * strength;
     
-    vec3 result = texture(tex, uv).rgb * 0.4;
-    result += texture(tex, uv + vec2(off1.x, 0.0)).rgb * 0.15;
-    result += texture(tex, uv - vec2(off1.x, 0.0)).rgb * 0.15;
-    result += texture(tex, uv + vec2(0.0, off1.y)).rgb * 0.15;
-    result += texture(tex, uv - vec2(0.0, off1.y)).rgb * 0.15;
+    vec3 result = sampleTex(uv).rgb * 0.4;
+    result += sampleTex(uv + vec2(off1.x, 0.0)).rgb * 0.15;
+    result += sampleTex(uv - vec2(off1.x, 0.0)).rgb * 0.15;
+    result += sampleTex(uv + vec2(0.0, off1.y)).rgb * 0.15;
+    result += sampleTex(uv - vec2(0.0, off1.y)).rgb * 0.15;
     
     return result;
 }
@@ -165,9 +171,9 @@ vec3 chromaticSample(vec2 uv, vec2 texelSize, float edgeMask) {
     vec2 offsetR = dir * caAmount * 0.8;
     vec2 offsetB = dir * caAmount * 1.2;
     
-    float r = texture(tex, uv + offsetR).r;
-    float g = texture(tex, uv).g;
-    float b = texture(tex, uv + offsetB).b;
+    float r = sampleTex(uv + offsetR).r;
+    float g = sampleTex(uv).g;
+    float b = sampleTex(uv + offsetB).b;
     
     return vec3(r, g, b);
 }
@@ -225,6 +231,9 @@ float specularHighlight(vec2 uv) {
 // ============================================================================
 
 void main() {
+    // v_texcoord maps [0,1] across the rendered quad (= window area)
+    // We use it directly for geometry calculations (SDF, edge mask)
+    // For texture sampling, windowToTexUV() remaps into the padded texture
     vec2 uv = v_texcoord;
     vec2 texelSize = 1.0 / fullSize;
     
@@ -243,8 +252,7 @@ void main() {
     vec2 refractionOffset = getRefractionOffset(uv, edgeMask);
     vec2 refractedUV = uv + refractionOffset;
     
-    // Clamp to valid UV range
-    refractedUV = clamp(refractedUV, 0.001, 0.999);
+    // No need to clamp aggressively - padded texture has real pixels beyond window edge
     
     // ========================================
     // 2. BLUR - Glass thickness effect

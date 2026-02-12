@@ -38,19 +38,28 @@ PHLWINDOW CLiquidGlassDecoration::getOwner() {
 }
 
 void CLiquidGlassDecoration::sampleBackground(CFramebuffer& sourceFB, CBox box) {
-    if (m_sampleFB.m_size.x != box.width || m_sampleFB.m_size.y != box.height) {
-        m_sampleFB.alloc(box.width, box.height, sourceFB.m_drmFormat);
+    const int pad = SAMPLE_PADDING_PX;
+    int paddedW = static_cast<int>(box.width) + 2 * pad;
+    int paddedH = static_cast<int>(box.height) + 2 * pad;
+
+    if (m_sampleFB.m_size.x != paddedW || m_sampleFB.m_size.y != paddedH) {
+        m_sampleFB.alloc(paddedW, paddedH, sourceFB.m_drmFormat);
     }
 
-    int x0 = static_cast<int>(box.x);
-    int x1 = static_cast<int>(box.x + box.width);
-    int y0 = static_cast<int>(box.y);
-    int y1 = static_cast<int>(box.y + box.height);
+    int x0 = static_cast<int>(box.x) - pad;
+    int x1 = static_cast<int>(box.x + box.width) + pad;
+    int y0 = static_cast<int>(box.y) - pad;
+    int y1 = static_cast<int>(box.y + box.height) + pad;
+
+    m_samplePaddingRatio = Vector2D(
+        static_cast<double>(pad) / paddedW,
+        static_cast<double>(pad) / paddedH
+    );
 
     glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFB.getFBID());
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_sampleFB.getFBID());
     glBlitFramebuffer(x0, y0, x1, y1, 0, 0,
-                      static_cast<int>(box.width), static_cast<int>(box.height),
+                      paddedW, paddedH,
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
 }
 
@@ -104,6 +113,10 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
 
     glUniform2f(g_pGlobalState->locFullSizeUntransformed,
         static_cast<float>(rawBox.width), static_cast<float>(rawBox.height));
+
+    glUniform2f(g_pGlobalState->locUvPadding,
+        static_cast<float>(m_samplePaddingRatio.x),
+        static_cast<float>(m_samplePaddingRatio.y));
 
     const auto PWINDOW = m_pWindow.lock();
     float cornerRadius = PWINDOW ? PWINDOW->rounding() : 0.0f;

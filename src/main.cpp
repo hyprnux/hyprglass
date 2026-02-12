@@ -58,6 +58,7 @@ void initShaderIfNeeded() {
     g_pGlobalState->locGlassOpacity          = glGetUniformLocation(prog, "glassOpacity");
     g_pGlobalState->locEdgeThickness         = glGetUniformLocation(prog, "edgeThickness");
     g_pGlobalState->locFullSizeUntransformed = glGetUniformLocation(prog, "fullSizeUntransformed");
+    g_pGlobalState->locUvPadding             = glGetUniformLocation(prog, "uvPadding");
 
     g_pGlobalState->shader.createVao();
 
