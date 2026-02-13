@@ -57,6 +57,11 @@ void initShaderIfNeeded() {
     g_pGlobalState->locUvPadding             = glGetUniformLocation(prog, "uvPadding");
     g_pGlobalState->locTintColor              = glGetUniformLocation(prog, "tintColor");
     g_pGlobalState->locTintAlpha              = glGetUniformLocation(prog, "tintAlpha");
+    g_pGlobalState->locLensDistortion         = glGetUniformLocation(prog, "lensDistortion");
+    g_pGlobalState->locBackgroundBrightness   = glGetUniformLocation(prog, "backgroundBrightness");
+    g_pGlobalState->locBackgroundSaturation   = glGetUniformLocation(prog, "backgroundSaturation");
+    g_pGlobalState->locEnvironmentStrength    = glGetUniformLocation(prog, "environmentStrength");
+    g_pGlobalState->locShadowStrength         = glGetUniformLocation(prog, "shadowStrength");
 
     g_pGlobalState->shader.createVao();
 
@@ -140,15 +145,20 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         [&](void* self, SCallbackInfo& info, std::any data) { onCloseWindow(self, data); });
 
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:enabled", Hyprlang::INT{1});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:blur_strength", Hyprlang::FLOAT{1.0});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:refraction_strength", Hyprlang::FLOAT{0.6});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:chromatic_aberration", Hyprlang::FLOAT{0.3});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:fresnel_strength", Hyprlang::FLOAT{0.5});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:specular_strength", Hyprlang::FLOAT{0.5});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:blur_strength", Hyprlang::FLOAT{1.3});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:refraction_strength", Hyprlang::FLOAT{0.8});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:chromatic_aberration", Hyprlang::FLOAT{0.7});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:fresnel_strength", Hyprlang::FLOAT{0.6});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:specular_strength", Hyprlang::FLOAT{0.8});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:glass_opacity", Hyprlang::FLOAT{1.0});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:edge_thickness", Hyprlang::FLOAT{0.08});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:edge_thickness", Hyprlang::FLOAT{0.045});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:blur_iterations", Hyprlang::INT{3});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:tint_color", Hyprlang::INT{0x8899aa22});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:lens_distortion", Hyprlang::FLOAT{0.5});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:background_brightness", Hyprlang::FLOAT{1.08});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:background_saturation", Hyprlang::FLOAT{0.82});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:environment_strength", Hyprlang::FLOAT{0.12});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:shadow_strength", Hyprlang::FLOAT{0.15});
 
     // Shadows must be enabled for the glass effect to sample the correct background.
     // Force-enable if the user has disabled them.

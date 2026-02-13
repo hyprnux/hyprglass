@@ -12,12 +12,16 @@ precision highp float;
 /*
  * Apple-style Liquid Glass Fragment Shader
  *
- * Based on Apple's iOS 26 Liquid Glass design principles:
- * - Layer 1: Strong Gaussian blur (the primary glass look)
- * - Layer 2: SDF-based bezel refraction (thin edge strip only)
- * - Layer 3: Chromatic aberration in bezel zone
- * - Layer 4: Fresnel edge glow
- * - Layer 5: Specular highlights from surface normal
+ * Rendering layers:
+ * 1. Full-surface convex lens distortion (height-map from SDF)
+ * 2. Bezel refraction with spectral dispersion (5-tap rainbow)
+ * 3. Frosted tint (brightness boost + desaturation)
+ * 4. Configurable color tint overlay
+ * 5. Environment reflection (top-down gradient)
+ * 6. Fresnel edge glow (Schlick approximation)
+ * 7. Specular highlights (two light sources)
+ * 8. Inner shadow (bottom/right depth)
+ * 9. Outer glow / soft drop shadow
  */
 
 uniform sampler2D tex;
@@ -25,14 +29,19 @@ uniform vec2 fullSize;
 uniform float radius;
 uniform vec2 uvPadding;
 
-uniform float refractionStrength;  // Bezel refraction max displacement (0.0 - 1.0)
-uniform float chromaticAberration; // RGB separation in bezel (0.0 - 1.0)
-uniform float fresnelStrength;     // Edge glow intensity (0.0 - 1.0)
-uniform float specularStrength;    // Highlight brightness (0.0 - 1.0)
-uniform float glassOpacity;        // Overall glass opacity (0.0 - 1.0)
-uniform float edgeThickness;       // Bezel width as fraction of min dimension (0.0 - 0.1)
-uniform vec3 tintColor;            // Tint color (RGB)
-uniform float tintAlpha;           // Tint blend strength (from color alpha channel)
+uniform float refractionStrength;
+uniform float chromaticAberration;
+uniform float fresnelStrength;
+uniform float specularStrength;
+uniform float glassOpacity;
+uniform float edgeThickness;
+uniform vec3 tintColor;
+uniform float tintAlpha;
+uniform float lensDistortion;
+uniform float backgroundBrightness;
+uniform float backgroundSaturation;
+uniform float environmentStrength;
+uniform float shadowStrength;
 
 in vec2 v_texcoord;
 layout(location = 0) out vec4 fragColor;
@@ -51,38 +60,88 @@ vec4 sampleTex(vec2 wuv) {
 }
 
 // ============================================================================
-// SDF: Two variants — corner SDF (real shape) and bezel SDF (smoothed normals)
+// SDF
 // ============================================================================
 
-// Corner SDF: uses actual window radius for correct shape masking
+float getRoundedBoxSDF(vec2 uv, float r) {
+    vec2 p = (uv - 0.5) * fullSize;
+    vec2 halfSize = fullSize * 0.5;
+    float clampedR = min(r, min(halfSize.x, halfSize.y));
+    vec2 q = abs(p) - halfSize + clampedR;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - clampedR;
+}
+
 float getCornerSDF(vec2 uv) {
-    vec2 p = (uv - 0.5) * fullSize;
-    vec2 halfSize = fullSize * 0.5;
-    float r = min(radius, min(halfSize.x, halfSize.y));
-    vec2 q = abs(p) - halfSize + r;
-    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+    return getRoundedBoxSDF(uv, radius);
 }
 
-// Bezel SDF: uses smoothed radius so normals are continuous at corners
+// Bezel SDF: smoothed radius for continuous normals at corners
 float getBezelSDF(vec2 uv) {
-    vec2 p = (uv - 0.5) * fullSize;
-    vec2 halfSize = fullSize * 0.5;
-    float minDim = min(halfSize.x, halfSize.y);
+    float minDim = min(fullSize.x, fullSize.y) * 0.5;
     float bezelW = edgeThickness * minDim * 2.0;
-    float r = max(radius, bezelW);
-    r = min(r, minDim);
-    vec2 q = abs(p) - halfSize + r;
-    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+    float r = min(max(radius, bezelW), minDim);
+    return getRoundedBoxSDF(uv, r);
 }
 
-// Normal from bezel SDF (smooth at corners)
-vec2 bezelNormal(vec2 uv) {
-    vec2 epsUV = 2.0 / fullSize;
-    float dx = getBezelSDF(uv + vec2(epsUV.x, 0.0)) - getBezelSDF(uv - vec2(epsUV.x, 0.0));
-    float dy = getBezelSDF(uv + vec2(0.0, epsUV.y)) - getBezelSDF(uv - vec2(0.0, epsUV.y));
+// SDF gradient (normalized) from bezel SDF
+vec2 sdfNormal(vec2 uv) {
+    vec2 eps = 2.0 / fullSize;
+    float dx = getBezelSDF(uv + vec2(eps.x, 0.0)) - getBezelSDF(uv - vec2(eps.x, 0.0));
+    float dy = getBezelSDF(uv + vec2(0.0, eps.y)) - getBezelSDF(uv - vec2(0.0, eps.y));
     vec2 n = vec2(dx, dy);
     float len = length(n);
     return len > 0.001 ? n / len : vec2(0.0);
+}
+
+// Analytical convex dome: (1-x²)(1-y²) in normalized [-1,1] UV space.
+// Perfectly smooth everywhere — no SDF quadrant artifacts.
+float domeHeight(vec2 uv) {
+    vec2 c = (uv - 0.5) * 2.0;
+    float cx2 = c.x * c.x;
+    float cy2 = c.y * c.y;
+    return max((1.0 - cx2) * (1.0 - cy2), 0.0);
+}
+
+// Analytical gradient of dome — smooth polynomial, no diagonal seams.
+// Returns gradient in UV space (chain rule: dc/duv = 2).
+vec2 domeGradient(vec2 uv) {
+    vec2 c = (uv - 0.5) * 2.0;
+    float cx2 = c.x * c.x;
+    float cy2 = c.y * c.y;
+    return vec2(
+        -4.0 * c.x * (1.0 - cy2),
+        -4.0 * c.y * (1.0 - cx2)
+    );
+}
+
+// ============================================================================
+// SPECTRAL DISPERSION — 5-tap wavelength sampling
+// ============================================================================
+
+vec3 spectralSample(vec2 baseUV, vec2 normal, float maxOffset) {
+    // 5 wavelength taps from red (outer) to blue (inner)
+    const int TAPS = 5;
+    const float offsets[5] = float[5](-1.0, -0.5, 0.0, 0.5, 1.0);
+    // Spectral weights: approximate visible spectrum RGB per tap
+    const vec3 weights[5] = vec3[5](
+        vec3(1.0, 0.0, 0.0),   // red
+        vec3(0.5, 0.5, 0.0),   // yellow
+        vec3(0.0, 1.0, 0.0),   // green
+        vec3(0.0, 0.5, 0.5),   // cyan
+        vec3(0.0, 0.0, 1.0)    // blue
+    );
+
+    vec3 result = vec3(0.0);
+    vec3 totalWeight = vec3(0.0);
+
+    for (int i = 0; i < TAPS; i++) {
+        vec2 offset = normal * offsets[i] * maxOffset / fullSize;
+        vec3 s = sampleTex(baseUV + offset).rgb;
+        result += s * weights[i];
+        totalWeight += weights[i];
+    }
+
+    return result / totalWeight;
 }
 
 // ============================================================================
@@ -92,83 +151,101 @@ vec2 bezelNormal(vec2 uv) {
 void main() {
     vec2 uv = v_texcoord;
 
-    // Rounded corner mask using actual window radius
     float cornerSdf = getCornerSDF(uv);
+
+    // Outer glow / drop shadow (rendered in the padding region outside the glass)
+    if (cornerSdf > 0.0 && shadowStrength > 0.001) {
+        float glowRadius = edgeThickness * min(fullSize.x, fullSize.y) * 1.5;
+        float glow = exp(-cornerSdf * cornerSdf / (glowRadius * glowRadius * 0.5));
+        float shadowAlpha = glow * shadowStrength * 0.6;
+        fragColor = vec4(0.0, 0.0, 0.0, shadowAlpha);
+        return;
+    }
+
+    // Rounded corner mask
     float cornerAlpha = 1.0 - smoothstep(-1.5, 0.5, cornerSdf);
     if (cornerAlpha < 0.001) discard;
 
-    // Bezel zone follows actual window shape (cornerSdf), normals from smoothed SDF
+    // ========================================
+    // EDGE PROXIMITY — exponential falloff, no hard boundary
+    // ========================================
+    float bezelSdf = getBezelSDF(uv);
     float bezelWidthPx = edgeThickness * min(fullSize.x, fullSize.y);
-    float bezelFactor = clamp(1.0 + cornerSdf / bezelWidthPx, 0.0, 1.0);
+    // 1.0 at outer edge, ~0.37 at 1 bezel width in, ~0.05 at 3 widths in — no cutoff
+    float edgeProximity = exp(bezelSdf / bezelWidthPx);
 
-    // Compute bezel displacement (only non-zero in the bezel strip)
-    vec2 displacement = vec2(0.0);
     vec2 normal = vec2(0.0);
-
-    if (bezelFactor > 0.001) {
-        normal = bezelNormal(uv);
-
-        // Convex circle-arc profile: strong at border, smooth falloff inward
-        float dispAmount = sqrt(bezelFactor * (2.0 - bezelFactor));
-
-        // Displacement perpendicular to border, pointing inward (convex lens)
-        float maxPx = refractionStrength * 30.0;
-        displacement = -normal * dispAmount * maxPx / fullSize;
-    }
-
-    // Sample at (potentially displaced) position
-    vec2 sampleUV = uv + displacement;
-
-    // ========================================
-    // Layer 1: BACKGROUND (pre-blurred via two-pass Gaussian)
-    // ========================================
-    vec3 color = sampleTex(sampleUV).rgb;
-
-    // ========================================
-    // Layer 2: CHROMATIC ABERRATION (bezel only)
-    // ========================================
-    if (bezelFactor > 0.001 && chromaticAberration > 0.001) {
-        float caPx = chromaticAberration * bezelFactor * 3.0;
-        vec2 caOffset = normal * caPx / fullSize;
-        color.r = sampleTex(sampleUV + caOffset).r;
-        color.b = sampleTex(sampleUV - caOffset).b;
+    if (edgeProximity > 0.01) {
+        normal = sdfNormal(uv);
     }
 
     // ========================================
-    // Layer 3: FRESNEL EDGE GLOW
+    // Layer 1: FULL-SURFACE LENS DISTORTION
     // ========================================
-    float fresnel = pow(bezelFactor, 3.0) * fresnelStrength * 0.25;
-    color += vec3(1.0) * fresnel;
+    vec2 dGrad = domeGradient(uv);
+    float minDim = min(fullSize.x, fullSize.y);
+    float lensMaxPx = lensDistortion * minDim * 0.005;
+    vec2 lensDisplacement = -dGrad * lensMaxPx / fullSize;
 
     // ========================================
-    // Layer 4: SPECULAR HIGHLIGHTS (depth cues)
+    // Layer 2: BEZEL REFRACTION
     // ========================================
-    if (bezelFactor > 0.001 && specularStrength > 0.001) {
-        // Top highlight (light from above)
-        vec2 lightDir = normalize(vec2(0.0, -1.0));
-        float specDot = max(dot(normal, lightDir), 0.0);
-        float spec = pow(specDot, 16.0) * bezelFactor * specularStrength * 0.5;
+    vec2 bezelDisplacement = vec2(0.0);
+    if (edgeProximity > 0.01) {
+        float maxPx = refractionStrength * 40.0;
+        bezelDisplacement = -normal * edgeProximity * edgeProximity * maxPx / fullSize;
+    }
 
-        // Side highlight for depth
-        vec2 lightDir2 = normalize(vec2(-0.8, -0.4));
-        float specDot2 = max(dot(normal, lightDir2), 0.0);
-        spec += pow(specDot2, 24.0) * bezelFactor * specularStrength * 0.3;
+    vec2 sampleUV = uv + lensDisplacement + bezelDisplacement;
 
+    // ========================================
+    // Layer 3: BACKGROUND SAMPLE + SPECTRAL DISPERSION
+    // ========================================
+    vec3 color;
+    if (edgeProximity > 0.05 && chromaticAberration > 0.001) {
+        float caMaxPx = chromaticAberration * edgeProximity * 6.0;
+        color = spectralSample(sampleUV, normal, caMaxPx);
+    } else {
+        color = sampleTex(sampleUV).rgb;
+    }
+
+    // ========================================
+    // Layer 4: FROSTED TINT (brightness + desaturation)
+    // ========================================
+    float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    color = mix(vec3(luminance), color, backgroundSaturation);
+    color *= backgroundBrightness;
+
+    // ========================================
+    // Layer 5: COLOR TINT OVERLAY
+    // ========================================
+    color = mix(color, tintColor, tintAlpha);
+
+    // ========================================
+    // Layer 6: FRESNEL RIM GLOW
+    // ========================================
+    if (fresnelStrength > 0.001) {
+        float fresnel = edgeProximity * edgeProximity * fresnelStrength * 0.12;
+        color += vec3(1.0) * fresnel;
+    }
+
+    // ========================================
+    // Layer 7: SPECULAR — subtle top highlight
+    // ========================================
+    if (specularStrength > 0.001) {
+        float topBias = pow(max(1.0 - uv.y, 0.0), 2.0);
+        float spec = topBias * edgeProximity * edgeProximity * specularStrength * 0.08;
         color += vec3(1.0, 0.99, 0.97) * spec;
     }
 
     // ========================================
-    // Layer 5: INNER SHADOW (depth at bottom/right edges)
+    // Layer 8: INNER SHADOW (bottom rim darkening)
     // ========================================
-    if (bezelFactor > 0.001) {
-        vec2 shadowDir = normalize(vec2(0.3, 0.7));
-        float shadowDot = max(dot(normal, shadowDir), 0.0);
-        float shadow = pow(shadowDot, 8.0) * bezelFactor * 0.12;
+    {
+        float bottomBias = pow(uv.y, 2.0);
+        float shadow = bottomBias * edgeProximity * edgeProximity * 0.06;
         color *= 1.0 - shadow;
     }
-
-    // Configurable glass tint
-    color = mix(color, tintColor, tintAlpha);
 
     fragColor = vec4(color, glassOpacity * cornerAlpha);
 }

@@ -146,6 +146,11 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     static auto* const POPACITY    = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:glass_opacity")->getDataStaticPtr();
     static auto* const PEDGE       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:edge_thickness")->getDataStaticPtr();
     static auto* const PTINTCOLOR  = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:tint_color")->getDataStaticPtr();
+    static auto* const PLENS       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:lens_distortion")->getDataStaticPtr();
+    static auto* const PBGBRIGHT   = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:background_brightness")->getDataStaticPtr();
+    static auto* const PBGSAT      = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:background_saturation")->getDataStaticPtr();
+    static auto* const PENVSTR     = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:environment_strength")->getDataStaticPtr();
+    static auto* const PSHADOWSTR  = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:shadow_strength")->getDataStaticPtr();
 
     const auto TR = Math::wlTransformToHyprutils(
         Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
@@ -175,6 +180,11 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     glUniform1f(g_pGlobalState->locSpecularStrength, static_cast<float>(**PSPECULAR));
     glUniform1f(g_pGlobalState->locGlassOpacity, static_cast<float>(**POPACITY) * windowAlpha);
     glUniform1f(g_pGlobalState->locEdgeThickness, static_cast<float>(**PEDGE));
+    glUniform1f(g_pGlobalState->locLensDistortion, static_cast<float>(**PLENS));
+    glUniform1f(g_pGlobalState->locBackgroundBrightness, static_cast<float>(**PBGBRIGHT));
+    glUniform1f(g_pGlobalState->locBackgroundSaturation, static_cast<float>(**PBGSAT));
+    glUniform1f(g_pGlobalState->locEnvironmentStrength, static_cast<float>(**PENVSTR));
+    glUniform1f(g_pGlobalState->locShadowStrength, static_cast<float>(**PSHADOWSTR));
 
     const int64_t tintColorValue = **PTINTCOLOR;
     glUniform3f(g_pGlobalState->locTintColor,
