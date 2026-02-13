@@ -30,7 +30,6 @@ precision highp float;
  */
 
 uniform sampler2D tex;
-uniform sampler2D texRaw;
 uniform vec2 fullSize;
 uniform float radius;
 uniform vec2 uvPadding;
@@ -67,11 +66,6 @@ vec2 toTexUV(vec2 wuv) {
 vec4 sampleBlurred(vec2 wuv) {
     vec2 tuv = toTexUV(wuv);
     return texture(tex, clamp(tuv, 0.001, 0.999));
-}
-
-vec4 sampleRaw(vec2 wuv) {
-    vec2 tuv = toTexUV(wuv);
-    return texture(texRaw, clamp(tuv, 0.001, 0.999));
 }
 
 // ============================================================================
@@ -266,7 +260,7 @@ void main() {
     float sigma = max(blurRadius / 3.0, 0.001);
     float invSigma2 = -0.5 / (sigma * sigma);
 
-    int samples = int(ceil(blurRadius));
+    int samples = min(int(ceil(blurRadius)), 8);
 
     // Center tap
     float w0 = 1.0;

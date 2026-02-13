@@ -109,16 +109,19 @@ void CLiquidGlassDecoration::blurBackground(float radius, int iterations, GLuint
     // Blur at half resolution to cut fragment work by ~75%
     int halfW = std::max(1, fullW / 2);
     int halfH = std::max(1, fullH / 2);
-    float halfRadius = radius * 0.5f;
+    float scaledRadius = radius * 0.5f;
 
-    if (m_blurHalfFB.m_size.x != halfW || m_blurHalfFB.m_size.y != halfH)
-        m_blurHalfFB.alloc(halfW, halfH, m_sampleFB.m_drmFormat);
-    if (m_blurHalfTmpFB.m_size.x != halfW || m_blurHalfTmpFB.m_size.y != halfH)
-        m_blurHalfTmpFB.alloc(halfW, halfH, m_sampleFB.m_drmFormat);
+    auto& blurFB    = g_pGlobalState->blurHalfFB;
+    auto& blurTmpFB = g_pGlobalState->blurHalfTmpFB;
+
+    if (blurFB.m_size.x != halfW || blurFB.m_size.y != halfH)
+        blurFB.alloc(halfW, halfH, m_sampleFB.m_drmFormat);
+    if (blurTmpFB.m_size.x != halfW || blurTmpFB.m_size.y != halfH)
+        blurTmpFB.alloc(halfW, halfH, m_sampleFB.m_drmFormat);
 
     // Downsample: blit full-res sample → half-res (hardware-accelerated bilinear downscale)
     glBindFramebuffer(GL_READ_FRAMEBUFFER, m_sampleFB.getFBID());
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_blurHalfFB.getFBID());
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, blurFB.getFBID());
     glBlitFramebuffer(0, 0, fullW, fullH, 0, 0, halfW, halfH, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
     // Fullscreen quad projection: maps VAO positions [0,1] to clip space [-1,1]
@@ -133,21 +136,21 @@ void CLiquidGlassDecoration::blurBackground(float radius, int iterations, GLuint
     g_pHyprOpenGL->useProgram(blurShader.program);
     blurShader.setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, projMatrix);
     blurShader.setUniformInt(SHADER_TEX, 0);
-    glUniform1f(g_pGlobalState->locBlurRadius, halfRadius);
+    glUniform1f(g_pGlobalState->locBlurRadius, scaledRadius);
     glBindVertexArray(blurShader.uniformLocations[SHADER_SHADER_VAO]);
     glViewport(0, 0, halfW, halfH);
     glActiveTexture(GL_TEXTURE0);
 
     for (int iter = 0; iter < iterations; iter++) {
-        // H pass: m_blurHalfFB → m_blurHalfTmpFB
-        glBindFramebuffer(GL_FRAMEBUFFER, m_blurHalfTmpFB.getFBID());
-        m_blurHalfFB.getTexture()->bind();
+        // H pass: blurFB → blurTmpFB
+        glBindFramebuffer(GL_FRAMEBUFFER, blurTmpFB.getFBID());
+        blurFB.getTexture()->bind();
         glUniform2f(g_pGlobalState->locBlurDirection, 1.0f / halfW, 0.0f);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-        // V pass: m_blurHalfTmpFB → m_blurHalfFB
-        glBindFramebuffer(GL_FRAMEBUFFER, m_blurHalfFB.getFBID());
-        m_blurHalfTmpFB.getTexture()->bind();
+        // V pass: blurTmpFB → blurFB
+        glBindFramebuffer(GL_FRAMEBUFFER, blurFB.getFBID());
+        blurTmpFB.getTexture()->bind();
         glUniform2f(g_pGlobalState->locBlurDirection, 0.0f, 1.0f / halfH);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
@@ -198,16 +201,10 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     glActiveTexture(GL_TEXTURE0);
     tex->bind();
 
-    // Bind raw (unblurred) texture on unit 1 for sharp nearby color pickup
-    glActiveTexture(GL_TEXTURE1);
-    m_sampleFB.getTexture()->bind();
-    glActiveTexture(GL_TEXTURE0);
-
     g_pHyprOpenGL->useProgram(g_pGlobalState->shader.program);
 
     g_pGlobalState->shader.setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, glMatrix.getMatrix());
     g_pGlobalState->shader.setUniformInt(SHADER_TEX, 0);
-    glUniform1i(g_pGlobalState->locTexRaw, 1);
 
     const auto FULLSIZE = Vector2D(transformedBox.width, transformedBox.height);
     g_pGlobalState->shader.setUniformFloat2(SHADER_FULL_SIZE,
@@ -306,7 +303,7 @@ void CLiquidGlassDecoration::renderPass(PHLMONITOR pMonitor, const float& a) {
     int viewportH = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
     blurBackground(blurRadius, blurIterations, SOURCE->getFBID(), viewportW, viewportH);
 
-    applyLiquidGlassEffect(m_blurHalfFB, *SOURCE, wlrbox, transformBox, a);
+    applyLiquidGlassEffect(g_pGlobalState->blurHalfFB, *SOURCE, wlrbox, transformBox, a);
 }
 
 eDecorationType CLiquidGlassDecoration::getDecorationType() {

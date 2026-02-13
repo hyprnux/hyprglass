@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hyprland/src/plugins/PluginAPI.hpp>
+#include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/render/Shader.hpp>
 #include <memory>
 #include <vector>
@@ -30,14 +31,17 @@ struct SGlobalState {
     GLint locVibrancyDarkness      = -1;
     GLint locAdaptiveDim           = -1;
     GLint locAdaptiveBoost         = -1;
-    GLint locTexRaw                = -1;
     GLint locRoundingPower         = -1;
 
     // Blur shader
-    SShader blurShader;
-    bool    blurShaderInitialized  = false;
-    GLint   locBlurDirection       = -1;
-    GLint   locBlurRadius          = -1;
+    SShader      blurShader;
+    bool         blurShaderInitialized  = false;
+    GLint        locBlurDirection       = -1;
+    GLint        locBlurRadius          = -1;
+
+    // Shared blur framebuffers (reused across all decorations since they render sequentially)
+    CFramebuffer blurHalfFB;
+    CFramebuffer blurHalfTmpFB;
 };
 
 inline HANDLE                        PHANDLE = nullptr;

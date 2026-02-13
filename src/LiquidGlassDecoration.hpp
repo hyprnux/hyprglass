@@ -30,8 +30,6 @@ class CLiquidGlassDecoration : public IHyprWindowDecoration {
     Vector2D     m_samplePaddingRatio;
 
     static constexpr int SAMPLE_PADDING_PX = 60;
-    CFramebuffer         m_blurHalfFB;
-    CFramebuffer         m_blurHalfTmpFB;
 
     bool resolveThemeIsDark() const;
     void sampleBackground(CFramebuffer& sourceFB, CBox box);

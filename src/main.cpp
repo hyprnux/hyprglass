@@ -65,7 +65,6 @@ void initShaderIfNeeded() {
     g_pGlobalState->locVibrancyDarkness        = glGetUniformLocation(prog, "vibrancyDarkness");
     g_pGlobalState->locAdaptiveDim             = glGetUniformLocation(prog, "adaptiveDim");
     g_pGlobalState->locAdaptiveBoost           = glGetUniformLocation(prog, "adaptiveBoost");
-    g_pGlobalState->locTexRaw                  = glGetUniformLocation(prog, "texRaw");
     g_pGlobalState->locRoundingPower           = glGetUniformLocation(prog, "roundingPower");
 
     g_pGlobalState->shader.createVao();
@@ -160,9 +159,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:blur_iterations", Hyprlang::INT{3});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:tint_color", Hyprlang::INT{0x8899aa22});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:lens_distortion", Hyprlang::FLOAT{0.5});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:background_brightness", Hyprlang::FLOAT{1.08});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:background_saturation", Hyprlang::FLOAT{0.82});
-
     // Theme system
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:default_theme", Hyprlang::INT{0});
 
@@ -181,9 +177,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:vibrancy", Hyprlang::FLOAT{0.12});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:vibrancy_darkness", Hyprlang::FLOAT{0.0});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:adaptive_boost", Hyprlang::FLOAT{0.4});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:environment_strength", Hyprlang::FLOAT{0.12});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:shadow_strength", Hyprlang::FLOAT{0.15});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light_angle", Hyprlang::FLOAT{225.0});
 
     // Shadows must be enabled for the glass effect to sample the correct background.
     // Force-enable if the user has disabled them.
