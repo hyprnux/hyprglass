@@ -5,7 +5,7 @@ An Apple-style Liquid Glass effect plugin for [Hyprland](https://hyprland.org/).
 ## Requirements
 
 - Hyprland (matching API version)
-- Hyprland shadows **must be enabled** (`decoration:shadow:enabled = true`). Shadow values can be set to 0 — only the decoration's presence in the render pipeline is required.
+- Hyprland shadows must be enabled for the glass effect to work correctly. The plugin **auto-enables shadows** at load time if they are disabled. Shadow visual values (range, color, etc.) can be set to 0 — only the decoration's presence in the render pipeline is required.
 
 ## Building
 
@@ -36,13 +36,14 @@ All options live under the `plugin:liquid-glass:` namespace in your Hyprland con
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | int | `1` | Enable/disable the effect (0 or 1) |
-| `blur_strength` | float | `1.0` | Blur radius scale. Controls the frosted glass intensity. Applied as `value * 12.0` px radius with 3 Gaussian iterations. |
+| `blur_strength` | float | `1.0` | Blur radius scale. Controls the frosted glass intensity. Applied as `value * 12.0` px radius. |
 | `refraction_strength` | float | `0.6` | Bezel refraction displacement (0.0–1.0). How much the edge strip bends the background. |
 | `chromatic_aberration` | float | `0.3` | RGB channel separation in the bezel zone (0.0–1.0). |
 | `fresnel_strength` | float | `0.5` | Edge glow intensity (0.0–1.0). Simulates light hitting the glass rim. |
 | `specular_strength` | float | `0.5` | Specular highlight brightness (0.0–1.0). Adds depth cues from virtual light sources. |
 | `glass_opacity` | float | `1.0` | Overall glass opacity (0.0–1.0). |
 | `edge_thickness` | float | `0.08` | Bezel width as a fraction of the window's smallest dimension (0.0–0.1). |
+| `blur_iterations` | int | `3` | Number of Gaussian blur passes (1–5). Lower values improve performance at the cost of blur quality. |
 
 ### Example
 
@@ -56,6 +57,7 @@ plugin:liquid-glass {
     specular_strength = 0.5
     glass_opacity = 1.0
     edge_thickness = 0.08
+    blur_iterations = 3
 }
 ```
 

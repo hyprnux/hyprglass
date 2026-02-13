@@ -1,7 +1,7 @@
 # Hyprnux-Liquid Plugin
 
 CXX ?= g++
-CXXFLAGS = -shared -fPIC -g -std=c++23
+CXXFLAGS = -shared -fPIC -g -O2 -std=c++23
 INCLUDES = $(shell pkg-config --cflags hyprland pixman-1 libdrm)
 LIBS = $(shell pkg-config --libs hyprland)
 

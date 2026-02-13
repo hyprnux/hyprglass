@@ -188,15 +188,30 @@ void main() {
     float sigma = max(blurRadius / 3.0, 0.001);
     float invSigma2 = -0.5 / (sigma * sigma);
 
-    vec4 result = vec4(0.0);
-    float totalWeight = 0.0;
-
     int samples = int(ceil(blurRadius));
-    for (int i = -samples; i <= samples; i++) {
-        float x = float(i);
-        float w = exp(x * x * invSigma2);
-        result += texture(tex, v_texcoord + direction * x) * w;
-        totalWeight += w;
+
+    // Center tap
+    float w0 = 1.0;
+    vec4 result = texture(tex, v_texcoord) * w0;
+    float totalWeight = w0;
+
+    // Linear sampling: pair adjacent taps (i, i+1) into a single bilinear fetch.
+    // The interpolated offset between two texels yields their weighted average
+    // in one texture() call, halving the total tap count.
+    for (int i = 1; i <= samples; i += 2) {
+        float x1 = float(i);
+        float x2 = float(i + 1);
+        float w1 = exp(x1 * x1 * invSigma2);
+        float w2 = (i + 1 <= samples) ? exp(x2 * x2 * invSigma2) : 0.0;
+        float wSum = w1 + w2;
+        if (wSum < 0.0001) continue;
+
+        // Offset biased toward the heavier weight
+        float offset = (x1 * w1 + x2 * w2) / wSum;
+
+        result += texture(tex, v_texcoord + direction * offset) * wSum;
+        result += texture(tex, v_texcoord - direction * offset) * wSum;
+        totalWeight += 2.0 * wSum;
     }
 
     fragColor = result / totalWeight;

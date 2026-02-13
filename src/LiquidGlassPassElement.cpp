@@ -41,9 +41,16 @@ std::optional<CBox> CLiquidGlassPassElement::boundingBox() {
 }
 
 bool CLiquidGlassPassElement::needsLiveBlur() {
-    return false;
+    return true;
 }
 
 bool CLiquidGlassPassElement::needsPrecomputeBlur() {
     return false;
+}
+
+bool CLiquidGlassPassElement::disableSimplification() {
+    // The glass effect samples and blurs the full window background area.
+    // Simplification would reduce our damage when opaque windows overlap,
+    // causing partial blur, stale content, and visible seam artifacts.
+    return true;
 }

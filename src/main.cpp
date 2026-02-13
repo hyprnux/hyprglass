@@ -9,6 +9,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/Shader.hpp>
 #include <hyprland/src/helpers/Color.hpp>
+#include <hyprland/src/config/ConfigManager.hpp>
 
 static std::string loadShader(const char* fileName) {
     if (SHADERS.contains(fileName)) {
@@ -144,6 +145,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:specular_strength", Hyprlang::FLOAT{0.5});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:glass_opacity", Hyprlang::FLOAT{1.0});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:edge_thickness", Hyprlang::FLOAT{0.08});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:blur_iterations", Hyprlang::INT{3});
+
+    // Shadows must be enabled for the glass effect to sample the correct background.
+    // Force-enable if the user has disabled them.
+    static auto* const PSHADOWENABLED = (Hyprlang::INT* const*)g_pConfigManager->getConfigValuePtr("decoration:shadow:enabled");
+    if (PSHADOWENABLED && !**PSHADOWENABLED) {
+        HyprlandAPI::invokeHyprctlCommand("keyword", "decoration:shadow:enabled true");
+        HyprlandAPI::addNotification(PHANDLE,
+            std::format("[{}] Shadows auto-enabled (required for glass effect)", PLUGIN_NAME),
+            CHyprColor{1.0, 0.8, 0.2, 1.0}, 5000);
+    }
 
     for (auto& w : g_pCompositor->m_windows) {
         if (w->isHidden() || !w->m_isMapped)
