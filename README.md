@@ -1,6 +1,6 @@
 # Liquid Glass Plugin for Hyprland
 
-An Apple-style Liquid Glass effect plugin for [Hyprland](https://hyprland.org/). Applies a frosted glass look with full-surface lens distortion, bezel refraction with spectral dispersion, fresnel edge glow, specular highlights, environment reflection, inner shadow, and outer glow to all windows.
+An Apple-style Liquid Glass effect plugin for [Hyprland](https://hyprland.org/). Models each window as a thick convex glass slab — content behind refracts naturally through the curved edges, creating color bleeding and chromatic fringing, while the flat center shows clean frosted blur.
 
 ## Requirements
 
@@ -36,58 +36,56 @@ All options live under the `plugin:liquid-glass:` namespace in your Hyprland con
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | int | `1` | Enable/disable the effect (0 or 1) |
-| `blur_strength` | float | `1.3` | Blur radius scale. Controls the frosted glass intensity. Applied as `value * 12.0` px radius. |
-| `blur_iterations` | int | `3` | Number of Gaussian blur passes (1–5). Lower values improve performance at the cost of blur quality. |
-| `lens_distortion` | float | `0.5` | Full-surface convex lens distortion (0.0–1.0). Subtle barrel distortion across the entire window body. |
-| `refraction_strength` | float | `0.8` | Bezel refraction displacement (0.0–1.0). How much the edge strip bends the background. |
-| `chromatic_aberration` | float | `0.7` | Spectral dispersion in the bezel zone (0.0–1.0). Creates rainbow shimmer at edges via 5-tap wavelength sampling. |
+| `blur_strength` | float | `2.0` | Blur radius scale. Controls the frosted glass intensity. Applied as `value * 12.0` px radius. |
+| `blur_iterations` | int | `4` | Number of Gaussian blur passes (1–5). Lower values improve performance at the cost of blur quality. |
+| `lens_distortion` | float | `0.5` | Center dome lens magnification (0.0–1.0). Subtle barrel distortion in the flat interior of the glass. |
+| `refraction_strength` | float | `0.6` | Edge refraction intensity (0.0–1.0). How strongly the curved glass edge pulls in content from beyond the window boundary. |
+| `chromatic_aberration` | float | `0.5` | Spectral dispersion at edges (0.0–1.0). Blue refracts more than red, creating natural rainbow fringing. |
 | `fresnel_strength` | float | `0.6` | Edge glow intensity (0.0–1.0). Schlick-based fresnel simulating light hitting the glass surface. |
-| `specular_strength` | float | `0.8` | Specular highlight brightness (0.0–1.0). Adds depth cues from two virtual light sources, extends into interior. |
+| `specular_strength` | float | `0.8` | Specular highlight brightness (0.0–1.0). Top-biased highlight adding depth. |
 | `glass_opacity` | float | `1.0` | Overall glass opacity (0.0–1.0). |
-| `edge_thickness` | float | `0.045` | Bezel width as a fraction of the window's smallest dimension (0.0–0.1). |
+| `edge_thickness` | float | `0.06` | Glass bezel width as a fraction of the window's smallest dimension (0.0–0.15). Controls how wide the refraction zone is. |
 | `tint_color` | color | `0x8899aa22` | Glass tint color in RRGGBBAA hex or `rgba(...)`. The alpha channel controls tint strength (0 = off). |
 | `background_brightness` | float | `1.08` | Frosted glass brightness boost (0.5–2.0). Values > 1.0 brighten the blurred background. |
 | `background_saturation` | float | `0.82` | Frosted glass desaturation (0.0–1.0). Values < 1.0 desaturate for a milky frosted look. |
-| `environment_strength` | float | `0.12` | Meniscus dispersion intensity (0.0–1.0). Controls how strongly nearby/behind colors disperse along the edge in light direction. |
-| `shadow_strength` | float | `0.15` | Outer glow / drop shadow intensity (0.0–1.0). Soft shadow beneath the glass element. |
-| `light_angle` | float | `225.0` | Light direction in degrees (0–360). Controls which way colors disperse along the meniscus edge. 225 = top-left. |
+| `environment_strength` | float | `0.12` | *(Deprecated, no-op)* Kept for config compatibility. |
+| `shadow_strength` | float | `0.15` | *(Deprecated, no-op)* Kept for config compatibility. |
+| `light_angle` | float | `225.0` | *(Deprecated, no-op)* Kept for config compatibility. |
 
 ### Example
 
 ```ini
 plugin:liquid-glass {
     enabled = 1
-    blur_strength = 1.3
-    blur_iterations = 3
+    blur_strength = 2.0
+    blur_iterations = 4
     lens_distortion = 0.5
-    refraction_strength = 0.8
-    chromatic_aberration = 0.7
+    refraction_strength = 0.6
+    chromatic_aberration = 0.5
     fresnel_strength = 0.6
     specular_strength = 0.8
     glass_opacity = 1.0
-    edge_thickness = 0.045
+    edge_thickness = 0.06
     tint_color = rgba(88, 99, aa, 0.15)
     background_brightness = 1.08
     background_saturation = 0.82
-    environment_strength = 0.12
-    shadow_strength = 0.15
-    light_angle = 225.0
 }
 ```
 
 ## How It Works
 
-The effect is composed of nine layers rendered per window:
+The window is modeled as a **thick convex glass slab**. The rendering pipeline per window:
 
-1. **Gaussian blur** — The background behind the window is sampled with padding and blurred via a two-pass (horizontal + vertical) Gaussian shader.
-2. **Full-surface lens distortion** — A convex height-map derived from the window SDF creates subtle barrel distortion across the entire window body.
-3. **Bezel refraction** — An SDF-based edge strip refracts the blurred background with a smooth convex arc profile.
-4. **Spectral dispersion** — 5-tap wavelength sampling in the bezel zone creates rainbow shimmer (replaces simple R/B chromatic aberration).
-5. **Frosted tint** — Brightness boost and desaturation applied to the blurred background for a milky frosted look.
-6. **Color tint overlay** — Configurable color tint blended onto the glass.
-7. **Environment reflection** — A top-to-bottom gradient simulating ambient sky reflection on the convex glass surface.
-8. **Fresnel edge glow** — Schlick-based fresnel approximation using the surface height-map.
-9. **Specular highlights + inner shadow** — Two virtual light sources with wide lobes add depth, with a soft shadow at the bottom-right extending into the interior.
+1. **Background sampling** — The framebuffer behind the window is captured with padding (content beyond the window boundary is included).
+2. **Gaussian blur** — Multi-pass two-pass (horizontal + vertical) Gaussian blur for the frosted look.
+3. **Glass height field** — An SDF-based height profile: 1.0 deep inside the window, smooth S-curve to 0.0 at the edge. The transition width is `edge_thickness`.
+4. **Edge refraction** — The height field gradient drives UV displacement. At the center the gradient is near-zero (no distortion). At the edges the gradient is steep, pushing sample UVs outward — pulling in content from beyond the window boundary. This creates natural color bleeding.
+5. **Chromatic aberration** — R, G, B channels are sampled with slightly different refraction scales (blue bends more), creating spectral fringing at edges.
+6. **Center dome lens** — Subtle barrel magnification in the flat interior, controlled by `lens_distortion`.
+7. **Frosted tint** — Brightness boost and desaturation applied to the blurred background.
+8. **Color tint overlay** — Configurable color tint.
+9. **Fresnel edge glow** — Schlick-based fresnel approximation at the glass edge.
+10. **Specular highlight + inner shadow** — Top-biased highlight and bottom-rim shadow for depth.
 
 The plugin integrates with Hyprland's render pass system as a `DECORATION_LAYER_BOTTOM` decoration, drawing before the window surface so the glass shows through transparent windows.
 

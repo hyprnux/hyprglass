@@ -149,9 +149,6 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     static auto* const PLENS       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:lens_distortion")->getDataStaticPtr();
     static auto* const PBGBRIGHT   = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:background_brightness")->getDataStaticPtr();
     static auto* const PBGSAT      = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:background_saturation")->getDataStaticPtr();
-    static auto* const PENVSTR     = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:environment_strength")->getDataStaticPtr();
-    static auto* const PSHADOWSTR  = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:shadow_strength")->getDataStaticPtr();
-    static auto* const PLIGHTANGLE = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:light_angle")->getDataStaticPtr();
 
     const auto TR = Math::wlTransformToHyprutils(
         Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
@@ -190,9 +187,6 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     glUniform1f(g_pGlobalState->locLensDistortion, static_cast<float>(**PLENS));
     glUniform1f(g_pGlobalState->locBackgroundBrightness, static_cast<float>(**PBGBRIGHT));
     glUniform1f(g_pGlobalState->locBackgroundSaturation, static_cast<float>(**PBGSAT));
-    glUniform1f(g_pGlobalState->locEnvironmentStrength, static_cast<float>(**PENVSTR));
-    glUniform1f(g_pGlobalState->locShadowStrength, static_cast<float>(**PSHADOWSTR));
-    glUniform1f(g_pGlobalState->locLightAngle, static_cast<float>(**PLIGHTANGLE));
 
     const int64_t tintColorValue = **PTINTCOLOR;
     glUniform3f(g_pGlobalState->locTintColor,
