@@ -23,21 +23,27 @@ std::optional<CBox> CLiquidGlassPassElement::boundingBox() {
     if (!window)
         return std::nullopt;
 
-    auto box = window->getWindowMainSurfaceBox();
     const auto pMonitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
-    if (pMonitor)
-        box.translate(-pMonitor->m_position);
+    if (!pMonitor)
+        return std::nullopt;
+
+    const auto workspace = window->m_workspace;
+    const auto workspaceOffset = workspace && !window->m_pinned
+        ? workspace->m_renderOffset->value()
+        : Vector2D();
+
+    auto box = window->getWindowMainSurfaceBox();
+    box.translate(workspaceOffset);
+    box.translate(-pMonitor->m_position + window->m_floatingOffset);
+    box.scale(pMonitor->m_scale);
+    box.round();
     return box;
 }
 
 bool CLiquidGlassPassElement::needsLiveBlur() {
-    return true;
+    return false;
 }
 
 bool CLiquidGlassPassElement::needsPrecomputeBlur() {
     return false;
-}
-
-bool CLiquidGlassPassElement::disableSimplification() {
-    return true;
 }

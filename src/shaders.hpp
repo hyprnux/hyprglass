@@ -21,14 +21,10 @@ precision highp float;
  */
 
 uniform sampler2D tex;
-uniform vec2 topLeft;
 uniform vec2 fullSize;
-uniform vec2 fullSizeUntransformed;
 uniform float radius;
-uniform float time;
 uniform vec2 uvPadding;
 
-uniform float blurStrength;        // Blur radius scale (0.0 - 3.0)
 uniform float refractionStrength;  // Bezel refraction max displacement (0.0 - 1.0)
 uniform float chromaticAberration; // RGB separation in bezel (0.0 - 1.0)
 uniform float fresnelStrength;     // Edge glow intensity (0.0 - 1.0)

@@ -9,7 +9,6 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/Shader.hpp>
 #include <hyprland/src/helpers/Color.hpp>
-#include <chrono>
 
 static std::string loadShader(const char* fileName) {
     if (SHADERS.contains(fileName)) {
@@ -45,19 +44,15 @@ void initShaderIfNeeded() {
     g_pGlobalState->shader.uniformLocations[SHADER_POS_ATTRIB] = glGetAttribLocation(prog, "pos");
     g_pGlobalState->shader.uniformLocations[SHADER_TEX_ATTRIB] = glGetAttribLocation(prog, "texcoord");
     g_pGlobalState->shader.uniformLocations[SHADER_TEX]        = glGetUniformLocation(prog, "tex");
-    g_pGlobalState->shader.uniformLocations[SHADER_TOP_LEFT]   = glGetUniformLocation(prog, "topLeft");
     g_pGlobalState->shader.uniformLocations[SHADER_FULL_SIZE]  = glGetUniformLocation(prog, "fullSize");
     g_pGlobalState->shader.uniformLocations[SHADER_RADIUS]     = glGetUniformLocation(prog, "radius");
 
-    g_pGlobalState->locTime                  = glGetUniformLocation(prog, "time");
-    g_pGlobalState->locBlurStrength          = glGetUniformLocation(prog, "blurStrength");
     g_pGlobalState->locRefractionStrength    = glGetUniformLocation(prog, "refractionStrength");
     g_pGlobalState->locChromaticAberration   = glGetUniformLocation(prog, "chromaticAberration");
     g_pGlobalState->locFresnelStrength       = glGetUniformLocation(prog, "fresnelStrength");
     g_pGlobalState->locSpecularStrength      = glGetUniformLocation(prog, "specularStrength");
     g_pGlobalState->locGlassOpacity          = glGetUniformLocation(prog, "glassOpacity");
     g_pGlobalState->locEdgeThickness         = glGetUniformLocation(prog, "edgeThickness");
-    g_pGlobalState->locFullSizeUntransformed = glGetUniformLocation(prog, "fullSizeUntransformed");
     g_pGlobalState->locUvPadding             = glGetUniformLocation(prog, "uvPadding");
 
     g_pGlobalState->shader.createVao();
@@ -85,10 +80,6 @@ void initShaderIfNeeded() {
     g_pGlobalState->locBlurRadius    = glGetUniformLocation(blurProg, "blurRadius");
     g_pGlobalState->blurShader.createVao();
     g_pGlobalState->blurShaderInitialized = true;
-
-    auto now = std::chrono::steady_clock::now();
-    g_pGlobalState->startTime = std::chrono::duration<float>(now.time_since_epoch()).count();
-
     g_pGlobalState->shaderInitialized = true;
 
     HyprlandAPI::addNotification(PHANDLE,

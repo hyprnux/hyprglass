@@ -3,13 +3,10 @@
 #include "globals.hpp"
 
 #include <GLES3/gl32.h>
-#include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprutils/math/Misc.hpp>
-#include <chrono>
-#include <hyprland/src/debug/log/Logger.hpp>
 
 CLiquidGlassDecoration::CLiquidGlassDecoration(PHLWINDOW pWindow)
     : IHyprWindowDecoration(pWindow), m_pWindow(pWindow) {
@@ -29,10 +26,6 @@ void CLiquidGlassDecoration::draw(PHLMONITOR pMonitor, float const& a) {
     static auto* const PENABLED = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:enabled")->getDataStaticPtr();
     if (!**PENABLED)
         return;
-
-    // Force full render pass — simple pass skips background compositing
-    // which we need for the glass x-ray effect
-    g_pHyprOpenGL->m_renderData.simplePass = false;
 
     CLiquidGlassPassElement::SLiquidGlassData data{this, a};
     g_pHyprRenderer->m_renderPass.add(makeUnique<CLiquidGlassPassElement>(data));
@@ -97,7 +90,7 @@ void CLiquidGlassDecoration::blurBackground(float radius, int iterations) {
     glGetIntegerv(GL_VIEWPORT, prevViewport);
 
     // Fullscreen quad projection: maps VAO positions [0,1] to clip space [-1,1]
-    std::array<float, 9> projMatrix = {
+    static constexpr std::array<float, 9> projMatrix = {
         2.0f, 0.0f, 0.0f,
         0.0f, 2.0f, 0.0f,
        -1.0f,-1.0f, 1.0f,
@@ -135,7 +128,6 @@ void CLiquidGlassDecoration::blurBackground(float radius, int iterations) {
 
 void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFramebuffer& targetFB,
                                                       CBox& rawBox, CBox& transformedBox, float windowAlpha) {
-    static auto* const PBLUR       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:blur_strength")->getDataStaticPtr();
     static auto* const PREFRACT    = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:refraction_strength")->getDataStaticPtr();
     static auto* const PCHROMATIC  = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:chromatic_aberration")->getDataStaticPtr();
     static auto* const PFRESNEL    = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:fresnel_strength")->getDataStaticPtr();
@@ -161,28 +153,16 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     g_pGlobalState->shader.setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, glMatrix.getMatrix());
     g_pGlobalState->shader.setUniformInt(SHADER_TEX, 0);
 
-    const auto TOPLEFT  = Vector2D(transformedBox.x, transformedBox.y);
     const auto FULLSIZE = Vector2D(transformedBox.width, transformedBox.height);
-
-    g_pGlobalState->shader.setUniformFloat2(SHADER_TOP_LEFT,
-        static_cast<float>(TOPLEFT.x), static_cast<float>(TOPLEFT.y));
     g_pGlobalState->shader.setUniformFloat2(SHADER_FULL_SIZE,
         static_cast<float>(FULLSIZE.x), static_cast<float>(FULLSIZE.y));
 
-    auto now = std::chrono::steady_clock::now();
-    float time = std::chrono::duration<float>(now.time_since_epoch()).count() - g_pGlobalState->startTime;
-
-    glUniform1f(g_pGlobalState->locTime, time);
-    glUniform1f(g_pGlobalState->locBlurStrength, static_cast<float>(**PBLUR));
     glUniform1f(g_pGlobalState->locRefractionStrength, static_cast<float>(**PREFRACT));
     glUniform1f(g_pGlobalState->locChromaticAberration, static_cast<float>(**PCHROMATIC));
     glUniform1f(g_pGlobalState->locFresnelStrength, static_cast<float>(**PFRESNEL));
     glUniform1f(g_pGlobalState->locSpecularStrength, static_cast<float>(**PSPECULAR));
     glUniform1f(g_pGlobalState->locGlassOpacity, static_cast<float>(**POPACITY) * windowAlpha);
     glUniform1f(g_pGlobalState->locEdgeThickness, static_cast<float>(**PEDGE));
-
-    glUniform2f(g_pGlobalState->locFullSizeUntransformed,
-        static_cast<float>(rawBox.width), static_cast<float>(rawBox.height));
 
     glUniform2f(g_pGlobalState->locUvPadding,
         static_cast<float>(m_samplePaddingRatio.x),
@@ -214,27 +194,6 @@ void CLiquidGlassDecoration::renderPass(PHLMONITOR pMonitor, const float& a) {
         : Vector2D();
 
     const auto SOURCE = g_pHyprOpenGL->m_renderData.currentFB;
-
-    {
-        static FILE* dbgFile = fopen("/tmp/liquidglass.log", "a");
-        if (dbgFile) {
-            auto thisboxDbg = PWINDOW->getWindowMainSurfaceBox();
-            CBox dbgBox = thisboxDbg.translate(-pMonitor->m_position + PWINDOW->m_floatingOffset)
-                              .scale(pMonitor->m_scale).round();
-            int cx = static_cast<int>(dbgBox.x + dbgBox.width / 2);
-            int cy = static_cast<int>(dbgBox.y + dbgBox.height / 2);
-            GLubyte pixel[4] = {0};
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, SOURCE->getFBID());
-            glReadPixels(cx, cy, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-            auto solitary = pMonitor->m_solitaryClient.lock();
-            fprintf(dbgFile, "FB=%u sp=%d sol=%d box=(%d,%d %dx%d) pixel@(%d,%d)=(%u,%u,%u,%u)\n",
-                SOURCE->getFBID(), (int)g_pHyprOpenGL->m_renderData.simplePass,
-                (int)(solitary != nullptr),
-                (int)dbgBox.x, (int)dbgBox.y, (int)dbgBox.width, (int)dbgBox.height,
-                cx, cy, pixel[0], pixel[1], pixel[2], pixel[3]);
-            fflush(dbgFile);
-        }
-    }
 
     auto thisbox = PWINDOW->getWindowMainSurfaceBox();
 

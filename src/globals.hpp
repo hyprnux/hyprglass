@@ -10,19 +10,15 @@ class CLiquidGlassDecoration;
 struct SGlobalState {
     std::vector<WP<CLiquidGlassDecoration>> decorations;
     SShader                                  shader;
-    float                                    startTime = 0.0f;
     bool                                     shaderInitialized = false;
 
     // Shader uniform locations
-    GLint locTime                  = -1;
-    GLint locBlurStrength          = -1;
     GLint locRefractionStrength    = -1;
     GLint locChromaticAberration   = -1;
     GLint locFresnelStrength       = -1;
     GLint locSpecularStrength      = -1;
     GLint locGlassOpacity          = -1;
     GLint locEdgeThickness         = -1;
-    GLint locFullSizeUntransformed = -1;
     GLint locUvPadding             = -1;
 
     // Blur shader
