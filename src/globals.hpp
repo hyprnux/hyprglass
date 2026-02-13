@@ -27,6 +27,8 @@ struct SGlobalState {
     GLint locBackgroundSaturation  = -1;
     GLint locEnvironmentStrength   = -1;
     GLint locShadowStrength        = -1;
+    GLint locLightAngle            = -1;
+    GLint locTexRaw                = -1;
 
     // Blur shader
     SShader blurShader;

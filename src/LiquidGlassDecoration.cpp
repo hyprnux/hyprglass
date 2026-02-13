@@ -151,6 +151,7 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     static auto* const PBGSAT      = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:background_saturation")->getDataStaticPtr();
     static auto* const PENVSTR     = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:environment_strength")->getDataStaticPtr();
     static auto* const PSHADOWSTR  = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:shadow_strength")->getDataStaticPtr();
+    static auto* const PLIGHTANGLE = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:light_angle")->getDataStaticPtr();
 
     const auto TR = Math::wlTransformToHyprutils(
         Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
@@ -165,10 +166,16 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     glActiveTexture(GL_TEXTURE0);
     tex->bind();
 
+    // Bind raw (unblurred) texture on unit 1 for sharp nearby color pickup
+    glActiveTexture(GL_TEXTURE1);
+    m_sampleFB.getTexture()->bind();
+    glActiveTexture(GL_TEXTURE0);
+
     g_pHyprOpenGL->useProgram(g_pGlobalState->shader.program);
 
     g_pGlobalState->shader.setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, glMatrix.getMatrix());
     g_pGlobalState->shader.setUniformInt(SHADER_TEX, 0);
+    glUniform1i(g_pGlobalState->locTexRaw, 1);
 
     const auto FULLSIZE = Vector2D(transformedBox.width, transformedBox.height);
     g_pGlobalState->shader.setUniformFloat2(SHADER_FULL_SIZE,
@@ -185,6 +192,7 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     glUniform1f(g_pGlobalState->locBackgroundSaturation, static_cast<float>(**PBGSAT));
     glUniform1f(g_pGlobalState->locEnvironmentStrength, static_cast<float>(**PENVSTR));
     glUniform1f(g_pGlobalState->locShadowStrength, static_cast<float>(**PSHADOWSTR));
+    glUniform1f(g_pGlobalState->locLightAngle, static_cast<float>(**PLIGHTANGLE));
 
     const int64_t tintColorValue = **PTINTCOLOR;
     glUniform3f(g_pGlobalState->locTintColor,

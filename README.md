@@ -48,8 +48,9 @@ All options live under the `plugin:liquid-glass:` namespace in your Hyprland con
 | `tint_color` | color | `0x8899aa22` | Glass tint color in RRGGBBAA hex or `rgba(...)`. The alpha channel controls tint strength (0 = off). |
 | `background_brightness` | float | `1.08` | Frosted glass brightness boost (0.5–2.0). Values > 1.0 brighten the blurred background. |
 | `background_saturation` | float | `0.82` | Frosted glass desaturation (0.0–1.0). Values < 1.0 desaturate for a milky frosted look. |
-| `environment_strength` | float | `0.12` | Environment reflection intensity (0.0–1.0). Simulates ambient sky reflection on the glass surface. |
+| `environment_strength` | float | `0.12` | Meniscus dispersion intensity (0.0–1.0). Controls how strongly nearby/behind colors disperse along the edge in light direction. |
 | `shadow_strength` | float | `0.15` | Outer glow / drop shadow intensity (0.0–1.0). Soft shadow beneath the glass element. |
+| `light_angle` | float | `225.0` | Light direction in degrees (0–360). Controls which way colors disperse along the meniscus edge. 225 = top-left. |
 
 ### Example
 
@@ -70,6 +71,7 @@ plugin:liquid-glass {
     background_saturation = 0.82
     environment_strength = 0.12
     shadow_strength = 0.15
+    light_angle = 225.0
 }
 ```
 

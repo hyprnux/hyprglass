@@ -62,6 +62,8 @@ void initShaderIfNeeded() {
     g_pGlobalState->locBackgroundSaturation   = glGetUniformLocation(prog, "backgroundSaturation");
     g_pGlobalState->locEnvironmentStrength    = glGetUniformLocation(prog, "environmentStrength");
     g_pGlobalState->locShadowStrength         = glGetUniformLocation(prog, "shadowStrength");
+    g_pGlobalState->locLightAngle              = glGetUniformLocation(prog, "lightAngle");
+    g_pGlobalState->locTexRaw                  = glGetUniformLocation(prog, "texRaw");
 
     g_pGlobalState->shader.createVao();
 
@@ -159,6 +161,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:background_saturation", Hyprlang::FLOAT{0.82});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:environment_strength", Hyprlang::FLOAT{0.12});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:shadow_strength", Hyprlang::FLOAT{0.15});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light_angle", Hyprlang::FLOAT{225.0});
 
     // Shadows must be enabled for the glass effect to sample the correct background.
     // Force-enable if the user has disabled them.
