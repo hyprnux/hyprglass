@@ -207,8 +207,11 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
         static_cast<float>(m_samplePaddingRatio.y));
 
     const auto PWINDOW = m_pWindow.lock();
-    float cornerRadius = PWINDOW ? PWINDOW->rounding() : 0.0f;
+    float monitorScale = g_pHyprOpenGL->m_renderData.pMonitor->m_scale;
+    float cornerRadius = PWINDOW ? PWINDOW->rounding() * monitorScale : 0.0f;
+    float roundingPower = PWINDOW ? PWINDOW->roundingPower() : 2.0f;
     g_pGlobalState->shader.setUniformFloat(SHADER_RADIUS, cornerRadius);
+    glUniform1f(g_pGlobalState->locRoundingPower, roundingPower);
 
     glBindVertexArray(g_pGlobalState->shader.uniformLocations[SHADER_SHADER_VAO]);
     g_pHyprOpenGL->scissor(rawBox);

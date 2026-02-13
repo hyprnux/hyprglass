@@ -44,6 +44,7 @@ uniform float backgroundSaturation;
 uniform float environmentStrength;
 uniform float shadowStrength;
 uniform float lightAngle;
+uniform float roundingPower;
 
 in vec2 v_texcoord;
 layout(location = 0) out vec4 fragColor;
@@ -71,24 +72,26 @@ vec4 sampleRaw(vec2 wuv) {
 // SDF
 // ============================================================================
 
+// Lp-norm: matches Hyprland's superellipse rounding (power=2 is Euclidean/circle)
+float lpNorm(vec2 v, float p) {
+    return pow(pow(abs(v.x), p) + pow(abs(v.y), p), 1.0 / p);
+}
+
 float getRoundedBoxSDF(vec2 uv, float r) {
     vec2 p = (uv - 0.5) * fullSize;
     vec2 halfSize = fullSize * 0.5;
     float clampedR = min(r, min(halfSize.x, halfSize.y));
     vec2 q = abs(p) - halfSize + clampedR;
-    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - clampedR;
+    return min(max(q.x, q.y), 0.0) + lpNorm(max(q, 0.0), roundingPower) - clampedR;
 }
 
 float getCornerSDF(vec2 uv) {
     return getRoundedBoxSDF(uv, radius);
 }
 
-// Bezel SDF: smoothed radius for continuous normals at corners
+// Bezel SDF: same shape as corner SDF so effects align with the visible boundary
 float getBezelSDF(vec2 uv) {
-    float minDim = min(fullSize.x, fullSize.y) * 0.5;
-    float bezelW = edgeThickness * minDim * 2.0;
-    float r = min(max(radius, bezelW), minDim);
-    return getRoundedBoxSDF(uv, r);
+    return getRoundedBoxSDF(uv, radius);
 }
 
 // SDF gradient (normalized) from bezel SDF
@@ -139,8 +142,8 @@ void main() {
     float cornerSdf = getCornerSDF(uv);
     float minDim = min(fullSize.x, fullSize.y);
 
-    // Meniscus half-width: ~4px outside + ~4px inside the contact line
-    float meniscusPx = max(edgeThickness * minDim * 0.3, 2.0);
+    // Meniscus half-width: fixed thin band for light spill, not proportional to window size
+    float meniscusPx = 4.0;
 
     // Light direction for directional dispersion (degrees → vec2)
     float angleRad = lightAngle * 3.14159265 / 180.0;
@@ -150,81 +153,10 @@ void main() {
     vec2 dGrad = domeGradient(uv);
 
     // ========================================
-    // ZONE 1: FAR OUTSIDE (cornerSdf > meniscusPx) — shadow only
-    // ========================================
-    if (cornerSdf > meniscusPx) {
-        if (shadowStrength > 0.001) {
-            float glowRadius = edgeThickness * minDim * 1.5;
-            float glow = exp(-cornerSdf * cornerSdf / (glowRadius * glowRadius * 0.5));
-            fragColor = vec4(0.0, 0.0, 0.0, glow * shadowStrength * 0.6);
-            return;
-        }
-        discard;
-    }
-
-    // ========================================
-    // ZONE 2: MENISCUS OUTER (0 < cornerSdf <= meniscusPx)
-    // C-shape tension: refracted/dispersed light spills outside the glass boundary
+    // OUTSIDE (cornerSdf > 0) — discard, Hyprland handles window shadow
     // ========================================
     if (cornerSdf > 0.0) {
-        float meniscusOuter = 1.0 - cornerSdf / meniscusPx;
-
-        vec2 normal = sdfNormal(uv);
-        vec2 tangent = vec2(-normal.y, normal.x);
-        float flow = dot(tangent, lightDir);
-
-        // Outward direction: dome gradient, with center-outward fallback at corners
-        // (dome gradient vanishes at corners since (1-x²)(1-y²) → 0)
-        vec2 outwardDir = -dGrad;
-        float outwardLen = length(outwardDir);
-        if (outwardLen > 0.01) {
-            outwardDir /= outwardLen;
-        } else {
-            outwardDir = normalize(uv - 0.5);
-        }
-
-        vec2 outwardUV = uv + outwardDir * 50.0 / fullSize;
-        vec2 inwardUV = uv - outwardDir * 30.0 / fullSize;
-
-        // Directional tangential dispersion
-        float dispPx = refractionStrength * environmentStrength * meniscusOuter * 200.0;
-        vec2 flowOffset = tangent * flow * dispPx / fullSize;
-        vec2 spreadR = tangent * dispPx * 0.4 / fullSize;
-
-        // Sample raw for saturation-weighted color detection (no sharp text)
-        vec3 rawOutside = sampleRaw(outwardUV).rgb;
-        vec3 rawInside = sampleRaw(inwardUV).rgb;
-        vec3 rawAvg = mix(rawInside, rawOutside, 0.4);
-        float rawLum = dot(rawAvg, vec3(0.2126, 0.7152, 0.0722));
-        vec3 chroma = rawAvg - vec3(rawLum);
-        float sat = length(chroma);
-
-        // Use blurred texture for visual content, tinted by detected saturated color
-        vec3 blurOutside = sampleTex(outwardUV + flowOffset).rgb;
-        vec3 blurInside = sampleTex(inwardUV + flowOffset).rgb;
-        vec3 meniscusColor = mix(blurInside, blurOutside, 0.4);
-
-        // Saturated nearby colors tint the meniscus
-        if (sat > 0.04) {
-            vec3 tint = vec3(rawLum) + chroma * (1.0 / sat) * 0.5;
-            meniscusColor = mix(meniscusColor, tint, min(sat * 3.0, 1.0) * 0.6);
-        }
-
-        // Border rim: bright contact line
-        float borderFactor = exp(-cornerSdf * cornerSdf / 2.0);
-        meniscusColor += vec3(1.0) * borderFactor * fresnelStrength * 0.2;
-
-        // Composite: meniscus optical + shadow
-        float meniscusAlpha = meniscusOuter * meniscusOuter * glassOpacity * 0.5;
-        float glowRadius = edgeThickness * minDim * 1.5;
-        float glow = exp(-cornerSdf * cornerSdf / (glowRadius * glowRadius * 0.5));
-        float shadowAlpha = glow * shadowStrength * 0.6 * (1.0 - meniscusOuter);
-
-        float totalAlpha = meniscusAlpha + shadowAlpha * (1.0 - meniscusAlpha);
-        if (totalAlpha < 0.001) discard;
-        vec3 finalRGB = (meniscusColor * meniscusAlpha) / totalAlpha;
-        fragColor = vec4(finalRGB, totalAlpha);
-        return;
+        discard;
     }
 
     // ========================================
@@ -253,11 +185,21 @@ void main() {
 
     // ========================================
     // BEZEL ZONE: Inward refraction
+    // Uses dome gradient for direction instead of SDF normal to avoid
+    // visible displacement rings at corners (SDF normal rotates sharply
+    // around corner arcs, dome gradient transitions smoothly)
     // ========================================
     vec2 bezelDisplacement = vec2(0.0);
     if (bezelFactor > 0.01) {
         float maxPx = refractionStrength * 40.0;
-        bezelDisplacement = -normal * bezelFactor * bezelFactor * maxPx / fullSize;
+        vec2 refractionDir = dGrad;
+        float refrDirLen = length(refractionDir);
+        if (refrDirLen > 0.01) {
+            refractionDir /= refrDirLen;
+        } else {
+            refractionDir = vec2(0.0);
+        }
+        bezelDisplacement = refractionDir * bezelFactor * bezelFactor * maxPx / fullSize;
     }
 
     vec2 sampleUV = uv + lensDisplacement + bezelDisplacement;
@@ -361,12 +303,6 @@ void main() {
         float shadow = bottomBias * bezelFactor * bezelFactor * 0.06;
         color *= 1.0 - shadow;
     }
-
-    // ========================================
-    // BORDER RIM (contact line highlight, visible from inside)
-    // ========================================
-    float borderFactor = exp(-cornerSdf * cornerSdf / 2.0);
-    color += vec3(1.0) * borderFactor * fresnelStrength * 0.15;
 
     fragColor = vec4(color, glassOpacity * cornerAlpha);
 }

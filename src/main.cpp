@@ -64,6 +64,7 @@ void initShaderIfNeeded() {
     g_pGlobalState->locShadowStrength         = glGetUniformLocation(prog, "shadowStrength");
     g_pGlobalState->locLightAngle              = glGetUniformLocation(prog, "lightAngle");
     g_pGlobalState->locTexRaw                  = glGetUniformLocation(prog, "texRaw");
+    g_pGlobalState->locRoundingPower           = glGetUniformLocation(prog, "roundingPower");
 
     g_pGlobalState->shader.createVao();
 
