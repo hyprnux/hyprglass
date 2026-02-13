@@ -157,7 +157,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:specular_strength", Hyprlang::FLOAT{0.8});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:glass_opacity", Hyprlang::FLOAT{1.0});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:edge_thickness", Hyprlang::FLOAT{0.06});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:blur_iterations", Hyprlang::INT{4});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:blur_iterations", Hyprlang::INT{3});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:tint_color", Hyprlang::INT{0x8899aa22});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:lens_distortion", Hyprlang::FLOAT{0.5});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:background_brightness", Hyprlang::FLOAT{1.08});

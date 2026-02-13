@@ -109,7 +109,7 @@ plugin:liquid-glass {
     specular_strength = 0.8
     glass_opacity = 1.0
     edge_thickness = 0.06
-    tint_color = rgba(88, 99, aa, 0.15)
+    tint_color = 0x8899aa22
     default_theme = 0
 
     dark:brightness = 0.82

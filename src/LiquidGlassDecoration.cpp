@@ -48,10 +48,14 @@ void CLiquidGlassDecoration::draw(PHLMONITOR pMonitor, float const& a) {
     CLiquidGlassPassElement::SLiquidGlassData data{this, a};
     g_pHyprRenderer->m_renderPass.add(makeUnique<CLiquidGlassPassElement>(data));
 
-    // Ensure our window area is damaged for the next frame so the render pass
-    // always has our region in m_damage. This is required because needsLiveBlur
-    // only expands damage that already intersects our bounding box.
-    damageEntire();
+    // Only damage during active workspace animations so the glass effect
+    // updates smoothly during transitions but goes idle once complete.
+    const auto PWINDOW = m_pWindow.lock();
+    if (PWINDOW) {
+        const auto PWORKSPACE = PWINDOW->m_workspace;
+        if (PWORKSPACE && !PWINDOW->m_pinned && PWORKSPACE->m_renderOffset->isBeingAnimated())
+            damageEntire();
+    }
 }
 
 PHLWINDOW CLiquidGlassDecoration::getOwner() {
