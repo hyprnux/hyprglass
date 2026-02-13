@@ -145,6 +145,7 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     static auto* const PSPECULAR   = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:specular_strength")->getDataStaticPtr();
     static auto* const POPACITY    = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:glass_opacity")->getDataStaticPtr();
     static auto* const PEDGE       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:edge_thickness")->getDataStaticPtr();
+    static auto* const PTINTCOLOR  = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:tint_color")->getDataStaticPtr();
 
     const auto TR = Math::wlTransformToHyprutils(
         Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
@@ -174,6 +175,14 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     glUniform1f(g_pGlobalState->locSpecularStrength, static_cast<float>(**PSPECULAR));
     glUniform1f(g_pGlobalState->locGlassOpacity, static_cast<float>(**POPACITY) * windowAlpha);
     glUniform1f(g_pGlobalState->locEdgeThickness, static_cast<float>(**PEDGE));
+
+    const int64_t tintColorValue = **PTINTCOLOR;
+    glUniform3f(g_pGlobalState->locTintColor,
+        static_cast<float>((tintColorValue >> 24) & 0xFF) / 255.0f,
+        static_cast<float>((tintColorValue >> 16) & 0xFF) / 255.0f,
+        static_cast<float>((tintColorValue >> 8) & 0xFF) / 255.0f);
+    glUniform1f(g_pGlobalState->locTintAlpha,
+        static_cast<float>(tintColorValue & 0xFF) / 255.0f);
 
     glUniform2f(g_pGlobalState->locUvPadding,
         static_cast<float>(m_samplePaddingRatio.x),

@@ -20,6 +20,8 @@ struct SGlobalState {
     GLint locGlassOpacity          = -1;
     GLint locEdgeThickness         = -1;
     GLint locUvPadding             = -1;
+    GLint locTintColor             = -1;
+    GLint locTintAlpha             = -1;
 
     // Blur shader
     SShader blurShader;

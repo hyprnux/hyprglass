@@ -31,6 +31,8 @@ uniform float fresnelStrength;     // Edge glow intensity (0.0 - 1.0)
 uniform float specularStrength;    // Highlight brightness (0.0 - 1.0)
 uniform float glassOpacity;        // Overall glass opacity (0.0 - 1.0)
 uniform float edgeThickness;       // Bezel width as fraction of min dimension (0.0 - 0.1)
+uniform vec3 tintColor;            // Tint color (RGB)
+uniform float tintAlpha;           // Tint blend strength (from color alpha channel)
 
 in vec2 v_texcoord;
 layout(location = 0) out vec4 fragColor;
@@ -165,8 +167,8 @@ void main() {
         color *= 1.0 - shadow;
     }
 
-    // Subtle cool glass tint
-    color *= vec3(0.97, 0.97, 1.0);
+    // Configurable glass tint
+    color = mix(color, tintColor, tintAlpha);
 
     fragColor = vec4(color, glassOpacity * cornerAlpha);
 }

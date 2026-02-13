@@ -55,6 +55,8 @@ void initShaderIfNeeded() {
     g_pGlobalState->locGlassOpacity          = glGetUniformLocation(prog, "glassOpacity");
     g_pGlobalState->locEdgeThickness         = glGetUniformLocation(prog, "edgeThickness");
     g_pGlobalState->locUvPadding             = glGetUniformLocation(prog, "uvPadding");
+    g_pGlobalState->locTintColor              = glGetUniformLocation(prog, "tintColor");
+    g_pGlobalState->locTintAlpha              = glGetUniformLocation(prog, "tintAlpha");
 
     g_pGlobalState->shader.createVao();
 
@@ -146,6 +148,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:glass_opacity", Hyprlang::FLOAT{1.0});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:edge_thickness", Hyprlang::FLOAT{0.08});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:blur_iterations", Hyprlang::INT{3});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:tint_color", Hyprlang::INT{0x8899aa22});
 
     // Shadows must be enabled for the glass effect to sample the correct background.
     // Force-enable if the user has disabled them.

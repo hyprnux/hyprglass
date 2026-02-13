@@ -44,6 +44,7 @@ All options live under the `plugin:liquid-glass:` namespace in your Hyprland con
 | `glass_opacity` | float | `1.0` | Overall glass opacity (0.0–1.0). |
 | `edge_thickness` | float | `0.08` | Bezel width as a fraction of the window's smallest dimension (0.0–0.1). |
 | `blur_iterations` | int | `3` | Number of Gaussian blur passes (1–5). Lower values improve performance at the cost of blur quality. |
+| `tint_color` | color | `0x8899aa22` | Glass tint color in RRGGBBAA hex or `rgba(...)`. The alpha channel controls tint strength (0 = off). |
 
 ### Example
 
@@ -58,6 +59,7 @@ plugin:liquid-glass {
     glass_opacity = 1.0
     edge_thickness = 0.08
     blur_iterations = 3
+    tint_color = rgba(88, 99, aa, 0.15)
 }
 ```
 
