@@ -1,0 +1,9 @@
+[repository]
+name = "HyprGlass"
+authors = ["Hyprnux"]
+description = "Apple-style Liquid Glass effect for Hyprland"
+
+[hyprglass]
+description = "Liquid Glass window decoration effect"
+output = "hyprglass.so"
+build = ["make"]

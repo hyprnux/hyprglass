@@ -1,123 +1,32 @@
-#include "LiquidGlassDecoration.hpp"
-#include "globals.hpp"
-#include "shaders.hpp"
+#include "GlassDecoration.hpp"
+#include "Globals.hpp"
+#include "PluginConfig.hpp"
 
-#include <GLES3/gl32.h>
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
-#include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
-#include <hyprland/src/render/Shader.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 
-static std::string loadShader(const char* fileName) {
-    if (SHADERS.contains(fileName)) {
-        return SHADERS.at(fileName);
-    }
-    const std::string message = std::format("[{}] Failed to load shader: {}", PLUGIN_NAME, fileName);
-    HyprlandAPI::addNotification(PHANDLE, message, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
-    throw std::runtime_error(message);
-}
-
-void initShaderIfNeeded() {
-    if (!g_pGlobalState || g_pGlobalState->shaderInitialized)
-        return;
-
-    const char* shaderFile = "liquidglass.frag";
-
-    GLuint prog = g_pHyprOpenGL->createProgram(
-        g_pHyprOpenGL->m_shaders->TEXVERTSRC,
-        loadShader(shaderFile),
-        true
-    );
-
-    if (prog == 0) {
-        HyprlandAPI::addNotification(PHANDLE,
-            std::format("[{}] Failed to compile shader", PLUGIN_NAME),
-            CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
-        return;
-    }
-
-    g_pGlobalState->shader.program = prog;
-
-    g_pGlobalState->shader.uniformLocations[SHADER_PROJ]       = glGetUniformLocation(prog, "proj");
-    g_pGlobalState->shader.uniformLocations[SHADER_POS_ATTRIB] = glGetAttribLocation(prog, "pos");
-    g_pGlobalState->shader.uniformLocations[SHADER_TEX_ATTRIB] = glGetAttribLocation(prog, "texcoord");
-    g_pGlobalState->shader.uniformLocations[SHADER_TEX]        = glGetUniformLocation(prog, "tex");
-    g_pGlobalState->shader.uniformLocations[SHADER_FULL_SIZE]  = glGetUniformLocation(prog, "fullSize");
-    g_pGlobalState->shader.uniformLocations[SHADER_RADIUS]     = glGetUniformLocation(prog, "radius");
-
-    g_pGlobalState->locRefractionStrength    = glGetUniformLocation(prog, "refractionStrength");
-    g_pGlobalState->locChromaticAberration   = glGetUniformLocation(prog, "chromaticAberration");
-    g_pGlobalState->locFresnelStrength       = glGetUniformLocation(prog, "fresnelStrength");
-    g_pGlobalState->locSpecularStrength      = glGetUniformLocation(prog, "specularStrength");
-    g_pGlobalState->locGlassOpacity          = glGetUniformLocation(prog, "glassOpacity");
-    g_pGlobalState->locEdgeThickness         = glGetUniformLocation(prog, "edgeThickness");
-    g_pGlobalState->locUvPadding             = glGetUniformLocation(prog, "uvPadding");
-    g_pGlobalState->locTintColor              = glGetUniformLocation(prog, "tintColor");
-    g_pGlobalState->locTintAlpha              = glGetUniformLocation(prog, "tintAlpha");
-    g_pGlobalState->locLensDistortion         = glGetUniformLocation(prog, "lensDistortion");
-    g_pGlobalState->locBrightness              = glGetUniformLocation(prog, "brightness");
-    g_pGlobalState->locContrast                = glGetUniformLocation(prog, "contrast");
-    g_pGlobalState->locSaturation              = glGetUniformLocation(prog, "saturation");
-    g_pGlobalState->locVibrancy                = glGetUniformLocation(prog, "vibrancy");
-    g_pGlobalState->locVibrancyDarkness        = glGetUniformLocation(prog, "vibrancyDarkness");
-    g_pGlobalState->locAdaptiveDim             = glGetUniformLocation(prog, "adaptiveDim");
-    g_pGlobalState->locAdaptiveBoost           = glGetUniformLocation(prog, "adaptiveBoost");
-    g_pGlobalState->locRoundingPower           = glGetUniformLocation(prog, "roundingPower");
-
-    g_pGlobalState->shader.createVao();
-
-    // Compile blur shader
-    GLuint blurProg = g_pHyprOpenGL->createProgram(
-        g_pHyprOpenGL->m_shaders->TEXVERTSRC,
-        loadShader("gaussianblur.frag"),
-        true
-    );
-
-    if (blurProg == 0) {
-        HyprlandAPI::addNotification(PHANDLE,
-            std::format("[{}] Failed to compile blur shader", PLUGIN_NAME),
-            CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
-        return;
-    }
-
-    g_pGlobalState->blurShader.program = blurProg;
-    g_pGlobalState->blurShader.uniformLocations[SHADER_PROJ]       = glGetUniformLocation(blurProg, "proj");
-    g_pGlobalState->blurShader.uniformLocations[SHADER_POS_ATTRIB] = glGetAttribLocation(blurProg, "pos");
-    g_pGlobalState->blurShader.uniformLocations[SHADER_TEX_ATTRIB] = glGetAttribLocation(blurProg, "texcoord");
-    g_pGlobalState->blurShader.uniformLocations[SHADER_TEX]        = glGetUniformLocation(blurProg, "tex");
-    g_pGlobalState->locBlurDirection = glGetUniformLocation(blurProg, "direction");
-    g_pGlobalState->locBlurRadius    = glGetUniformLocation(blurProg, "blurRadius");
-    g_pGlobalState->blurShader.createVao();
-    g_pGlobalState->blurShaderInitialized = true;
-    g_pGlobalState->shaderInitialized = true;
-
-    HyprlandAPI::addNotification(PHANDLE,
-        std::format("[{}] Shader initialized", PLUGIN_NAME),
-        CHyprColor{0.2, 0.8, 0.2, 1.0}, 3000);
-}
-
 static void onNewWindow(void* self, std::any data) {
-    const auto PWINDOW = std::any_cast<PHLWINDOW>(data);
+    const auto window = std::any_cast<PHLWINDOW>(data);
 
-    if (std::ranges::any_of(PWINDOW->m_windowDecorations,
-                            [](const auto& d) { return d->getDisplayName() == "LiquidGlass"; }))
+    if (std::ranges::any_of(window->m_windowDecorations,
+                            [](const auto& decoration) { return decoration->getDisplayName() == "HyprGlass"; }))
         return;
 
-    auto deco = makeUnique<CLiquidGlassDecoration>(PWINDOW);
-    g_pGlobalState->decorations.emplace_back(deco);
-    deco->m_self = deco;
-    HyprlandAPI::addWindowDecoration(PHANDLE, PWINDOW, std::move(deco));
+    auto decoration = makeUnique<CGlassDecoration>(window);
+    g_pGlobalState->decorations.emplace_back(decoration);
+    decoration->m_self = decoration;
+    HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(decoration));
 }
 
 static void onCloseWindow(void* self, std::any data) {
-    const auto PWINDOW = std::any_cast<PHLWINDOW>(data);
+    const auto window = std::any_cast<PHLWINDOW>(data);
 
-    std::erase_if(g_pGlobalState->decorations, [PWINDOW](const auto& deco) {
-        auto locked = deco.lock();
-        return !locked || locked->getOwner() == PWINDOW;
+    std::erase_if(g_pGlobalState->decorations, [&window](const auto& decoration) {
+        auto locked = decoration.lock();
+        return !locked || locked->getOwner() == window;
     });
 }
 
@@ -140,72 +49,38 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pGlobalState = std::make_unique<SGlobalState>();
 
-    static auto P1 = HyprlandAPI::registerCallbackDynamic(
+    static auto onOpen = HyprlandAPI::registerCallbackDynamic(
         PHANDLE, "openWindow",
         [&](void* self, SCallbackInfo& info, std::any data) { onNewWindow(self, data); });
 
-    static auto P2 = HyprlandAPI::registerCallbackDynamic(
+    static auto onClose = HyprlandAPI::registerCallbackDynamic(
         PHANDLE, "closeWindow",
         [&](void* self, SCallbackInfo& info, std::any data) { onCloseWindow(self, data); });
 
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:enabled", Hyprlang::INT{1});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:blur_strength", Hyprlang::FLOAT{2.0});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:refraction_strength", Hyprlang::FLOAT{0.6});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:chromatic_aberration", Hyprlang::FLOAT{0.5});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:fresnel_strength", Hyprlang::FLOAT{0.6});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:specular_strength", Hyprlang::FLOAT{0.8});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:glass_opacity", Hyprlang::FLOAT{1.0});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:edge_thickness", Hyprlang::FLOAT{0.06});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:blur_iterations", Hyprlang::INT{3});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:tint_color", Hyprlang::INT{0x8899aa22});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:lens_distortion", Hyprlang::FLOAT{0.5});
-    // Theme system
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:default_theme", Hyprlang::INT{0});
-
-    // Dark theme settings
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:brightness", Hyprlang::FLOAT{0.82});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:contrast", Hyprlang::FLOAT{0.90});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:saturation", Hyprlang::FLOAT{0.80});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:vibrancy", Hyprlang::FLOAT{0.15});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:vibrancy_darkness", Hyprlang::FLOAT{0.0});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:adaptive_dim", Hyprlang::FLOAT{0.4});
-
-    // Light theme settings
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:brightness", Hyprlang::FLOAT{1.12});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:contrast", Hyprlang::FLOAT{0.92});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:saturation", Hyprlang::FLOAT{0.85});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:vibrancy", Hyprlang::FLOAT{0.12});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:vibrancy_darkness", Hyprlang::FLOAT{0.0});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:adaptive_boost", Hyprlang::FLOAT{0.4});
+    registerConfig(PHANDLE);
+    initConfigPointers(PHANDLE, g_pGlobalState->config);
 
     // Shadows must be enabled for the glass effect to sample the correct background.
     // Force-enable if the user has disabled them.
     static auto* const PSHADOWENABLED = (Hyprlang::INT* const*)g_pConfigManager->getConfigValuePtr("decoration:shadow:enabled");
     if (PSHADOWENABLED && !**PSHADOWENABLED) {
         HyprlandAPI::invokeHyprctlCommand("keyword", "decoration:shadow:enabled true");
-        HyprlandAPI::addNotification(PHANDLE,
-            std::format("[{}] Shadows auto-enabled (required for glass effect)", PLUGIN_NAME),
-            CHyprColor{1.0, 0.8, 0.2, 1.0}, 5000);
     }
 
-    for (auto& w : g_pCompositor->m_windows) {
-        if (w->isHidden() || !w->m_isMapped)
+    for (auto& window : g_pCompositor->m_windows) {
+        if (window->isHidden() || !window->m_isMapped)
             continue;
-        onNewWindow(nullptr, std::any(w));
+        onNewWindow(nullptr, std::any(window));
     }
 
     HyprlandAPI::reloadConfig();
 
-    HyprlandAPI::addNotification(PHANDLE,
-        std::format("[{}] Loaded successfully!", PLUGIN_NAME),
-        CHyprColor{0.2, 0.8, 0.4, 1.0}, 4000);
-
-    return {PLUGIN_NAME, PLUGIN_DESCRIPTION, PLUGIN_AUTHOR, PLUGIN_VERSION};
+    return {std::string(PLUGIN_NAME), std::string(PLUGIN_DESCRIPTION), std::string(PLUGIN_AUTHOR), std::string(PLUGIN_VERSION)};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
-    for (auto& deco : g_pGlobalState->decorations) {
-        auto locked = deco.lock();
+    for (auto& decoration : g_pGlobalState->decorations) {
+        auto locked = decoration.lock();
         if (locked) {
             auto owner = locked->getOwner();
             if (owner)
@@ -213,9 +88,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
         }
     }
 
-    g_pHyprRenderer->m_renderPass.removeAllOfType("CLiquidGlassPassElement");
+    g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassPassElement");
 
-    g_pGlobalState->shader.destroy();
-    g_pGlobalState->blurShader.destroy();
+    g_pGlobalState->shaderManager.destroy();
     g_pGlobalState.reset();
 }

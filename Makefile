@@ -1,4 +1,4 @@
-# Hyprnux-Liquid Plugin
+# HyprGlass Plugin
 
 CXX ?= g++
 CXXFLAGS = -shared -fPIC -g -O2 -std=c++23
@@ -9,8 +9,8 @@ ifeq ($(CXX),g++)
 	CXXFLAGS += --no-gnu-unique
 endif
 
-TARGET = hyprnux-liquid.so
-SOURCES = src/main.cpp src/LiquidGlassDecoration.cpp src/LiquidGlassPassElement.cpp
+TARGET = hyprglass.so
+SOURCES = src/main.cpp src/GlassDecoration.cpp src/GlassPassElement.cpp src/PluginConfig.cpp src/ShaderManager.cpp
 
 all: $(TARGET)
 
