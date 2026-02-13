@@ -5,12 +5,29 @@
 #include <algorithm>
 #include <GLES3/gl32.h>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprutils/math/Misc.hpp>
 
 CLiquidGlassDecoration::CLiquidGlassDecoration(PHLWINDOW pWindow)
     : IHyprWindowDecoration(pWindow), m_pWindow(pWindow) {
+}
+
+bool CLiquidGlassDecoration::resolveThemeIsDark() const {
+    static auto* const PDEFAULTTHEME = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:default_theme")->getDataStaticPtr();
+
+    try {
+        const auto PWINDOW = m_pWindow.lock();
+        if (PWINDOW && PWINDOW->m_ruleApplicator) {
+            if (PWINDOW->m_ruleApplicator->m_tagKeeper.isTagged("hyprnux_theme_light"))
+                return false;
+            if (PWINDOW->m_ruleApplicator->m_tagKeeper.isTagged("hyprnux_theme_dark"))
+                return true;
+        }
+    } catch (...) {}
+
+    return **PDEFAULTTHEME == 0;
 }
 
 SDecorationPositioningInfo CLiquidGlassDecoration::getPositioningInfo() {
@@ -147,8 +164,22 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     static auto* const PEDGE       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:edge_thickness")->getDataStaticPtr();
     static auto* const PTINTCOLOR  = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:tint_color")->getDataStaticPtr();
     static auto* const PLENS       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:lens_distortion")->getDataStaticPtr();
-    static auto* const PBGBRIGHT   = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:background_brightness")->getDataStaticPtr();
-    static auto* const PBGSAT      = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:background_saturation")->getDataStaticPtr();
+
+    // Dark theme config pointers
+    static auto* const PDARKBRIGHTNESS        = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:dark:brightness")->getDataStaticPtr();
+    static auto* const PDARKCONTRAST          = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:dark:contrast")->getDataStaticPtr();
+    static auto* const PDARKSATURATION        = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:dark:saturation")->getDataStaticPtr();
+    static auto* const PDARKVIBRANCY          = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:dark:vibrancy")->getDataStaticPtr();
+    static auto* const PDARKVIBRANCYDARKNESS  = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:dark:vibrancy_darkness")->getDataStaticPtr();
+    static auto* const PDARKADAPTIVEDIM       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:dark:adaptive_dim")->getDataStaticPtr();
+
+    // Light theme config pointers
+    static auto* const PLIGHTBRIGHTNESS       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:light:brightness")->getDataStaticPtr();
+    static auto* const PLIGHTCONTRAST         = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:light:contrast")->getDataStaticPtr();
+    static auto* const PLIGHTSATURATION       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:light:saturation")->getDataStaticPtr();
+    static auto* const PLIGHTVIBRANCY         = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:light:vibrancy")->getDataStaticPtr();
+    static auto* const PLIGHTVIBRANCYDARKNESS = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:light:vibrancy_darkness")->getDataStaticPtr();
+    static auto* const PLIGHTADAPTIVEBOOST    = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:liquid-glass:light:adaptive_boost")->getDataStaticPtr();
 
     const auto TR = Math::wlTransformToHyprutils(
         Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
@@ -185,8 +216,25 @@ void CLiquidGlassDecoration::applyLiquidGlassEffect(CFramebuffer& sourceFB, CFra
     glUniform1f(g_pGlobalState->locGlassOpacity, static_cast<float>(**POPACITY) * windowAlpha);
     glUniform1f(g_pGlobalState->locEdgeThickness, static_cast<float>(**PEDGE));
     glUniform1f(g_pGlobalState->locLensDistortion, static_cast<float>(**PLENS));
-    glUniform1f(g_pGlobalState->locBackgroundBrightness, static_cast<float>(**PBGBRIGHT));
-    glUniform1f(g_pGlobalState->locBackgroundSaturation, static_cast<float>(**PBGSAT));
+
+    const bool isDark = resolveThemeIsDark();
+    if (isDark) {
+        glUniform1f(g_pGlobalState->locBrightness, static_cast<float>(**PDARKBRIGHTNESS));
+        glUniform1f(g_pGlobalState->locContrast, static_cast<float>(**PDARKCONTRAST));
+        glUniform1f(g_pGlobalState->locSaturation, static_cast<float>(**PDARKSATURATION));
+        glUniform1f(g_pGlobalState->locVibrancy, static_cast<float>(**PDARKVIBRANCY));
+        glUniform1f(g_pGlobalState->locVibrancyDarkness, static_cast<float>(**PDARKVIBRANCYDARKNESS));
+        glUniform1f(g_pGlobalState->locAdaptiveDim, static_cast<float>(**PDARKADAPTIVEDIM));
+        glUniform1f(g_pGlobalState->locAdaptiveBoost, 0.0f);
+    } else {
+        glUniform1f(g_pGlobalState->locBrightness, static_cast<float>(**PLIGHTBRIGHTNESS));
+        glUniform1f(g_pGlobalState->locContrast, static_cast<float>(**PLIGHTCONTRAST));
+        glUniform1f(g_pGlobalState->locSaturation, static_cast<float>(**PLIGHTSATURATION));
+        glUniform1f(g_pGlobalState->locVibrancy, static_cast<float>(**PLIGHTVIBRANCY));
+        glUniform1f(g_pGlobalState->locVibrancyDarkness, static_cast<float>(**PLIGHTVIBRANCYDARKNESS));
+        glUniform1f(g_pGlobalState->locAdaptiveDim, 0.0f);
+        glUniform1f(g_pGlobalState->locAdaptiveBoost, static_cast<float>(**PLIGHTADAPTIVEBOOST));
+    }
 
     const int64_t tintColorValue = **PTINTCOLOR;
     glUniform3f(g_pGlobalState->locTintColor,

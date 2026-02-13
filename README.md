@@ -46,11 +46,54 @@ All options live under the `plugin:liquid-glass:` namespace in your Hyprland con
 | `glass_opacity` | float | `1.0` | Overall glass opacity (0.0–1.0). |
 | `edge_thickness` | float | `0.06` | Glass bezel width as a fraction of the window's smallest dimension (0.0–0.15). Controls how wide the refraction zone is. |
 | `tint_color` | color | `0x8899aa22` | Glass tint color in RRGGBBAA hex or `rgba(...)`. The alpha channel controls tint strength (0 = off). |
-| `background_brightness` | float | `1.08` | Frosted glass brightness boost (0.5–2.0). Values > 1.0 brighten the blurred background. |
-| `background_saturation` | float | `0.82` | Frosted glass desaturation (0.0–1.0). Values < 1.0 desaturate for a milky frosted look. |
+| `background_brightness` | float | `1.08` | *(Deprecated)* Replaced by per-theme brightness. Kept for config compatibility. |
+| `background_saturation` | float | `0.82` | *(Deprecated)* Replaced by per-theme saturation. Kept for config compatibility. |
+| `default_theme` | int | `0` | System default theme: 0 = dark, 1 = light. Used when a window has no theme tag. |
 | `environment_strength` | float | `0.12` | *(Deprecated, no-op)* Kept for config compatibility. |
 | `shadow_strength` | float | `0.15` | *(Deprecated, no-op)* Kept for config compatibility. |
 | `light_angle` | float | `225.0` | *(Deprecated, no-op)* Kept for config compatibility. |
+
+### Dark Theme Settings (`dark:*`)
+
+Applied when the window's resolved theme is dark.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `dark:brightness` | float | `0.82` | Brightness multiplier. Below 1.0 for a softer frosted look. |
+| `dark:contrast` | float | `0.90` | Contrast around midpoint. Below 1.0 softens harsh edges. |
+| `dark:saturation` | float | `0.80` | Frosted desaturation (0 = grayscale, 1 = full color). |
+| `dark:vibrancy` | float | `0.15` | Selective saturation boost scaled by existing saturation. |
+| `dark:vibrancy_darkness` | float | `0.0` | How much vibrancy affects dark background areas (0–1). |
+| `dark:adaptive_dim` | float | `0.25` | Per-pixel dimming of bright background areas (0–1). Improves text readability on dark-themed windows over bright content. |
+
+### Light Theme Settings (`light:*`)
+
+Applied when the window's resolved theme is light.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `light:brightness` | float | `1.12` | Brightness multiplier. Above 1.0 to lift the frosted background. |
+| `light:contrast` | float | `0.92` | Contrast around midpoint. |
+| `light:saturation` | float | `0.85` | Frosted desaturation (0 = grayscale, 1 = full color). |
+| `light:vibrancy` | float | `0.12` | Selective saturation boost scaled by existing saturation. |
+| `light:vibrancy_darkness` | float | `0.0` | How much vibrancy affects dark background areas (0–1). |
+| `light:adaptive_boost` | float | `0.25` | Per-pixel brightening of dark background areas (0–1). Improves text readability on light-themed windows over dark content. |
+
+### Theme Detection
+
+The plugin resolves each window's theme in this order:
+1. **Window tag** — If the window has the tag `hyprnux_theme_light`, light theme is used. If `hyprnux_theme_dark`, dark theme.
+2. **Fallback** — The `default_theme` config value (0 = dark, 1 = light).
+
+Set tags via window rules:
+```ini
+windowrule = tag +hyprnux_theme_light, match:class firefox
+```
+
+Or dynamically:
+```bash
+hyprctl dispatch tagwindow +hyprnux_theme_dark
+```
 
 ### Example
 
@@ -67,8 +110,21 @@ plugin:liquid-glass {
     glass_opacity = 1.0
     edge_thickness = 0.06
     tint_color = rgba(88, 99, aa, 0.15)
-    background_brightness = 1.08
-    background_saturation = 0.82
+    default_theme = 0
+
+    dark:brightness = 0.82
+    dark:contrast = 0.90
+    dark:saturation = 0.80
+    dark:vibrancy = 0.15
+    dark:vibrancy_darkness = 0.0
+    dark:adaptive_dim = 0.25
+
+    light:brightness = 1.12
+    light:contrast = 0.92
+    light:saturation = 0.85
+    light:vibrancy = 0.12
+    light:vibrancy_darkness = 0.0
+    light:adaptive_boost = 0.25
 }
 ```
 
@@ -82,7 +138,7 @@ The window is modeled as a **thick convex glass slab**. The rendering pipeline p
 4. **Edge refraction** — The height field gradient drives UV displacement. At the center the gradient is near-zero (no distortion). At the edges the gradient is steep, pushing sample UVs outward — pulling in content from beyond the window boundary. This creates natural color bleeding.
 5. **Chromatic aberration** — R, G, B channels are sampled with slightly different refraction scales (blue bends more), creating spectral fringing at edges.
 6. **Center dome lens** — Subtle barrel magnification in the flat interior, controlled by `lens_distortion`.
-7. **Frosted tint** — Brightness boost and desaturation applied to the blurred background.
+7. **Frosted tint** — Per-theme tone mapping: adaptive luminance-dependent brightness, contrast, desaturation, and vibrancy applied to the blurred background.
 8. **Color tint overlay** — Configurable color tint.
 9. **Fresnel edge glow** — Schlick-based fresnel approximation at the glass edge.
 10. **Specular highlight + inner shadow** — Top-biased highlight and bottom-rim shadow for depth.

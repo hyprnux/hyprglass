@@ -23,8 +23,13 @@ struct SGlobalState {
     GLint locTintColor             = -1;
     GLint locTintAlpha             = -1;
     GLint locLensDistortion        = -1;
-    GLint locBackgroundBrightness  = -1;
-    GLint locBackgroundSaturation  = -1;
+    GLint locBrightness            = -1;
+    GLint locContrast              = -1;
+    GLint locSaturation            = -1;
+    GLint locVibrancy              = -1;
+    GLint locVibrancyDarkness      = -1;
+    GLint locAdaptiveDim           = -1;
+    GLint locAdaptiveBoost         = -1;
     GLint locTexRaw                = -1;
     GLint locRoundingPower         = -1;
 

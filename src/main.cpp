@@ -58,8 +58,13 @@ void initShaderIfNeeded() {
     g_pGlobalState->locTintColor              = glGetUniformLocation(prog, "tintColor");
     g_pGlobalState->locTintAlpha              = glGetUniformLocation(prog, "tintAlpha");
     g_pGlobalState->locLensDistortion         = glGetUniformLocation(prog, "lensDistortion");
-    g_pGlobalState->locBackgroundBrightness   = glGetUniformLocation(prog, "backgroundBrightness");
-    g_pGlobalState->locBackgroundSaturation   = glGetUniformLocation(prog, "backgroundSaturation");
+    g_pGlobalState->locBrightness              = glGetUniformLocation(prog, "brightness");
+    g_pGlobalState->locContrast                = glGetUniformLocation(prog, "contrast");
+    g_pGlobalState->locSaturation              = glGetUniformLocation(prog, "saturation");
+    g_pGlobalState->locVibrancy                = glGetUniformLocation(prog, "vibrancy");
+    g_pGlobalState->locVibrancyDarkness        = glGetUniformLocation(prog, "vibrancyDarkness");
+    g_pGlobalState->locAdaptiveDim             = glGetUniformLocation(prog, "adaptiveDim");
+    g_pGlobalState->locAdaptiveBoost           = glGetUniformLocation(prog, "adaptiveBoost");
     g_pGlobalState->locTexRaw                  = glGetUniformLocation(prog, "texRaw");
     g_pGlobalState->locRoundingPower           = glGetUniformLocation(prog, "roundingPower");
 
@@ -157,6 +162,25 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:lens_distortion", Hyprlang::FLOAT{0.5});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:background_brightness", Hyprlang::FLOAT{1.08});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:background_saturation", Hyprlang::FLOAT{0.82});
+
+    // Theme system
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:default_theme", Hyprlang::INT{0});
+
+    // Dark theme settings
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:brightness", Hyprlang::FLOAT{0.82});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:contrast", Hyprlang::FLOAT{0.90});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:saturation", Hyprlang::FLOAT{0.80});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:vibrancy", Hyprlang::FLOAT{0.15});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:vibrancy_darkness", Hyprlang::FLOAT{0.0});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:dark:adaptive_dim", Hyprlang::FLOAT{0.4});
+
+    // Light theme settings
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:brightness", Hyprlang::FLOAT{1.12});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:contrast", Hyprlang::FLOAT{0.92});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:saturation", Hyprlang::FLOAT{0.85});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:vibrancy", Hyprlang::FLOAT{0.12});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:vibrancy_darkness", Hyprlang::FLOAT{0.0});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light:adaptive_boost", Hyprlang::FLOAT{0.4});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:environment_strength", Hyprlang::FLOAT{0.12});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:shadow_strength", Hyprlang::FLOAT{0.15});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:liquid-glass:light_angle", Hyprlang::FLOAT{225.0});

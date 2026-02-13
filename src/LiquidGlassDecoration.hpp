@@ -33,6 +33,7 @@ class CLiquidGlassDecoration : public IHyprWindowDecoration {
     CFramebuffer         m_blurHalfFB;
     CFramebuffer         m_blurHalfTmpFB;
 
+    bool resolveThemeIsDark() const;
     void sampleBackground(CFramebuffer& sourceFB, CBox box);
     void blurBackground(float radius, int iterations, GLuint callerFB, int viewportW, int viewportH);
     void applyLiquidGlassEffect(CFramebuffer& sourceFB, CFramebuffer& targetFB,
