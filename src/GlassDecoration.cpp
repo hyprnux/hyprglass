@@ -166,23 +166,23 @@ void CGlassDecoration::blurBackground(float radius, int iterations, GLuint calle
 void CGlassDecoration::uploadThemeUniforms(bool isDark) const {
     const auto& config   = g_pGlobalState->config;
     const auto& uniforms = g_pGlobalState->shaderManager.glassUniforms;
+    const auto& theme    = isDark ? config.dark : config.light;
+    const auto& defaults = isDark ? DARK_THEME_DEFAULTS : LIGHT_THEME_DEFAULTS;
 
+    glUniform1f(uniforms.brightness,       resolveFloat(theme.brightness, config.global.brightness, defaults.brightness));
+    glUniform1f(uniforms.contrast,         resolveFloat(theme.contrast, config.global.contrast, defaults.contrast));
+    glUniform1f(uniforms.saturation,       resolveFloat(theme.saturation, config.global.saturation, defaults.saturation));
+    glUniform1f(uniforms.vibrancy,         resolveFloat(theme.vibrancy, config.global.vibrancy, defaults.vibrancy));
+    glUniform1f(uniforms.vibrancyDarkness, resolveFloat(theme.vibrancyDarkness, config.global.vibrancyDarkness, defaults.vibrancyDarkness));
+
+    // adaptive_correction maps to the appropriate shader uniform per theme
+    const float adaptiveCorrection = resolveFloat(theme.adaptiveCorrection, config.global.adaptiveCorrection, defaults.adaptiveCorrection);
     if (isDark) {
-        glUniform1f(uniforms.brightness,       static_cast<float>(**config.darkBrightness));
-        glUniform1f(uniforms.contrast,         static_cast<float>(**config.darkContrast));
-        glUniform1f(uniforms.saturation,       static_cast<float>(**config.darkSaturation));
-        glUniform1f(uniforms.vibrancy,         static_cast<float>(**config.darkVibrancy));
-        glUniform1f(uniforms.vibrancyDarkness, static_cast<float>(**config.darkVibrancyDarkness));
-        glUniform1f(uniforms.adaptiveDim,      static_cast<float>(**config.darkAdaptiveDim));
-        glUniform1f(uniforms.adaptiveBoost,    0.0f);
+        glUniform1f(uniforms.adaptiveDim,   adaptiveCorrection);
+        glUniform1f(uniforms.adaptiveBoost, 0.0f);
     } else {
-        glUniform1f(uniforms.brightness,       static_cast<float>(**config.lightBrightness));
-        glUniform1f(uniforms.contrast,         static_cast<float>(**config.lightContrast));
-        glUniform1f(uniforms.saturation,       static_cast<float>(**config.lightSaturation));
-        glUniform1f(uniforms.vibrancy,         static_cast<float>(**config.lightVibrancy));
-        glUniform1f(uniforms.vibrancyDarkness, static_cast<float>(**config.lightVibrancyDarkness));
-        glUniform1f(uniforms.adaptiveDim,      0.0f);
-        glUniform1f(uniforms.adaptiveBoost,    static_cast<float>(**config.lightAdaptiveBoost));
+        glUniform1f(uniforms.adaptiveDim,   0.0f);
+        glUniform1f(uniforms.adaptiveBoost, adaptiveCorrection);
     }
 }
 
@@ -191,6 +191,9 @@ void CGlassDecoration::applyGlassEffect(CFramebuffer& sourceFramebuffer, CFrameb
     const auto& config   = g_pGlobalState->config;
     auto& shaderManager  = g_pGlobalState->shaderManager;
     const auto& uniforms = shaderManager.glassUniforms;
+
+    const bool isDark = resolveThemeIsDark();
+    const auto& theme = isDark ? config.dark : config.light;
 
     const auto transform = Math::wlTransformToHyprutils(
         Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
@@ -214,17 +217,17 @@ void CGlassDecoration::applyGlassEffect(CFramebuffer& sourceFramebuffer, CFrameb
     shaderManager.glassShader.setUniformFloat2(SHADER_FULL_SIZE,
         static_cast<float>(fullSize.x), static_cast<float>(fullSize.y));
 
-    glUniform1f(uniforms.refractionStrength,  static_cast<float>(**config.refractionStrength));
-    glUniform1f(uniforms.chromaticAberration, static_cast<float>(**config.chromaticAberration));
-    glUniform1f(uniforms.fresnelStrength,     static_cast<float>(**config.fresnelStrength));
-    glUniform1f(uniforms.specularStrength,    static_cast<float>(**config.specularStrength));
-    glUniform1f(uniforms.glassOpacity,        static_cast<float>(**config.glassOpacity) * windowAlpha);
-    glUniform1f(uniforms.edgeThickness,       static_cast<float>(**config.edgeThickness));
-    glUniform1f(uniforms.lensDistortion,      static_cast<float>(**config.lensDistortion));
+    glUniform1f(uniforms.refractionStrength,  resolveFloat(theme.refractionStrength, config.global.refractionStrength));
+    glUniform1f(uniforms.chromaticAberration, resolveFloat(theme.chromaticAberration, config.global.chromaticAberration));
+    glUniform1f(uniforms.fresnelStrength,     resolveFloat(theme.fresnelStrength, config.global.fresnelStrength));
+    glUniform1f(uniforms.specularStrength,    resolveFloat(theme.specularStrength, config.global.specularStrength));
+    glUniform1f(uniforms.glassOpacity,        resolveFloat(theme.glassOpacity, config.global.glassOpacity) * windowAlpha);
+    glUniform1f(uniforms.edgeThickness,       resolveFloat(theme.edgeThickness, config.global.edgeThickness));
+    glUniform1f(uniforms.lensDistortion,      resolveFloat(theme.lensDistortion, config.global.lensDistortion));
 
-    uploadThemeUniforms(resolveThemeIsDark());
+    uploadThemeUniforms(isDark);
 
-    const int64_t tintColorValue = **config.tintColor;
+    const int64_t tintColorValue = resolveInt(theme.tintColor, config.global.tintColor);
     glUniform3f(uniforms.tintColor,
         static_cast<float>((tintColorValue >> 24) & 0xFF) / 255.0f,
         static_cast<float>((tintColorValue >> 16) & 0xFF) / 255.0f,
@@ -283,8 +286,11 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     sampleBackground(*source, transformBox);
 
     const auto& config = g_pGlobalState->config;
-    float blurRadius     = static_cast<float>(**config.blurStrength) * 12.0f;
-    int blurIterations   = std::clamp(static_cast<int>(**config.blurIterations), 1, 5);
+    const bool isDark = resolveThemeIsDark();
+    const auto& theme = isDark ? config.dark : config.light;
+
+    float blurRadius     = resolveFloat(theme.blurStrength, config.global.blurStrength) * 12.0f;
+    int blurIterations   = std::clamp(static_cast<int>(resolveInt(theme.blurIterations, config.global.blurIterations)), 1, 5);
     int viewportWidth    = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x);
     int viewportHeight   = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
     blurBackground(blurRadius, blurIterations, source->getFBID(), viewportWidth, viewportHeight);
