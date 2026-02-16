@@ -1,0 +1,61 @@
+name: Check Hyprland Updates
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check latest Hyprland release
+        id: check
+        run: |
+          CURRENT_VERSION=$(cat .hyprland-version | tr -d '[:space:]')
+          echo "Current tracked version: ${CURRENT_VERSION}"
+
+          LATEST_VERSION=$(curl -sL https://api.github.com/repos/hyprwm/Hyprland/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+          echo "Latest Hyprland version: ${LATEST_VERSION}"
+
+          if [[ "$CURRENT_VERSION" == "$LATEST_VERSION" ]]; then
+            echo "Already up to date"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version available: ${LATEST_VERSION}"
+            echo "$LATEST_VERSION" > .hyprland-version
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+            echo "new_version=${LATEST_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "current_version=${CURRENT_VERSION}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Pull Request
+        if: steps.check.outputs.updated == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "build: update hyprland compatibility to v${{ steps.check.outputs.new_version }}"
+          title: "build: update hyprland compatibility to v${{ steps.check.outputs.new_version }}"
+          body: |
+            A new Hyprland release has been detected.
+
+            | Property | Value |
+            |----------|-------|
+            | Previous version | `${{ steps.check.outputs.current_version }}` |
+            | New version | `${{ steps.check.outputs.new_version }}` |
+            | Release | [v${{ steps.check.outputs.new_version }}](https://github.com/hyprwm/Hyprland/releases/tag/v${{ steps.check.outputs.new_version }}) |
+
+            Merging this PR will trigger a new release build compiled against the updated Hyprland headers.
+
+            > [!NOTE]
+            > The CI build job will verify that the plugin compiles against the new version before this can be merged.
+          branch: chore/hyprland-update-${{ steps.check.outputs.new_version }}
+          labels: dependencies

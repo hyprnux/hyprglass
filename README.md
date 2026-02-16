@@ -17,6 +17,10 @@ The plugin compiles to `hyprglass.so`.
 
 ## Installation
 
+### Pre-built Release
+
+Download the latest `hyprglass.so` from [GitHub Releases](https://github.com/Hyprnux/liquid-glass-plugin-hyprpm/releases/latest) and load it:
+
 ```bash
 hyprctl plugin load /path/to/hyprglass.so
 ```
@@ -27,7 +31,23 @@ Or add to your Hyprland config:
 plugin = /path/to/hyprglass.so
 ```
 
-For [hyprpm](https://wiki.hyprland.org/Plugins/Using-Plugins/#hyprpm) users, install via the `hyprpm.toml` manifest.
+> **Note**: Pre-built releases are compiled against a specific Hyprland version (listed in the release notes). If your Hyprland version differs, build from source or use `hyprpm` instead.
+
+### Using hyprpm (recommended)
+
+[hyprpm](https://wiki.hyprland.org/Plugins/Using-Plugins/#hyprpm) builds against your local Hyprland version, ensuring ABI compatibility:
+
+```bash
+hyprpm add https://github.com/Hyprnux/liquid-glass-plugin-hyprpm
+hyprpm enable HyprGlass
+```
+
+### Manual Build
+
+```bash
+make
+hyprctl plugin load $(pwd)/hyprglass.so
+```
 
 ## Configuration
 

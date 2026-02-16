@@ -1,0 +1,226 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Skip changelog commits to avoid infinite loops
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install system dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed \
+            git \
+            base-devel \
+            hyprland \
+            pixman \
+            libdrm \
+            pkgconf \
+            wget
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # actions/checkout in a container marks the repo as safe
+      - name: Fix git ownership
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Determine version bump from conventional commits
+        id: version-bump
+        run: |
+          LAST_TAG=$(git tag --list "v*" --sort=-version:refname | head -n1 || echo "")
+
+          if [[ -z "$LAST_TAG" ]]; then
+            echo "No previous release found"
+            COMMITS=$(git log --oneline --no-merges)
+            CURRENT_VERSION="0.0.0"
+          else
+            echo "Last release: ${LAST_TAG}"
+            COMMITS=$(git log --oneline --no-merges "${LAST_TAG}..HEAD")
+            CURRENT_VERSION=$(echo "$LAST_TAG" | sed 's/^v//')
+          fi
+
+          echo "Current version: ${CURRENT_VERSION}"
+          echo "Commits since last release:"
+          echo "$COMMITS"
+
+          BUMP_TYPE="none"
+
+          if echo "$COMMITS" | grep -qiE '(BREAKING CHANGE|^[a-f0-9]+ [a-z]+(\(.*\))?!:)'; then
+            BUMP_TYPE="major"
+          elif echo "$COMMITS" | grep -qiE '^[a-f0-9]+ feat'; then
+            BUMP_TYPE="minor"
+          elif echo "$COMMITS" | grep -qiE '^[a-f0-9]+ (fix|perf)'; then
+            BUMP_TYPE="patch"
+          fi
+
+          echo "Bump type: ${BUMP_TYPE}"
+
+          if [[ "$BUMP_TYPE" == "none" ]]; then
+            echo "::notice::No releasable commits found (need feat, fix, perf, or breaking change). Skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
+          case "$BUMP_TYPE" in
+            major)
+              NEW_VERSION="$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+              ;;
+            patch)
+              NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+              ;;
+          esac
+
+          echo "New version: ${NEW_VERSION}"
+
+          echo "bump_type=${BUMP_TYPE}" >> "$GITHUB_OUTPUT"
+          echo "current_version=${CURRENT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build plugin
+        if: steps.version-bump.outputs.skip != 'true'
+        run: make
+
+      - name: Capture Hyprland version
+        if: steps.version-bump.outputs.skip != 'true'
+        id: hyprland-version
+        run: |
+          HYPRLAND_VERSION=$(pacman -Q hyprland | awk '{print $2}' | cut -d'-' -f1)
+          echo "version=${HYPRLAND_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Built against Hyprland ${HYPRLAND_VERSION}"
+
+      - name: Install git-chglog
+        if: steps.version-bump.outputs.skip != 'true'
+        run: |
+          CHGLOG_VERSION="0.15.4"
+          wget -qO git-chglog.tar.gz "https://github.com/git-chglog/git-chglog/releases/download/v${CHGLOG_VERSION}/git-chglog_${CHGLOG_VERSION}_linux_amd64.tar.gz"
+          tar xzf git-chglog.tar.gz
+          mv git-chglog /usr/local/bin/
+
+      - name: Generate changelog
+        if: steps.version-bump.outputs.skip != 'true'
+        id: changelog
+        run: |
+          NEW_TAG="${{ steps.version-bump.outputs.tag }}"
+
+          # Create temporary tag for git-chglog to pick up
+          git tag "$NEW_TAG"
+
+          git-chglog --config .chglog/config.yml --output CHANGELOG.md
+
+          # Remove temporary tag (GitHub release will create the real one)
+          git tag -d "$NEW_TAG"
+
+          echo "Generated CHANGELOG.md"
+
+          # Extract changelog content for release body (first 100 lines)
+          CHANGELOG_CONTENT=$(head -100 CHANGELOG.md)
+          echo "changelog<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGELOG_CONTENT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Commit changelog
+        if: steps.version-bump.outputs.skip != 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git add CHANGELOG.md
+
+          if git diff --staged --quiet; then
+            echo "No changelog changes to commit"
+          else
+            git commit -m "chore(release): v${{ steps.version-bump.outputs.new_version }} [skip ci]" \
+              -m "Bump version from ${{ steps.version-bump.outputs.current_version }} to ${{ steps.version-bump.outputs.new_version }}" \
+              -m "Update CHANGELOG.md"
+
+            git push https://github-actions:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
+            echo "Changelog committed and pushed"
+          fi
+
+      - name: Prepare release artifact
+        if: steps.version-bump.outputs.skip != 'true'
+        run: |
+          mkdir -p release
+          cp hyprglass.so release/
+
+      - name: Create GitHub Release
+        if: steps.version-bump.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version-bump.outputs.tag }}
+          name: "HyprGlass ${{ steps.version-bump.outputs.tag }}"
+          body: |
+            ## HyprGlass ${{ steps.version-bump.outputs.tag }}
+
+            **Hyprland compatibility**: `${{ steps.hyprland-version.outputs.version }}`
+
+            > [!IMPORTANT]
+            > This pre-built binary was compiled against Hyprland **${{ steps.hyprland-version.outputs.version }}**.
+            > If you are running a different Hyprland version, build from source or use `hyprpm` instead.
+
+            ### Installation
+
+            ```bash
+            # Download the pre-built plugin
+            wget -O hyprglass.so https://github.com/${{ github.repository }}/releases/download/${{ steps.version-bump.outputs.tag }}/hyprglass.so
+
+            # Load it
+            hyprctl plugin load $(pwd)/hyprglass.so
+            ```
+
+            Or build from source with [hyprpm](https://wiki.hyprland.org/Plugins/Using-Plugins/#hyprpm):
+            ```bash
+            hyprpm add https://github.com/${{ github.repository }}
+            hyprpm enable HyprGlass
+            ```
+
+            ---
+
+            ${{ steps.changelog.outputs.changelog }}
+          files: |
+            release/hyprglass.so
+          generate_release_notes: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        if: steps.version-bump.outputs.skip != 'true'
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Release Summary
+
+          | Property | Value |
+          |----------|-------|
+          | Version | \`${{ steps.version-bump.outputs.tag }}\` |
+          | Previous | \`v${{ steps.version-bump.outputs.current_version }}\` |
+          | Bump Type | \`${{ steps.version-bump.outputs.bump_type }}\` |
+          | Hyprland | \`${{ steps.hyprland-version.outputs.version }}\` |
+          | Release | [${{ steps.version-bump.outputs.tag }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.version-bump.outputs.tag }}) |
+          EOF
