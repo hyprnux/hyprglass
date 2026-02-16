@@ -24,7 +24,16 @@ std::optional<CBox> CGlassPassElement::boundingBox() {
         return std::nullopt;
 
     const auto monitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
-    return WindowGeometry::computeWindowBox(window, monitor);
+    auto box = WindowGeometry::computeWindowBox(window, monitor);
+    if (!box)
+        return std::nullopt;
+
+    // Expand by our sampling padding so the render pass damages the full
+    // area we read from. Without this, wallpaper outside the window box
+    // but inside our padding isn't re-rendered, leaving stale content.
+    const float padding = CGlassDecoration::SAMPLE_PADDING_PX / monitor->m_scale;
+    box->expand(padding);
+    return box;
 }
 
 bool CGlassPassElement::needsLiveBlur() {

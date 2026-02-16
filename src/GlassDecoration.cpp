@@ -49,13 +49,25 @@ void CGlassDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     CGlassPassElement::SGlassPassData data{this, alpha};
     g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassPassElement>(data));
 
-    // Only damage during active workspace animations so the glass effect
-    // updates smoothly during transitions but goes idle once complete.
     const auto window = m_window.lock();
     if (window) {
         const auto workspace = window->m_workspace;
+
+        // Workspace slide animations need continuous damage
         if (workspace && !window->m_pinned && workspace->m_renderOffset->isBeingAnimated())
             damageEntire();
+
+        // Damage when position or size actually changed since last frame.
+        // This seeds initial damage (first frame detects change from default {0,0}),
+        // keeps the glass updated during movement, and naturally stops when
+        // static (same position → no damage → no feedback loop).
+        const auto currentPosition = window->m_realPosition->value();
+        const auto currentSize = window->m_realSize->value();
+        if (currentPosition != m_lastPosition || currentSize != m_lastSize) {
+            damageEntire();
+            m_lastPosition = currentPosition;
+            m_lastSize = currentSize;
+        }
     }
 }
 
@@ -91,6 +103,11 @@ void CGlassDecoration::sampleBackground(CFramebuffer& sourceFramebuffer, CBox bo
         static_cast<double>(pad) / paddedWidth,
         static_cast<double>(pad) / paddedHeight
     );
+
+    // The render pass scissors each element to its damage region.
+    // That scissor state leaks here and clips glBlitFramebuffer on the
+    // DRAW framebuffer, causing partial writes and stale noise artifacts.
+    glDisable(GL_SCISSOR_TEST);
 
     glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFramebuffer.getFBID());
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_sampleFramebuffer.getFBID());
@@ -304,6 +321,15 @@ void CGlassDecoration::damageEntire() {
     if (workspace && workspace->m_renderOffset->isBeingAnimated() && !window->m_pinned)
         surfaceBox.translate(workspace->m_renderOffset->value());
     surfaceBox.translate(window->m_floatingOffset);
+
+    // Expand damage by our sampling padding so the render pass re-renders
+    // background content (wallpaper, other windows) in the padded margin.
+    // Without this, the scissored render pass leaves stale previous-frame
+    // content in the padding area, causing noise artifacts.
+    // surfaceBox is in logical coords; convert pixel padding to logical.
+    const auto monitor = window->m_monitor.lock();
+    const float scale = monitor ? monitor->m_scale : 1.0f;
+    surfaceBox.expand(SAMPLE_PADDING_PX / scale);
 
     g_pHyprRenderer->damageBox(surfaceBox);
 }

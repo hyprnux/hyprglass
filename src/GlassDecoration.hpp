@@ -24,12 +24,16 @@ class CGlassDecoration : public IHyprWindowDecoration {
 
     WP<CGlassDecoration> m_self;
 
+    static constexpr int SAMPLE_PADDING_PX = 60;
+
   private:
     PHLWINDOWREF m_window;
     CFramebuffer m_sampleFramebuffer;
     Vector2D     m_samplePaddingRatio;
 
-    static constexpr int SAMPLE_PADDING_PX = 60;
+    // Track last rendered position/size to detect actual changes and seed damage
+    Vector2D m_lastPosition;
+    Vector2D m_lastSize;
 
     [[nodiscard]] bool resolveThemeIsDark() const;
 
