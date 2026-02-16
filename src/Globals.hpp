@@ -16,9 +16,8 @@ struct SGlobalState {
     CShaderManager                    shaderManager;
     SPluginConfig                     config;
 
-    // Shared blur framebuffers (reused across all decorations since they render sequentially)
-    CFramebuffer blurHalfFramebuffer;
-    CFramebuffer blurHalfTempFramebuffer;
+    // Shared blur temp framebuffer (reused across all decorations since they render sequentially)
+    CFramebuffer blurTempFramebuffer;
 };
 
 inline HANDLE                        PHANDLE = nullptr;

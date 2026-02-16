@@ -104,26 +104,12 @@ void CGlassDecoration::blurBackground(float radius, int iterations, GLuint calle
     if (radius <= 0.0f || iterations <= 0 || !shaderManager.isInitialized())
         return;
 
-    int fullWidth  = static_cast<int>(m_sampleFramebuffer.m_size.x);
-    int fullHeight = static_cast<int>(m_sampleFramebuffer.m_size.y);
+    int width  = static_cast<int>(m_sampleFramebuffer.m_size.x);
+    int height = static_cast<int>(m_sampleFramebuffer.m_size.y);
 
-    // Blur at half resolution to cut fragment work by ~75%
-    int halfWidth    = std::max(1, fullWidth / 2);
-    int halfHeight   = std::max(1, fullHeight / 2);
-    float scaledRadius = radius * 0.5f;
-
-    auto& blurFramebuffer     = g_pGlobalState->blurHalfFramebuffer;
-    auto& blurTempFramebuffer = g_pGlobalState->blurHalfTempFramebuffer;
-
-    if (blurFramebuffer.m_size.x != halfWidth || blurFramebuffer.m_size.y != halfHeight)
-        blurFramebuffer.alloc(halfWidth, halfHeight, m_sampleFramebuffer.m_drmFormat);
-    if (blurTempFramebuffer.m_size.x != halfWidth || blurTempFramebuffer.m_size.y != halfHeight)
-        blurTempFramebuffer.alloc(halfWidth, halfHeight, m_sampleFramebuffer.m_drmFormat);
-
-    // Downsample: blit full-res sample → half-res (hardware-accelerated bilinear downscale)
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_sampleFramebuffer.getFBID());
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, blurFramebuffer.getFBID());
-    glBlitFramebuffer(0, 0, fullWidth, fullHeight, 0, 0, halfWidth, halfHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    auto& blurTempFramebuffer = g_pGlobalState->blurTempFramebuffer;
+    if (blurTempFramebuffer.m_size.x != width || blurTempFramebuffer.m_size.y != height)
+        blurTempFramebuffer.alloc(width, height, m_sampleFramebuffer.m_drmFormat);
 
     // Fullscreen quad projection: maps VAO positions [0,1] to clip space [-1,1]
     static constexpr std::array<float, 9> FULLSCREEN_PROJECTION = {
@@ -138,22 +124,23 @@ void CGlassDecoration::blurBackground(float radius, int iterations, GLuint calle
     g_pHyprOpenGL->useProgram(blurShader.program);
     blurShader.setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, FULLSCREEN_PROJECTION);
     blurShader.setUniformInt(SHADER_TEX, 0);
-    glUniform1f(blurUniforms.radius, scaledRadius);
+    glUniform1f(blurUniforms.radius, radius);
     glBindVertexArray(blurShader.uniformLocations[SHADER_SHADER_VAO]);
-    glViewport(0, 0, halfWidth, halfHeight);
+    glViewport(0, 0, width, height);
     glActiveTexture(GL_TEXTURE0);
 
+    // Ping-pong at full resolution: m_sampleFramebuffer ↔ blurTempFramebuffer
     for (int iteration = 0; iteration < iterations; iteration++) {
-        // Horizontal pass: blurFramebuffer → blurTempFramebuffer
+        // Horizontal pass: m_sampleFramebuffer → blurTempFramebuffer
         glBindFramebuffer(GL_FRAMEBUFFER, blurTempFramebuffer.getFBID());
-        blurFramebuffer.getTexture()->bind();
-        glUniform2f(blurUniforms.direction, 1.0f / halfWidth, 0.0f);
+        m_sampleFramebuffer.getTexture()->bind();
+        glUniform2f(blurUniforms.direction, 1.0f / width, 0.0f);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-        // Vertical pass: blurTempFramebuffer → blurFramebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, blurFramebuffer.getFBID());
+        // Vertical pass: blurTempFramebuffer → m_sampleFramebuffer
+        glBindFramebuffer(GL_FRAMEBUFFER, m_sampleFramebuffer.getFBID());
         blurTempFramebuffer.getTexture()->bind();
-        glUniform2f(blurUniforms.direction, 0.0f, 1.0f / halfHeight);
+        glUniform2f(blurUniforms.direction, 0.0f, 1.0f / height);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
 
@@ -295,7 +282,7 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     int viewportHeight   = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
     blurBackground(blurRadius, blurIterations, source->getFBID(), viewportWidth, viewportHeight);
 
-    applyGlassEffect(g_pGlobalState->blurHalfFramebuffer, *source, windowBox, transformBox, alpha);
+    applyGlassEffect(m_sampleFramebuffer, *source, windowBox, transformBox, alpha);
 }
 
 eDecorationType CGlassDecoration::getDecorationType() {
