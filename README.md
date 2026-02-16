@@ -1,48 +1,39 @@
-# HyprGlass — Liquid Glass Plugin for Hyprland
+# HyprGlass – Liquid Glass inspired plugin for Hyprland
 
-An Apple-style Liquid Glass effect plugin for [Hyprland](https://hyprland.org/). Models each window as a thick convex glass slab — content behind refracts naturally through the curved edges, creating color bleeding and chromatic fringing, while the flat center shows clean frosted blur.
+Liquid Glass for [Hyprland](https://hyprland.org/).
 
-## Requirements
+Frosted blur, edge refraction, chromatic aberration, specular highlights — fully customizable, per-theme, on every window.
 
-- Hyprland (matching API version)
-- Hyprland shadows must be enabled for the glass effect to work correctly. The plugin **auto-enables shadows** at load time if they are disabled. Shadow visual values (range, color, etc.) can be set to 0 — only the decoration's presence in the render pipeline is required.
-
-## Building
-
-```bash
-make
-```
-
-The plugin compiles to `hyprglass.so`.
+| Dark | Light |
+|:---:|:---:|
+| ![Dark theme](assets/dark-theme.png) | ![Light theme](assets/light-theme.png) |
 
 ## Installation
 
-### Pre-built Release
+### hyprpm (recommended)
 
-Download the latest `hyprglass.so` from [GitHub Releases](https://github.com/Hyprnux/liquid-glass-plugin-hyprpm/releases/latest) and load it:
+Builds against your exact Hyprland version, no ABI mismatch headaches:
+
+```bash
+hyprpm add https://github.com/hyprnux/hyprglass
+hyprpm enable HyprGlass
+```
+
+### Pre-built release
+
+Grab `hyprglass.so` from [Releases](https://github.com/hyprnux/hyprglass/releases/latest). Each release targets a specific Hyprland API version — check the release notes to confirm it matches yours.
 
 ```bash
 hyprctl plugin load /path/to/hyprglass.so
 ```
 
-Or add to your Hyprland config:
+Or persist it in your config:
 
 ```ini
 plugin = /path/to/hyprglass.so
 ```
 
-> **Note**: Pre-built releases are compiled against a specific Hyprland version (listed in the release notes). If your Hyprland version differs, build from source or use `hyprpm` instead.
-
-### Using hyprpm (recommended)
-
-[hyprpm](https://wiki.hyprland.org/Plugins/Using-Plugins/#hyprpm) builds against your local Hyprland version, ensuring ABI compatibility:
-
-```bash
-hyprpm add https://github.com/Hyprnux/liquid-glass-plugin-hyprpm
-hyprpm enable HyprGlass
-```
-
-### Manual Build
+### Manual build
 
 ```bash
 make
@@ -51,82 +42,118 @@ hyprctl plugin load $(pwd)/hyprglass.so
 
 ## Configuration
 
-All options live under the `plugin:hyprglass:` namespace in your Hyprland config.
+Everything goes under `plugin:hyprglass:` in your Hyprland config.
 
-### Layered Config System
+### Layered config
 
-Every setting (except `enabled` and `default_theme`) supports three-tier resolution:
+Settings resolve in three tiers:
 
-1. **Theme override** (`dark:*` / `light:*`) — highest priority
+1. **Theme override** (`dark:` / `light:` prefix) — highest priority
 2. **Global value** — applies to both themes
-3. **Hardcoded theme default** — built-in fallback per theme
-
-This means you can set a value globally and it applies to both themes, or override it for a specific theme only. Example:
+3. **Built-in default** — per-theme fallback
 
 ```ini
 plugin:hyprglass {
-    brightness = 0.9              # applies to both themes
-    dark:brightness = 0.82        # overrides global for dark only
+    brightness = 0.9              # both themes
+    dark:brightness = 0.82        # dark only override
     light:adaptive_correction = 0.5
 }
 ```
 
-### Global-Only Settings
+### Global-only settings
 
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | int | `1` | Enable/disable the effect (0 or 1) |
-| `default_theme` | int | `0` | System default theme: 0 = dark, 1 = light. Used when a window has no theme tag. |
+| `default_theme` | int | `0` | Default theme: 0 = dark, 1 = light |
 
-### Overridable Settings
+### Overridable settings
 
-These can be set at the global level, or overridden per theme with `dark:` / `light:` prefix.
+Set globally, or per theme with `dark:` / `light:` prefix.
 
 | Option | Type | Global Default | Dark Default | Light Default | Description |
 |---|---|---|---|---|---|
-| `blur_strength` | float | `2.0` | — | — | Blur radius scale. Applied as `value * 12.0` px radius. |
-| `blur_iterations` | int | `3` | — | — | Number of Gaussian blur passes (1–5). |
-| `refraction_strength` | float | `0.6` | — | — | Edge refraction intensity (0.0–1.0). |
-| `chromatic_aberration` | float | `0.5` | — | — | Spectral dispersion at edges (0.0–1.0). |
-| `fresnel_strength` | float | `0.6` | — | — | Edge glow intensity (0.0–1.0). |
-| `specular_strength` | float | `0.8` | — | — | Specular highlight brightness (0.0–1.0). |
-| `glass_opacity` | float | `1.0` | — | — | Overall glass opacity (0.0–1.0). |
-| `edge_thickness` | float | `0.06` | — | — | Glass bezel width as fraction of smallest dimension (0.0–0.15). |
-| `tint_color` | color | `0x8899aa22` | — | — | Glass tint in RRGGBBAA hex. Alpha controls tint strength. |
-| `lens_distortion` | float | `0.5` | — | — | Center dome lens magnification (0.0–1.0). |
-| `brightness` | float | — | `0.82` | `1.12` | Brightness multiplier. |
-| `contrast` | float | — | `0.90` | `0.92` | Contrast around midpoint. |
-| `saturation` | float | — | `0.80` | `0.85` | Frosted desaturation (0 = grayscale, 1 = full color). |
-| `vibrancy` | float | — | `0.15` | `0.12` | Selective saturation boost scaled by existing saturation. |
-| `vibrancy_darkness` | float | — | `0.0` | `0.0` | How much vibrancy affects dark background areas (0–1). |
-| `adaptive_correction` | float | — | `0.4` | `0.4` | Adaptive luminance correction (0–1). In dark mode: dims bright areas. In light mode: boosts dark areas. |
+| `blur_strength` | float | `2.0` | — | — | Blur radius scale (`value × 12.0` px) |
+| `blur_iterations` | int | `3` | — | — | Gaussian blur passes (1–5) |
+| `refraction_strength` | float | `0.6` | — | — | Edge refraction intensity (0.0–1.0) |
+| `chromatic_aberration` | float | `0.5` | — | — | Spectral dispersion at edges (0.0–1.0) |
+| `fresnel_strength` | float | `0.6` | — | — | Edge glow intensity (0.0–1.0) |
+| `specular_strength` | float | `0.8` | — | — | Specular highlight brightness (0.0–1.0) |
+| `glass_opacity` | float | `1.0` | — | — | Overall glass opacity (0.0–1.0) |
+| `edge_thickness` | float | `0.06` | — | — | Bezel width, fraction of smallest dimension (0.0–0.15) |
+| `tint_color` | color | `0x8899aa22` | — | — | Glass tint RRGGBBAA hex. Alpha = tint strength |
+| `lens_distortion` | float | `0.5` | — | — | Center dome magnification (0.0–1.0) |
+| `brightness` | float | — | `0.82` | `1.12` | Brightness multiplier |
+| `contrast` | float | — | `0.90` | `0.92` | Contrast around midpoint |
+| `saturation` | float | — | `0.80` | `0.85` | Desaturation (0 = grayscale, 1 = full) |
+| `vibrancy` | float | — | `0.15` | `0.12` | Selective saturation boost |
+| `vibrancy_darkness` | float | — | `0.0` | `0.0` | Vibrancy influence on dark areas (0–1) |
+| `adaptive_correction` | float | — | `0.4` | `0.4` | Luminance correction (0–1). Dark: dims bright areas. Light: boosts dark areas |
 
-Settings with `—` in the Global Default column fall through to their per-theme hardcoded defaults when no global or theme override is set. Settings with `—` in the Dark/Light Default columns inherit from the global value.
+`—` in Global Default = falls through to per-theme default. `—` in Dark/Light = inherits global value.
 
-### Theme Detection
+### Theme detection
 
-The plugin resolves each window's theme in this order:
-1. **Window tag** — If the window has the tag `hyprnux_theme_light`, light theme is used. If `hyprnux_theme_dark`, dark theme.
-2. **Fallback** — The `default_theme` config value (0 = dark, 1 = light).
+Each window's theme is resolved as:
+1. **Window tag** `hyprnux_theme_light` or `hyprnux_theme_dark`
+2. **Fallback** to `default_theme`
 
-Set tags via window rules:
+Set via window rules:
 ```ini
 windowrule = tag +hyprnux_theme_light, match:class firefox
 ```
 
-Or dynamically:
+Or on the fly:
 ```bash
 hyprctl dispatch tagwindow +hyprnux_theme_dark
 ```
 
-### Example
+### Presets
+
+**High contrast** — punchy colors, strong tinting, good contrast between dark and light themes:
+
+```ini
+plugin:hyprglass {
+    enabled = 1
+    blur_strength = 1.4
+    blur_iterations = 2
+    lens_distortion = 0.5
+    refraction_strength = 1.2
+    chromatic_aberration = 0.25
+    fresnel_strength = 0.3
+    specular_strength = 0.8
+    glass_opacity = 1
+    edge_thickness = 0.06
+    default_theme = 0
+
+    dark:brightness = 0.92
+    dark:contrast = 1.14
+    dark:saturation = 0.92
+    dark:vibrancy = 0.5
+    dark:vibrancy_darkness = 0.2
+    dark:adaptive_correction = 0.15
+    dark:tint_color = 0x021d3c66
+
+    light:brightness = 1.03
+    light:contrast = 0.92
+    light:saturation = 0.8
+    light:vibrancy = 0.12
+    light:vibrancy_darkness = 5.0
+    light:adaptive_correction = 0.35
+    light:tint_color = 0xc2cddb33
+}
+```
+
+*Increase two last digits of tint colors for more opacity of teint color and more contrast with background*
+
+
+**Defaults** — softer frosted look, lighter blur:
 
 ```ini
 plugin:hyprglass {
     enabled = 1
     default_theme = 0
 
-    # Global — applies to both themes unless overridden
     blur_strength = 2.0
     blur_iterations = 3
     refraction_strength = 0.6
@@ -138,14 +165,12 @@ plugin:hyprglass {
     tint_color = 0x8899aa22
     lens_distortion = 0.5
 
-    # Dark theme overrides
     dark:brightness = 0.82
     dark:contrast = 0.90
     dark:saturation = 0.80
     dark:vibrancy = 0.15
     dark:adaptive_correction = 0.4
 
-    # Light theme overrides
     light:brightness = 1.12
     light:contrast = 0.92
     light:saturation = 0.85
@@ -176,6 +201,10 @@ The plugin integrates with Hyprland's render pass system as a `DECORATION_LAYER_
 ```bash
 hyprctl plugin unload /path/to/hyprglass.so
 ```
+
+## Notes
+
+- The plugin requires Hyprland shadows to be present in the render pipeline. It **auto-enables them** at load time if disabled — shadow visual values (range, color…) can be zero, only the decoration's presence matters.
 
 ## License
 
