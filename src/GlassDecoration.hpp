@@ -21,6 +21,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
 
     [[nodiscard]] PHLWINDOW getOwner();
     void                    renderPass(PHLMONITOR monitor, const float& alpha);
+    [[nodiscard]] bool      needsResample() const noexcept;
 
     WP<CGlassDecoration> m_self;
 
@@ -34,6 +35,10 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // Track last rendered position/size to detect actual changes and seed damage
     Vector2D m_lastPosition;
     Vector2D m_lastSize;
+
+    // Dirty flag: true when window needs fresh background sampling + blur.
+    // Cleared after renderPass() to avoid re-blurring on static frames.
+    bool m_needsResample = true;
 
     [[nodiscard]] bool resolveThemeIsDark() const;
 

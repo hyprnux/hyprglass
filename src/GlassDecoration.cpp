@@ -53,17 +53,15 @@ void CGlassDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     if (window) {
         const auto workspace = window->m_workspace;
 
-        // Workspace slide animations need continuous damage
-        if (workspace && !window->m_pinned && workspace->m_renderOffset->isBeingAnimated())
+        if (workspace && !window->m_pinned && workspace->m_renderOffset->isBeingAnimated()) {
+            m_needsResample = true;
             damageEntire();
+        }
 
-        // Damage when position or size actually changed since last frame.
-        // This seeds initial damage (first frame detects change from default {0,0}),
-        // keeps the glass updated during movement, and naturally stops when
-        // static (same position → no damage → no feedback loop).
         const auto currentPosition = window->m_realPosition->value();
         const auto currentSize = window->m_realSize->value();
         if (currentPosition != m_lastPosition || currentSize != m_lastSize) {
+            m_needsResample = true;
             damageEntire();
             m_lastPosition = currentPosition;
             m_lastSize = currentSize;
@@ -73,6 +71,10 @@ void CGlassDecoration::draw(PHLMONITOR monitor, float const& alpha) {
 
 PHLWINDOW CGlassDecoration::getOwner() {
     return m_window.lock();
+}
+
+bool CGlassDecoration::needsResample() const noexcept {
+    return m_needsResample;
 }
 
 void CGlassDecoration::sampleBackground(CFramebuffer& sourceFramebuffer, CBox box) {
@@ -287,17 +289,23 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
         g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x,
         g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
 
-    sampleBackground(*source, transformBox);
+    // Only re-sample and re-blur when content actually changed.
+    // When static, reuse the cached blurred framebuffer — just re-composite.
+    const bool hasCache = m_sampleFramebuffer.m_size.x > 0;
+    if (m_needsResample || !hasCache) {
+        sampleBackground(*source, transformBox);
 
-    const auto& config = g_pGlobalState->config;
-    const bool isDark = resolveThemeIsDark();
-    const auto& theme = isDark ? config.dark : config.light;
+        const auto& config = g_pGlobalState->config;
+        const bool isDark = resolveThemeIsDark();
+        const auto& theme = isDark ? config.dark : config.light;
 
-    float blurRadius     = resolveFloat(theme.blurStrength, config.global.blurStrength) * 12.0f;
-    int blurIterations   = std::clamp(static_cast<int>(resolveInt(theme.blurIterations, config.global.blurIterations)), 1, 5);
-    int viewportWidth    = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x);
-    int viewportHeight   = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
-    blurBackground(blurRadius, blurIterations, source->getFBID(), viewportWidth, viewportHeight);
+        float blurRadius     = resolveFloat(theme.blurStrength, config.global.blurStrength) * 12.0f;
+        int blurIterations   = std::clamp(static_cast<int>(resolveInt(theme.blurIterations, config.global.blurIterations)), 1, 5);
+        int viewportWidth    = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x);
+        int viewportHeight   = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
+        blurBackground(blurRadius, blurIterations, source->getFBID(), viewportWidth, viewportHeight);
+    }
+    m_needsResample = false;
 
     applyGlassEffect(m_sampleFramebuffer, *source, windowBox, transformBox, alpha);
 }
@@ -307,7 +315,10 @@ eDecorationType CGlassDecoration::getDecorationType() {
 }
 
 void CGlassDecoration::updateWindow(PHLWINDOW window) {
-    damageEntire();
+    if (!m_needsResample) {
+        m_needsResample = true;
+        damageEntire();
+    }
 }
 
 void CGlassDecoration::damageEntire() {

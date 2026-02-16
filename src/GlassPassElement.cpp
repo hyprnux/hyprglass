@@ -37,7 +37,7 @@ std::optional<CBox> CGlassPassElement::boundingBox() {
 }
 
 bool CGlassPassElement::needsLiveBlur() {
-    return true;
+    return m_data.decoration && m_data.decoration->needsResample();
 }
 
 bool CGlassPassElement::needsPrecomputeBlur() {
@@ -48,5 +48,6 @@ bool CGlassPassElement::disableSimplification() {
     // The glass effect samples and blurs the full window background area.
     // Simplification would reduce our damage when opaque windows overlap,
     // causing partial blur, stale content, and visible seam artifacts.
-    return true;
+    // Only needed when actively resampling; static frames reuse the cache.
+    return m_data.decoration && m_data.decoration->needsResample();
 }
