@@ -1,4 +1,11 @@
 
+## [v0.2.0](https://github.com/Hyprnux/hyprglass/compare/v0.1.0...v0.2.0) - 2026-02-18
+
+### Features
+
+* settings improvments, with presets and built-in presets
+
+
 ## v0.1.0 - 2026-02-16
 
 ### Bug Fixes
@@ -12,6 +19,10 @@
 ### CI/CD
 
 * pipelines + docs
+
+### Chores
+
+* **release:** v0.1.0 [skip ci]
 
 ### Code Refactoring
 
