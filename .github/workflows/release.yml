@@ -67,14 +67,14 @@ jobs:
             BUMP_TYPE="major"
           elif echo "$COMMITS" | grep -qiE '^[a-f0-9]+ feat'; then
             BUMP_TYPE="minor"
-          elif echo "$COMMITS" | grep -qiE '^[a-f0-9]+ (fix|perf)'; then
+          elif echo "$COMMITS" | grep -qiE '^[a-f0-9]+ (fix|perf|build)'; then
             BUMP_TYPE="patch"
           fi
 
           echo "Bump type: ${BUMP_TYPE}"
 
           if [[ "$BUMP_TYPE" == "none" ]]; then
-            echo "::notice::No releasable commits found (need feat, fix, perf, or breaking change). Skipping."
+            echo "::notice::No releasable commits found (need feat, fix, perf, build, or breaking change). Skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
