@@ -16,6 +16,9 @@ struct SGlobalState {
     CShaderManager                    shaderManager;
     SPluginConfig                     config;
 
+    // User-defined presets (populated from config keyword, swapped in on configReloaded)
+    std::unordered_map<std::string, SCustomPreset> customPresets;
+
     // Shared blur temp framebuffer (reused across all decorations since they render sequentially)
     CFramebuffer blurTempFramebuffer;
 };

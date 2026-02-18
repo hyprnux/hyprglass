@@ -57,6 +57,15 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         PHANDLE, "closeWindow",
         [&](void* self, SCallbackInfo& info, std::any data) { onCloseWindow(self, data); });
 
+    // Clear pending presets before config re-parse, commit after
+    static auto onPreConfigReload = HyprlandAPI::registerCallbackDynamic(
+        PHANDLE, "preConfigReload",
+        [&](void* /*self*/, SCallbackInfo& /*info*/, std::any /*data*/) { clearPendingPresets(); });
+
+    static auto onConfigReloaded = HyprlandAPI::registerCallbackDynamic(
+        PHANDLE, "configReloaded",
+        [&](void* /*self*/, SCallbackInfo& /*info*/, std::any /*data*/) { commitPendingPresets(); validateConfig(); });
+
     registerConfig(PHANDLE);
     initConfigPointers(PHANDLE, g_pGlobalState->config);
 
@@ -74,6 +83,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     HyprlandAPI::reloadConfig();
+    validateConfig();
 
     return {std::string(PLUGIN_NAME), std::string(PLUGIN_DESCRIPTION), std::string(PLUGIN_AUTHOR), std::string(PLUGIN_VERSION)};
 }

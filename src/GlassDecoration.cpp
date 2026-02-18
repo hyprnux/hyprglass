@@ -1,4 +1,5 @@
 #include "GlassDecoration.hpp"
+#include "BuiltInPresets.hpp"
 #include "GlassPassElement.hpp"
 #include "Globals.hpp"
 #include "WindowGeometry.hpp"
@@ -17,19 +18,47 @@ CGlassDecoration::CGlassDecoration(PHLWINDOW window)
 }
 
 bool CGlassDecoration::resolveThemeIsDark() const {
-    const auto& config = g_pGlobalState->config;
-
     try {
         const auto window = m_window.lock();
         if (window && window->m_ruleApplicator) {
-            if (window->m_ruleApplicator->m_tagKeeper.isTagged(std::string(TAG_THEME_LIGHT)))
+            const std::string lightTag = std::string(TAG_THEME_PREFIX) + "light";
+            const std::string darkTag  = std::string(TAG_THEME_PREFIX) + "dark";
+            if (window->m_ruleApplicator->m_tagKeeper.isTagged(lightTag))
                 return false;
-            if (window->m_ruleApplicator->m_tagKeeper.isTagged(std::string(TAG_THEME_DARK)))
+            if (window->m_ruleApplicator->m_tagKeeper.isTagged(darkTag))
                 return true;
+        }
+
+        const auto& config = g_pGlobalState->config;
+        if (config.defaultTheme) {
+            const char* theme = *config.defaultTheme;
+            if (theme)
+                return std::string_view(theme) != "light";
         }
     } catch (...) {}
 
-    return **config.defaultTheme == 0;
+    return true;
+}
+
+std::string CGlassDecoration::resolvePresetName() const {
+    try {
+        const auto window = m_window.lock();
+        if (window && window->m_ruleApplicator) {
+            for (const auto& tag : window->m_ruleApplicator->m_tagKeeper.getTags()) {
+                if (tag.starts_with(TAG_PRESET_PREFIX))
+                    return tag.substr(TAG_PRESET_PREFIX.size());
+            }
+        }
+
+        const auto& config = g_pGlobalState->config;
+        if (config.defaultPreset) {
+            const char* preset = *config.defaultPreset;
+            if (preset && preset[0] != '\0')
+                return std::string(preset);
+        }
+    } catch (...) {}
+
+    return "default";
 }
 
 SDecorationPositioningInfo CGlassDecoration::getPositioningInfo() {
@@ -169,27 +198,18 @@ void CGlassDecoration::blurBackground(float radius, int iterations, GLuint calle
     glViewport(0, 0, viewportWidth, viewportHeight);
 }
 
-void CGlassDecoration::uploadThemeUniforms(bool isDark) const {
-    const auto& config   = g_pGlobalState->config;
+void CGlassDecoration::uploadThemeUniforms(const SResolveContext& ctx) const {
     const auto& uniforms = g_pGlobalState->shaderManager.glassUniforms;
-    const auto& theme    = isDark ? config.dark : config.light;
-    const auto& defaults = isDark ? DARK_THEME_DEFAULTS : LIGHT_THEME_DEFAULTS;
+    const auto& defaults = ctx.isDark ? DARK_THEME_DEFAULTS : LIGHT_THEME_DEFAULTS;
 
-    glUniform1f(uniforms.brightness,       resolveFloat(theme.brightness, config.global.brightness, defaults.brightness));
-    glUniform1f(uniforms.contrast,         resolveFloat(theme.contrast, config.global.contrast, defaults.contrast));
-    glUniform1f(uniforms.saturation,       resolveFloat(theme.saturation, config.global.saturation, defaults.saturation));
-    glUniform1f(uniforms.vibrancy,         resolveFloat(theme.vibrancy, config.global.vibrancy, defaults.vibrancy));
-    glUniform1f(uniforms.vibrancyDarkness, resolveFloat(theme.vibrancyDarkness, config.global.vibrancyDarkness, defaults.vibrancyDarkness));
+    glUniform1f(uniforms.brightness,       resolvePresetFloat(ctx, &SPresetValues::brightness, &SOverridableConfig::brightness, defaults.brightness));
+    glUniform1f(uniforms.contrast,         resolvePresetFloat(ctx, &SPresetValues::contrast, &SOverridableConfig::contrast, defaults.contrast));
+    glUniform1f(uniforms.saturation,       resolvePresetFloat(ctx, &SPresetValues::saturation, &SOverridableConfig::saturation, defaults.saturation));
+    glUniform1f(uniforms.vibrancy,         resolvePresetFloat(ctx, &SPresetValues::vibrancy, &SOverridableConfig::vibrancy, defaults.vibrancy));
+    glUniform1f(uniforms.vibrancyDarkness, resolvePresetFloat(ctx, &SPresetValues::vibrancyDarkness, &SOverridableConfig::vibrancyDarkness, defaults.vibrancyDarkness));
 
-    // adaptive_correction maps to the appropriate shader uniform per theme
-    const float adaptiveCorrection = resolveFloat(theme.adaptiveCorrection, config.global.adaptiveCorrection, defaults.adaptiveCorrection);
-    if (isDark) {
-        glUniform1f(uniforms.adaptiveDim,   adaptiveCorrection);
-        glUniform1f(uniforms.adaptiveBoost, 0.0f);
-    } else {
-        glUniform1f(uniforms.adaptiveDim,   0.0f);
-        glUniform1f(uniforms.adaptiveBoost, adaptiveCorrection);
-    }
+    glUniform1f(uniforms.adaptiveDim,   resolvePresetFloat(ctx, &SPresetValues::adaptiveDim, &SOverridableConfig::adaptiveDim, defaults.adaptiveDim));
+    glUniform1f(uniforms.adaptiveBoost, resolvePresetFloat(ctx, &SPresetValues::adaptiveBoost, &SOverridableConfig::adaptiveBoost, defaults.adaptiveBoost));
 }
 
 void CGlassDecoration::applyGlassEffect(CFramebuffer& sourceFramebuffer, CFramebuffer& targetFramebuffer,
@@ -198,8 +218,9 @@ void CGlassDecoration::applyGlassEffect(CFramebuffer& sourceFramebuffer, CFrameb
     auto& shaderManager  = g_pGlobalState->shaderManager;
     const auto& uniforms = shaderManager.glassUniforms;
 
-    const bool isDark = resolveThemeIsDark();
-    const auto& theme = isDark ? config.dark : config.light;
+    const bool isDark          = resolveThemeIsDark();
+    const std::string preset   = resolvePresetName();
+    const SResolveContext ctx  = {preset, isDark, config, g_pGlobalState->customPresets};
 
     const auto transform = Math::wlTransformToHyprutils(
         Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
@@ -223,17 +244,17 @@ void CGlassDecoration::applyGlassEffect(CFramebuffer& sourceFramebuffer, CFrameb
     shaderManager.glassShader.setUniformFloat2(SHADER_FULL_SIZE,
         static_cast<float>(fullSize.x), static_cast<float>(fullSize.y));
 
-    glUniform1f(uniforms.refractionStrength,  resolveFloat(theme.refractionStrength, config.global.refractionStrength));
-    glUniform1f(uniforms.chromaticAberration, resolveFloat(theme.chromaticAberration, config.global.chromaticAberration));
-    glUniform1f(uniforms.fresnelStrength,     resolveFloat(theme.fresnelStrength, config.global.fresnelStrength));
-    glUniform1f(uniforms.specularStrength,    resolveFloat(theme.specularStrength, config.global.specularStrength));
-    glUniform1f(uniforms.glassOpacity,        resolveFloat(theme.glassOpacity, config.global.glassOpacity) * windowAlpha);
-    glUniform1f(uniforms.edgeThickness,       resolveFloat(theme.edgeThickness, config.global.edgeThickness));
-    glUniform1f(uniforms.lensDistortion,      resolveFloat(theme.lensDistortion, config.global.lensDistortion));
+    glUniform1f(uniforms.refractionStrength,  resolvePresetFloat(ctx, &SPresetValues::refractionStrength, &SOverridableConfig::refractionStrength));
+    glUniform1f(uniforms.chromaticAberration, resolvePresetFloat(ctx, &SPresetValues::chromaticAberration, &SOverridableConfig::chromaticAberration));
+    glUniform1f(uniforms.fresnelStrength,     resolvePresetFloat(ctx, &SPresetValues::fresnelStrength, &SOverridableConfig::fresnelStrength));
+    glUniform1f(uniforms.specularStrength,    resolvePresetFloat(ctx, &SPresetValues::specularStrength, &SOverridableConfig::specularStrength));
+    glUniform1f(uniforms.glassOpacity,        resolvePresetFloat(ctx, &SPresetValues::glassOpacity, &SOverridableConfig::glassOpacity) * windowAlpha);
+    glUniform1f(uniforms.edgeThickness,       resolvePresetFloat(ctx, &SPresetValues::edgeThickness, &SOverridableConfig::edgeThickness));
+    glUniform1f(uniforms.lensDistortion,      resolvePresetFloat(ctx, &SPresetValues::lensDistortion, &SOverridableConfig::lensDistortion));
 
-    uploadThemeUniforms(isDark);
+    uploadThemeUniforms(ctx);
 
-    const int64_t tintColorValue = resolveInt(theme.tintColor, config.global.tintColor);
+    const int64_t tintColorValue = resolvePresetInt(ctx, &SPresetValues::tintColor, &SOverridableConfig::tintColor);
     glUniform3f(uniforms.tintColor,
         static_cast<float>((tintColorValue >> 24) & 0xFF) / 255.0f,
         static_cast<float>((tintColorValue >> 16) & 0xFF) / 255.0f,
@@ -295,12 +316,13 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     if (m_needsResample || !hasCache) {
         sampleBackground(*source, transformBox);
 
-        const auto& config = g_pGlobalState->config;
-        const bool isDark = resolveThemeIsDark();
-        const auto& theme = isDark ? config.dark : config.light;
+        const auto& config         = g_pGlobalState->config;
+        const bool isDark          = resolveThemeIsDark();
+        const std::string preset   = resolvePresetName();
+        const SResolveContext ctx  = {preset, isDark, config, g_pGlobalState->customPresets};
 
-        float blurRadius     = resolveFloat(theme.blurStrength, config.global.blurStrength) * 12.0f;
-        int blurIterations   = std::clamp(static_cast<int>(resolveInt(theme.blurIterations, config.global.blurIterations)), 1, 5);
+        float blurRadius     = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength) * 12.0f;
+        int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
         int viewportWidth    = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x);
         int viewportHeight   = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
         blurBackground(blurRadius, blurIterations, source->getFBID(), viewportWidth, viewportHeight);
