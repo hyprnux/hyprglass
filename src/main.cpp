@@ -7,10 +7,9 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/event/EventBus.hpp>
 
-static void onNewWindow(void* self, std::any data) {
-    const auto window = std::any_cast<PHLWINDOW>(data);
-
+static void onNewWindow(PHLWINDOW window) {
     if (std::ranges::any_of(window->m_windowDecorations,
                             [](const auto& decoration) { return decoration->getDisplayName() == "HyprGlass"; }))
         return;
@@ -21,9 +20,7 @@ static void onNewWindow(void* self, std::any data) {
     HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(decoration));
 }
 
-static void onCloseWindow(void* self, std::any data) {
-    const auto window = std::any_cast<PHLWINDOW>(data);
-
+static void onCloseWindow(PHLWINDOW window) {
     std::erase_if(g_pGlobalState->decorations, [&window](const auto& decoration) {
         auto locked = decoration.lock();
         return !locked || locked->getOwner() == window;
@@ -49,22 +46,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pGlobalState = std::make_unique<SGlobalState>();
 
-    static auto onOpen = HyprlandAPI::registerCallbackDynamic(
-        PHANDLE, "openWindow",
-        [&](void* self, SCallbackInfo& info, std::any data) { onNewWindow(self, data); });
+    static auto onOpen = Event::bus()->m_events.window.open.listen([&](PHLWINDOW w) { onNewWindow(w); });
 
-    static auto onClose = HyprlandAPI::registerCallbackDynamic(
-        PHANDLE, "closeWindow",
-        [&](void* self, SCallbackInfo& info, std::any data) { onCloseWindow(self, data); });
+    static auto onClose = Event::bus()->m_events.window.close.listen([&](PHLWINDOW w) { onCloseWindow(w); });
 
     // Clear pending presets before config re-parse, commit after
-    static auto onPreConfigReload = HyprlandAPI::registerCallbackDynamic(
-        PHANDLE, "preConfigReload",
-        [&](void* /*self*/, SCallbackInfo& /*info*/, std::any /*data*/) { clearPendingPresets(); });
+    static auto onPreConfigReload = Event::bus()->m_events.config.preReload.listen([&]() { clearPendingPresets(); });
 
-    static auto onConfigReloaded = HyprlandAPI::registerCallbackDynamic(
-        PHANDLE, "configReloaded",
-        [&](void* /*self*/, SCallbackInfo& /*info*/, std::any /*data*/) { commitPendingPresets(); validateConfig(); });
+    static auto onConfigReloaded = Event::bus()->m_events.config.reloaded.listen([&]() { commitPendingPresets(); validateConfig(); });
 
     registerConfig(PHANDLE);
     initConfigPointers(PHANDLE, g_pGlobalState->config);
@@ -79,7 +68,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     for (auto& window : g_pCompositor->m_windows) {
         if (window->isHidden() || !window->m_isMapped)
             continue;
-        onNewWindow(nullptr, std::any(window));
+        onNewWindow(window);
     }
 
     HyprlandAPI::reloadConfig();
