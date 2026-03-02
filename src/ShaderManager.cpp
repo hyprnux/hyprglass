@@ -17,27 +17,18 @@ std::string CShaderManager::loadShaderSource(const char* fileName) {
 }
 
 bool CShaderManager::compileGlassShader() {
-    GLuint program = g_pHyprOpenGL->createProgram(
-        g_pHyprOpenGL->m_shaders->TEXVERTSRC,
-        loadShaderSource("liquidglass.frag"),
-        true
-    );
-
-    if (program == 0) {
+    if (!glassShader->createProgram(
+            g_pHyprOpenGL->m_shaders->TEXVERTSRC,
+            loadShaderSource("liquidglass.frag"),
+            true
+        )) {
         HyprlandAPI::addNotification(PHANDLE,
             std::format("[{}] Failed to compile glass shader", PLUGIN_NAME),
             CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
         return false;
     }
 
-    glassShader.program = program;
-
-    glassShader.uniformLocations[SHADER_PROJ]       = glGetUniformLocation(program, "proj");
-    glassShader.uniformLocations[SHADER_POS_ATTRIB] = glGetAttribLocation(program, "pos");
-    glassShader.uniformLocations[SHADER_TEX_ATTRIB] = glGetAttribLocation(program, "texcoord");
-    glassShader.uniformLocations[SHADER_TEX]        = glGetUniformLocation(program, "tex");
-    glassShader.uniformLocations[SHADER_FULL_SIZE]  = glGetUniformLocation(program, "fullSize");
-    glassShader.uniformLocations[SHADER_RADIUS]     = glGetUniformLocation(program, "radius");
+    const auto program = glassShader->program();
 
     glassUniforms.refractionStrength  = glGetUniformLocation(program, "refractionStrength");
     glassUniforms.chromaticAberration = glGetUniformLocation(program, "chromaticAberration");
@@ -58,35 +49,26 @@ bool CShaderManager::compileGlassShader() {
     glassUniforms.adaptiveBoost       = glGetUniformLocation(program, "adaptiveBoost");
     glassUniforms.roundingPower       = glGetUniformLocation(program, "roundingPower");
 
-    glassShader.createVao();
     return true;
 }
 
 bool CShaderManager::compileBlurShader() {
-    GLuint program = g_pHyprOpenGL->createProgram(
-        g_pHyprOpenGL->m_shaders->TEXVERTSRC,
-        loadShaderSource("gaussianblur.frag"),
-        true
-    );
-
-    if (program == 0) {
+    if (!blurShader->createProgram(
+            g_pHyprOpenGL->m_shaders->TEXVERTSRC,
+            loadShaderSource("gaussianblur.frag"),
+            true
+        )) {
         HyprlandAPI::addNotification(PHANDLE,
             std::format("[{}] Failed to compile blur shader", PLUGIN_NAME),
             CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
         return false;
     }
 
-    blurShader.program = program;
-
-    blurShader.uniformLocations[SHADER_PROJ]       = glGetUniformLocation(program, "proj");
-    blurShader.uniformLocations[SHADER_POS_ATTRIB] = glGetAttribLocation(program, "pos");
-    blurShader.uniformLocations[SHADER_TEX_ATTRIB] = glGetAttribLocation(program, "texcoord");
-    blurShader.uniformLocations[SHADER_TEX]        = glGetUniformLocation(program, "tex");
+    const auto program = blurShader->program();
 
     blurUniforms.direction = glGetUniformLocation(program, "direction");
     blurUniforms.radius    = glGetUniformLocation(program, "blurRadius");
 
-    blurShader.createVao();
     return true;
 }
 
@@ -104,7 +86,7 @@ void CShaderManager::initializeIfNeeded() {
 }
 
 void CShaderManager::destroy() noexcept {
-    glassShader.destroy();
-    blurShader.destroy();
+    glassShader->destroy();
+    blurShader->destroy();
     m_initialized = false;
 }

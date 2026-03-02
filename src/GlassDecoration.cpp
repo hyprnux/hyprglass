@@ -12,6 +12,8 @@
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprutils/math/Misc.hpp>
+#include <hyprutils/memory/SharedPtr.hpp>
+#include <memory>
 
 CGlassDecoration::CGlassDecoration(PHLWINDOW window)
     : IHyprWindowDecoration(window), m_window(window) {
@@ -166,14 +168,13 @@ void CGlassDecoration::blurBackground(float radius, int iterations, GLuint calle
        -1.0f,-1.0f, 1.0f,
     };
 
-    auto& blurShader = shaderManager.blurShader;
     const auto& blurUniforms = shaderManager.blurUniforms;
 
-    g_pHyprOpenGL->useProgram(blurShader.program);
-    blurShader.setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, FULLSCREEN_PROJECTION);
-    blurShader.setUniformInt(SHADER_TEX, 0);
+    auto shader = g_pHyprOpenGL->useShader(shaderManager.blurShader);
+    shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, FULLSCREEN_PROJECTION);
+    shader->setUniformInt(SHADER_TEX, 0);
     glUniform1f(blurUniforms.radius, radius);
-    glBindVertexArray(blurShader.uniformLocations[SHADER_SHADER_VAO]);
+    glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
     glViewport(0, 0, width, height);
     glActiveTexture(GL_TEXTURE0);
 
@@ -235,13 +236,13 @@ void CGlassDecoration::applyGlassEffect(CFramebuffer& sourceFramebuffer, CFrameb
     glActiveTexture(GL_TEXTURE0);
     texture->bind();
 
-    g_pHyprOpenGL->useProgram(shaderManager.glassShader.program);
+    auto shader = g_pHyprOpenGL->useShader(shaderManager.glassShader);
 
-    shaderManager.glassShader.setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, glMatrix.getMatrix());
-    shaderManager.glassShader.setUniformInt(SHADER_TEX, 0);
+    shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, glMatrix.getMatrix());
+    shader->setUniformInt(SHADER_TEX, 0);
 
     const auto fullSize = Vector2D(transformedBox.width, transformedBox.height);
-    shaderManager.glassShader.setUniformFloat2(SHADER_FULL_SIZE,
+    shader->setUniformFloat2(SHADER_FULL_SIZE,
         static_cast<float>(fullSize.x), static_cast<float>(fullSize.y));
 
     glUniform1f(uniforms.refractionStrength,  resolvePresetFloat(ctx, &SPresetValues::refractionStrength, &SOverridableConfig::refractionStrength));
@@ -270,10 +271,10 @@ void CGlassDecoration::applyGlassEffect(CFramebuffer& sourceFramebuffer, CFrameb
     float monitorScale = g_pHyprOpenGL->m_renderData.pMonitor->m_scale;
     float cornerRadius  = window ? window->rounding() * monitorScale : 0.0f;
     float roundingPower = window ? window->roundingPower() : 2.0f;
-    shaderManager.glassShader.setUniformFloat(SHADER_RADIUS, cornerRadius);
+    shader->setUniformFloat(SHADER_RADIUS, cornerRadius);
     glUniform1f(uniforms.roundingPower, roundingPower);
 
-    glBindVertexArray(shaderManager.glassShader.uniformLocations[SHADER_SHADER_VAO]);
+    glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
     g_pHyprOpenGL->scissor(rawBox);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     g_pHyprOpenGL->scissor(nullptr);

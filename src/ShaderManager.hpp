@@ -37,10 +37,10 @@ class CShaderManager {
     void initializeIfNeeded();
     void destroy() noexcept;
 
-    SShader        glassShader;
+    SP<CShader>    glassShader = makeShared<CShader>();
     SGlassUniforms glassUniforms;
 
-    SShader        blurShader;
+    SP<CShader>    blurShader = makeShared<CShader>();
     SBlurUniforms  blurUniforms;
 
   private:
