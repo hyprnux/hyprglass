@@ -1,25 +1,31 @@
 # HyprGlass Plugin
 
 CXX ?= g++
-CXXFLAGS = -shared -fPIC -g -O2 -std=c++23
+CXXFLAGS = -fPIC -g -O2 -std=c++23
+LDFLAGS = -shared
 INCLUDES = $(shell pkg-config --cflags hyprland pixman-1 libdrm)
 LIBS = $(shell pkg-config --libs hyprland)
 
-ifeq ($(CXX),g++)
+ifeq ($(basename $(CXX)),g++)
 	CXXFLAGS += --no-gnu-unique
 endif
 
 TARGET = hyprglass.so
 SOURCES = src/main.cpp src/GlassDecoration.cpp src/GlassPassElement.cpp src/PluginConfig.cpp src/ShaderManager.cpp
+OBJ = $(SOURCES:.cpp=.o)
 
 all: $(TARGET)
 
-$(TARGET): $(SOURCES)
-	@echo "Building $(TARGET)..."
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOURCES) -o $@ $(LIBS)
+%.o : %.cpp
+	@echo "[$(CXX)] $<"
+	@$(CXX) -c $(CXXFLAGS) $(INCLUDES) $< -o $@
+
+$(TARGET): $(OBJ)
+	@echo "Linking $(TARGET)..."
+	@$(CXX) $(LDFLAGS) $(OBJ) -o $@ $(LIBS)
 	@echo "Done!"
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(OBJ) $(TARGET)
 
 .PHONY: all clean
