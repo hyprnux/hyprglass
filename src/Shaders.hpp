@@ -52,6 +52,11 @@ uniform float adaptiveDim;
 uniform float adaptiveBoost;
 uniform float roundingPower;
 
+uniform sampler2D maskTex;
+uniform int useMask;
+uniform vec2 maskUVOffset;
+uniform vec2 maskUVScale;
+
 in vec2 v_texcoord;
 layout(location = 0) out vec4 fragColor;
 
@@ -108,6 +113,18 @@ vec2 refractionDir(vec2 uv) {
 
 void main() {
     vec2 uv = v_texcoord;
+
+    // Layers only: sample the temp FBO to get the rendered surface pixel.
+    // Discard fully transparent fragments so glass only covers visible content.
+    // For windows, hasMask is false and this block is skipped entirely.
+    vec4 surfacePixel = vec4(0.0);
+    bool hasMask = (useMask == 1);
+    if (hasMask) {
+        vec2 maskUV = uv * maskUVScale + maskUVOffset;
+        surfacePixel = texture(maskTex, clamp(maskUV, 0.001, 0.999));
+        if (surfacePixel.a < 0.001) discard;
+    }
+
     float cornerSdf = getCornerSDF(uv);
 
     if (cornerSdf > 0.0) {
@@ -240,7 +257,25 @@ void main() {
         color *= 1.0 - shadow;
     }
 
-    fragColor = vec4(color, glassOpacity * cornerAlpha);
+    float glassA = glassOpacity * cornerAlpha;
+
+    if (hasMask) {
+        // Layers only: composite the rendered surface over the glass effect
+        // in a single pass. surfacePixel is premultiplied alpha from Hyprland's
+        // surface rendering, so we unpremultiply before the 'over' blend.
+        float surfA = surfacePixel.a;
+        vec3 surfRGB = surfA > 0.001 ? surfacePixel.rgb / surfA : vec3(0.0);
+
+        float compA = surfA + glassA * (1.0 - surfA);
+        vec3 compRGB = compA > 0.001
+            ? (surfRGB * surfA + color * glassA * (1.0 - surfA)) / compA
+            : vec3(0.0);
+
+        fragColor = vec4(compRGB, compA);
+    } else {
+        // Windows: output the glass effect alone, surface is rendered separately by Hyprland.
+        fragColor = vec4(color, glassA);
+    }
 }
 )GLSL"},
 

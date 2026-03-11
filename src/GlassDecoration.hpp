@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GlassRenderer.hpp"
 #include "PluginConfig.hpp"
 
 #include <hyprland/src/desktop/view/Window.hpp>
@@ -26,8 +27,6 @@ class CGlassDecoration : public IHyprWindowDecoration {
 
     WP<CGlassDecoration> m_self;
 
-    static constexpr int SAMPLE_PADDING_PX = 60;
-
   private:
     PHLWINDOWREF m_window;
     CFramebuffer m_sampleFramebuffer;
@@ -39,13 +38,6 @@ class CGlassDecoration : public IHyprWindowDecoration {
 
     [[nodiscard]] bool        resolveThemeIsDark() const;
     [[nodiscard]] std::string resolvePresetName() const;
-
-    void sampleBackground(CFramebuffer& sourceFramebuffer, CBox box);
-    void blurBackground(float radius, int iterations, GLuint callerFramebufferID, int viewportWidth, int viewportHeight);
-
-    void applyGlassEffect(CFramebuffer& sourceFramebuffer, CFramebuffer& targetFramebuffer,
-                          CBox& rawBox, CBox& transformedBox, float windowAlpha);
-    void uploadThemeUniforms(const SResolveContext& resolveContext) const;
 
     friend class CGlassPassElement;
 };

@@ -19,6 +19,12 @@ struct SGlassUniforms {
     GLint vibrancyDarkness = -1;
     GLint adaptiveDim = -1;
     GLint adaptiveBoost = -1;
+    
+    // Layers only: temp FBO surface mask for content-aware glass
+    GLint maskTex = -1;
+    GLint useMask = -1;
+    GLint maskUVOffset = -1;
+    GLint maskUVScale = -1;
 };
 
 struct SBlurUniforms {

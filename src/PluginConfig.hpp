@@ -47,6 +47,13 @@ inline constexpr auto VIBRANCY_DARKNESS    = "plugin:hyprglass:vibrancy_darkness
 inline constexpr auto ADAPTIVE_DIM          = "plugin:hyprglass:adaptive_dim";
 inline constexpr auto ADAPTIVE_BOOST        = "plugin:hyprglass:adaptive_boost";
 
+// Layer surface support
+inline constexpr auto LAYERS_ENABLED            = "plugin:hyprglass:layers:enabled";
+inline constexpr auto LAYERS_NAMESPACES         = "plugin:hyprglass:layers:namespaces";
+inline constexpr auto LAYERS_EXCLUDE_NAMESPACES = "plugin:hyprglass:layers:exclude_namespaces";
+inline constexpr auto LAYERS_PRESET             = "plugin:hyprglass:layers:preset";
+inline constexpr auto LAYERS_NAMESPACE_PRESETS  = "plugin:hyprglass:layers:namespace_presets";
+
 // Overridable — dark theme overrides
 inline constexpr auto DARK_BLUR_STRENGTH        = "plugin:hyprglass:dark:blur_strength";
 inline constexpr auto DARK_BLUR_ITERATIONS      = "plugin:hyprglass:dark:blur_iterations";
@@ -141,6 +148,12 @@ struct SPluginConfig {
     Hyprlang::INT* const*   enabled       = nullptr;
     Hyprlang::STRING const*  defaultTheme  = nullptr;
     Hyprlang::STRING const*  defaultPreset = nullptr;
+
+    Hyprlang::INT* const*    layersEnabled           = nullptr;
+    Hyprlang::STRING const*  layersNamespaces        = nullptr;
+    Hyprlang::STRING const*  layersExcludeNamespaces = nullptr;
+    Hyprlang::STRING const*  layersPreset            = nullptr;
+    Hyprlang::STRING const*  layersNamespacePresets  = nullptr;
 
     SOverridableConfig global;
     SOverridableConfig dark;

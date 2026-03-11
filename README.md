@@ -2,7 +2,7 @@
 
 Liquid Glass for [Hyprland](https://hyprland.org/).
 
-Frosted blur, edge refraction, chromatic aberration, specular highlights — fully customizable, per-theme, on every window.
+Frosted blur, edge refraction, chromatic aberration, specular highlights — fully customizable, per-theme, on every window and layer surface.
 
 | Dark | Light |
 |:---:|:---:|
@@ -81,6 +81,43 @@ plugin:hyprglass {
 | `enabled` | int | `1` | Enable/disable the effect (0 or 1) |
 | `default_theme` | string | `dark` | Default theme: `dark` or `light` |
 | `default_preset` | string | `default` | Default preset name |
+
+### Layer surfaces (BETA)
+
+The glass effect can also be applied to layer surfaces (bars, docks, widgets). 
+Disabled by default.
+
+**Caveat:** Fully transparent layers will be ignored, that's wanted, just use some very small opacity on the surface to trigger the glass effect. _It's because layers can come in a vast variety of forms, and we have no way to differenciate real transparent surface that needs to be blurred from transparent surface or claimed space that needs to be ignored._
+
+**Known issue:** Layers shadows will not render correctly at the moment, they will be considered as part of the glass surface.
+
+**Known issue 2:** Intensive GPU usage during animation of glassed layers surface, make it look laggy.
+
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `layers:enabled` | int | `0` | Enable glass on layer surfaces (0 or 1) |
+| `layers:namespaces` | string | `""` | Comma-separated namespace whitelist. Empty = all layers |
+| `layers:exclude_namespaces` | string | `""` | Comma-separated namespace blacklist. Takes priority over whitelist |
+| `layers:preset` | string | `""` | Preset override for all layers. Empty = use `default_preset` |
+| `layers:namespace_presets` | string | `""` | Per-namespace preset overrides (`ns:preset` pairs, comma-separated). Takes priority over `layers:preset` |
+
+```ini
+plugin:hyprglass {
+    layers {
+        enabled = 1
+        namespaces = bar, dock, notifications
+        exclude_namespaces = some-debug-panel
+        preset = subtle
+        namespace_presets = waybar:bar-glass, notifications:notif-glass
+    }
+}
+```
+
+If `namespaces` is empty, all layers are included except those in `exclude_namespaces`.  `
+If `namespaces` is set, only listed namespaces are included — `exclude_namespaces` still takes priority.
+
+> **Note:** Layer support hooks into Hyprland's internal render pipeline. This is version-sensitive and may break across Hyprland updates.
 
 ### Overridable settings
 
@@ -207,7 +244,7 @@ The window is modeled as a **thick convex glass slab**. The rendering pipeline p
 9. **Fresnel edge glow** — Schlick-based fresnel approximation at the glass edge.
 10. **Specular highlight + inner shadow** — Top-biased highlight and bottom-rim shadow for depth.
 
-The plugin integrates with Hyprland's render pass system as a `DECORATION_LAYER_BOTTOM` decoration, drawing before the window surface so the glass shows through transparent windows.
+For windows, the plugin integrates with Hyprland's render pass system as a `DECORATION_LAYER_BOTTOM` decoration, drawing before the window surface so the glass shows through transparent windows. For layer surfaces, the plugin hooks `CHyprRenderer::renderLayer` and uses a temp FBO redirect: the background is sampled and blurred, then Hyprland's surface rendering is redirected into a transparent temporary framebuffer to capture the surface's exact alpha. A post-surface pass then composites the glass effect (masked to visible content only) and the surface content back onto the main framebuffer in a single shader pass.
 
 ## Unloading
 
@@ -218,6 +255,7 @@ hyprctl plugin unload /path/to/hyprglass.so
 ## Notes
 
 - The plugin requires Hyprland shadows to be present in the render pipeline. It **auto-enables them** at load time if disabled — shadow visual values (range, color…) can be zero, only the decoration's presence matters.
+- Layer surface glass uses a function hook on `renderLayer`, which is a private Hyprland internal. The hook may break on Hyprland updates that change this function's signature.
 
 ## License
 

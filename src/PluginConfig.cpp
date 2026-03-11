@@ -14,6 +14,13 @@ void registerConfig(HANDLE handle) {
     HyprlandAPI::addConfigValue(handle, ConfigKeys::DEFAULT_THEME, Hyprlang::STRING{"dark"});
     HyprlandAPI::addConfigValue(handle, ConfigKeys::DEFAULT_PRESET, Hyprlang::STRING{"default"});
 
+    // Layer surface support
+    HyprlandAPI::addConfigValue(handle, ConfigKeys::LAYERS_ENABLED, Hyprlang::INT{0});
+    HyprlandAPI::addConfigValue(handle, ConfigKeys::LAYERS_NAMESPACES, Hyprlang::STRING{""});
+    HyprlandAPI::addConfigValue(handle, ConfigKeys::LAYERS_EXCLUDE_NAMESPACES, Hyprlang::STRING{""});
+    HyprlandAPI::addConfigValue(handle, ConfigKeys::LAYERS_PRESET, Hyprlang::STRING{""});
+    HyprlandAPI::addConfigValue(handle, ConfigKeys::LAYERS_NAMESPACE_PRESETS, Hyprlang::STRING{""});
+
     // Global level — real defaults for effect settings,
     // sentinel for theme-sensitive settings (fallback to hardcoded theme defaults)
     HyprlandAPI::addConfigValue(handle, ConfigKeys::BLUR_STRENGTH, Hyprlang::FLOAT{GlobalDefaults::BLUR_STRENGTH});
@@ -117,6 +124,12 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.enabled       = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::ENABLED);
     config.defaultTheme  = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(handle, ConfigKeys::DEFAULT_THEME)->getDataStaticPtr();
     config.defaultPreset = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(handle, ConfigKeys::DEFAULT_PRESET)->getDataStaticPtr();
+
+    config.layersEnabled           = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_ENABLED);
+    config.layersNamespaces        = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(handle, ConfigKeys::LAYERS_NAMESPACES)->getDataStaticPtr();
+    config.layersExcludeNamespaces = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(handle, ConfigKeys::LAYERS_EXCLUDE_NAMESPACES)->getDataStaticPtr();
+    config.layersPreset            = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(handle, ConfigKeys::LAYERS_PRESET)->getDataStaticPtr();
+    config.layersNamespacePresets  = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(handle, ConfigKeys::LAYERS_NAMESPACE_PRESETS)->getDataStaticPtr();
 
     initOverridablePointers(handle, config.global,
         ConfigKeys::BLUR_STRENGTH, ConfigKeys::BLUR_ITERATIONS,

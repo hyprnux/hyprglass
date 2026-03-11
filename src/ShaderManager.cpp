@@ -44,6 +44,10 @@ bool CShaderManager::compileGlassShader() {
     glassUniforms.vibrancyDarkness    = glGetUniformLocation(program, "vibrancyDarkness");
     glassUniforms.adaptiveDim         = glGetUniformLocation(program, "adaptiveDim");
     glassUniforms.adaptiveBoost       = glGetUniformLocation(program, "adaptiveBoost");
+    glassUniforms.maskTex             = glGetUniformLocation(program, "maskTex");
+    glassUniforms.useMask             = glGetUniformLocation(program, "useMask");
+    glassUniforms.maskUVOffset        = glGetUniformLocation(program, "maskUVOffset");
+    glassUniforms.maskUVScale         = glGetUniformLocation(program, "maskUVScale");
 
     return true;
 }
