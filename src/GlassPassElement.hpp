@@ -16,7 +16,6 @@ class CGlassPassElement : public IPassElement {
     explicit CGlassPassElement(const SGlassPassData& data);
     ~CGlassPassElement() override = default;
 
-    void                draw(const CRegion& damage) override;
     [[nodiscard]] bool                needsLiveBlur() override;
     [[nodiscard]] bool                needsPrecomputeBlur() override;
     [[nodiscard]] std::optional<CBox> boundingBox() override;
@@ -24,6 +23,10 @@ class CGlassPassElement : public IPassElement {
 
     [[nodiscard]] const char* passName() override { return "CGlassPassElement"; }
 
+    virtual ePassElementType type() override {
+        return EK_FRAMEBUFFER;
+    }
+    
   private:
     SGlassPassData m_data;
 };

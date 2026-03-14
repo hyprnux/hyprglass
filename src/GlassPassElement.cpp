@@ -4,16 +4,10 @@
 #include "WindowGeometry.hpp"
 
 #include <hyprland/src/render/OpenGL.hpp>
+#include <hyprland/src/render/Renderer.hpp>
 
 CGlassPassElement::CGlassPassElement(const SGlassPassData& data)
     : m_data(data) {}
-
-void CGlassPassElement::draw(const CRegion& damage) {
-    if (!m_data.decoration)
-        return;
-
-    m_data.decoration->renderPass(g_pHyprOpenGL->m_renderData.pMonitor.lock(), m_data.alpha);
-}
 
 std::optional<CBox> CGlassPassElement::boundingBox() {
     if (!m_data.decoration)
@@ -23,7 +17,7 @@ std::optional<CBox> CGlassPassElement::boundingBox() {
     if (!window)
         return std::nullopt;
 
-    const auto monitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
+    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
     auto box = WindowGeometry::computeWindowBox(window, monitor);
     if (!box)
         return std::nullopt;

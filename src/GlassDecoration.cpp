@@ -99,13 +99,13 @@ PHLWINDOW CGlassDecoration::getOwner() {
     return m_window.lock();
 }
 
-void CGlassDecoration::sampleBackground(CFramebuffer& sourceFramebuffer, CBox box) {
+void CGlassDecoration::sampleBackground(SP<IFramebuffer> sourceFramebuffer, CBox box) {
     const int pad = SAMPLE_PADDING_PX;
     int paddedWidth  = static_cast<int>(box.width) + 2 * pad;
     int paddedHeight = static_cast<int>(box.height) + 2 * pad;
 
-    if (m_sampleFramebuffer.m_size.x != paddedWidth || m_sampleFramebuffer.m_size.y != paddedHeight)
-        m_sampleFramebuffer.alloc(paddedWidth, paddedHeight, sourceFramebuffer.m_drmFormat);
+    if (m_sampleFramebuffer->m_size.x != paddedWidth || m_sampleFramebuffer->m_size.y != paddedHeight)
+        m_sampleFramebuffer->alloc(paddedWidth, paddedHeight, sourceFramebuffer->m_drmFormat);
 
     int srcX0 = static_cast<int>(box.x) - pad;
     int srcX1 = static_cast<int>(box.x + box.width) + pad;
@@ -113,8 +113,8 @@ void CGlassDecoration::sampleBackground(CFramebuffer& sourceFramebuffer, CBox bo
     int srcY1 = static_cast<int>(box.y + box.height) + pad;
 
     // Clamp source coordinates to framebuffer bounds to avoid reading black/undefined pixels
-    int framebufferWidth  = static_cast<int>(sourceFramebuffer.m_size.x);
-    int framebufferHeight = static_cast<int>(sourceFramebuffer.m_size.y);
+    int framebufferWidth  = static_cast<int>(sourceFramebuffer->m_size.x);
+    int framebufferHeight = static_cast<int>(sourceFramebuffer->m_size.y);
 
     int dstX0 = 0, dstY0 = 0, dstX1 = paddedWidth, dstY1 = paddedHeight;
 
@@ -133,8 +133,8 @@ void CGlassDecoration::sampleBackground(CFramebuffer& sourceFramebuffer, CBox bo
     // DRAW framebuffer, causing partial writes and stale noise artifacts.
     g_pHyprOpenGL->setCapStatus(GL_SCISSOR_TEST, false);
 
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFramebuffer.getFBID());
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_sampleFramebuffer.getFBID());
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, GLFB(sourceFramebuffer)->getFBID());
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, GLFB(m_sampleFramebuffer)->getFBID());
     glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1,
                       dstX0, dstY0, dstX1, dstY1,
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
@@ -145,12 +145,12 @@ void CGlassDecoration::blurBackground(float radius, int iterations, GLuint calle
     if (radius <= 0.0f || iterations <= 0 || !shaderManager.isInitialized())
         return;
 
-    int width  = static_cast<int>(m_sampleFramebuffer.m_size.x);
-    int height = static_cast<int>(m_sampleFramebuffer.m_size.y);
+    int width  = static_cast<int>(m_sampleFramebuffer->m_size.x);
+    int height = static_cast<int>(m_sampleFramebuffer->m_size.y);
 
     auto& blurTempFramebuffer = g_pGlobalState->blurTempFramebuffer;
-    if (blurTempFramebuffer.m_size.x != width || blurTempFramebuffer.m_size.y != height)
-        blurTempFramebuffer.alloc(width, height, m_sampleFramebuffer.m_drmFormat);
+    if (blurTempFramebuffer->m_size.x != width || blurTempFramebuffer->m_size.y != height)
+        blurTempFramebuffer->alloc(width, height, m_sampleFramebuffer->m_drmFormat);
 
     // Fullscreen quad projection: maps VAO positions [0,1] to clip space [-1,1]
     static constexpr std::array<float, 9> FULLSCREEN_PROJECTION = {
@@ -172,14 +172,14 @@ void CGlassDecoration::blurBackground(float radius, int iterations, GLuint calle
     // Ping-pong at full resolution: m_sampleFramebuffer ↔ blurTempFramebuffer
     for (int iteration = 0; iteration < iterations; iteration++) {
         // Horizontal pass: m_sampleFramebuffer → blurTempFramebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, blurTempFramebuffer.getFBID());
-        m_sampleFramebuffer.getTexture()->bind();
+        glBindFramebuffer(GL_FRAMEBUFFER, GLFB(blurTempFramebuffer)->getFBID());
+        m_sampleFramebuffer->getTexture()->bind();
         glUniform2f(blurUniforms.direction, 1.0f / width, 0.0f);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         // Vertical pass: blurTempFramebuffer → m_sampleFramebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, m_sampleFramebuffer.getFBID());
-        blurTempFramebuffer.getTexture()->bind();
+        glBindFramebuffer(GL_FRAMEBUFFER, GLFB(m_sampleFramebuffer)->getFBID());
+        blurTempFramebuffer->getTexture()->bind();
         glUniform2f(blurUniforms.direction, 0.0f, 1.0f / height);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
@@ -205,7 +205,7 @@ void CGlassDecoration::uploadThemeUniforms(const SResolveContext& ctx) const {
     glUniform1f(uniforms.adaptiveBoost, resolvePresetFloat(ctx, &SPresetValues::adaptiveBoost, &SOverridableConfig::adaptiveBoost, defaults.adaptiveBoost));
 }
 
-void CGlassDecoration::applyGlassEffect(CFramebuffer& sourceFramebuffer, CFramebuffer& targetFramebuffer,
+void CGlassDecoration::applyGlassEffect(SP<IFramebuffer> sourceFramebuffer, SP<IFramebuffer> targetFramebuffer,
                                          CBox& rawBox, CBox& transformedBox, float windowAlpha) {
     const auto& config   = g_pGlobalState->config;
     auto& shaderManager  = g_pGlobalState->shaderManager;
@@ -216,15 +216,14 @@ void CGlassDecoration::applyGlassEffect(CFramebuffer& sourceFramebuffer, CFrameb
     const SResolveContext ctx  = {preset, isDark, config, g_pGlobalState->customPresets};
 
     const auto transform = Math::wlTransformToHyprutils(
-        Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
+        Math::invertTransform(g_pHyprRenderer->m_renderData.pMonitor->m_transform));
 
-    Mat3x3 matrix   = g_pHyprOpenGL->m_renderData.monitorProjection.projectBox(rawBox, transform, rawBox.rot);
-    Mat3x3 glMatrix = g_pHyprOpenGL->m_renderData.projection.copy().multiply(matrix);
-    auto texture    = sourceFramebuffer.getTexture();
+    Mat3x3 glMatrix = g_pHyprRenderer->projectBoxToTarget(rawBox, transform);
+    auto texture    = sourceFramebuffer->getTexture();
 
     glMatrix.transpose();
 
-    glBindFramebuffer(GL_FRAMEBUFFER, targetFramebuffer.getFBID());
+    glBindFramebuffer(GL_FRAMEBUFFER, GLFB(targetFramebuffer)->getFBID());
     glActiveTexture(GL_TEXTURE0);
     texture->bind();
 
@@ -260,7 +259,7 @@ void CGlassDecoration::applyGlassEffect(CFramebuffer& sourceFramebuffer, CFrameb
         static_cast<float>(m_samplePaddingRatio.y));
 
     const auto window = m_window.lock();
-    float monitorScale = g_pHyprOpenGL->m_renderData.pMonitor->m_scale;
+    float monitorScale = g_pHyprRenderer->m_renderData.pMonitor->m_scale;
     float cornerRadius  = window ? window->rounding() * monitorScale : 0.0f;
     float roundingPower = window ? window->roundingPower() : 2.0f;
     shader->setUniformFloat(SHADER_RADIUS, cornerRadius);
@@ -288,7 +287,7 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
         ? workspace->m_renderOffset->value()
         : Vector2D();
 
-    const auto source = g_pHyprOpenGL->m_renderData.currentFB;
+    const auto source = g_pHyprRenderer->m_renderData.currentFB;
 
     CBox windowBox = window->getWindowMainSurfaceBox()
                          .translate(workspaceOffset)
@@ -298,12 +297,12 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     CBox transformBox = windowBox;
 
     const auto transform = Math::wlTransformToHyprutils(
-        Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
+        Math::invertTransform(g_pHyprRenderer->m_renderData.pMonitor->m_transform));
     transformBox.transform(transform,
-        g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x,
-        g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
+        g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.x,
+        g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.y);
 
-    sampleBackground(*source, transformBox);
+    sampleBackground(source, transformBox);
 
     {
         const auto& config         = g_pGlobalState->config;
@@ -313,12 +312,12 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
 
         float blurRadius     = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength) * 12.0f;
         int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
-        int viewportWidth    = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x);
-        int viewportHeight   = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
-        blurBackground(blurRadius, blurIterations, source->getFBID(), viewportWidth, viewportHeight);
+        int viewportWidth    = static_cast<int>(g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.x);
+        int viewportHeight   = static_cast<int>(g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.y);
+        blurBackground(blurRadius, blurIterations, GLFB(source)->getFBID(), viewportWidth, viewportHeight);
     }
 
-    applyGlassEffect(m_sampleFramebuffer, *source, windowBox, transformBox, alpha);
+    applyGlassEffect(m_sampleFramebuffer, source, windowBox, transformBox, alpha);
 }
 
 eDecorationType CGlassDecoration::getDecorationType() {

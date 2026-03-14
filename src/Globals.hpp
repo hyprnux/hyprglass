@@ -20,7 +20,7 @@ struct SGlobalState {
     std::unordered_map<std::string, SCustomPreset> customPresets;
 
     // Shared blur temp framebuffer (reused across all decorations since they render sequentially)
-    CFramebuffer blurTempFramebuffer;
+    SP<IFramebuffer> blurTempFramebuffer;
 };
 
 inline HANDLE                        PHANDLE = nullptr;
