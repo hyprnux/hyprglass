@@ -114,9 +114,9 @@ static bool shouldGlassLayer(PHLLS layerSurface) {
     return include.contains(ns);
 }
 
-using renderLayerFn = void (*)(IHyprRenderer*, PHLLS, PHLMONITOR, const Time::steady_tp&, bool, bool);
+using renderLayerFn = void (*)(Render::IHyprRenderer*, PHLLS, PHLMONITOR, const Time::steady_tp&, bool, bool);
 
-static void hkRenderLayer(IHyprRenderer* thisptr, PHLLS layerSurface, PHLMONITOR monitor,
+static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PHLMONITOR monitor,
                            const Time::steady_tp& now, bool popups, bool lockscreen) {
     const auto& config = g_pGlobalState->config;
 
@@ -233,7 +233,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // Hook renderLayer for layer surface glass support
     auto renderLayerMatches = HyprlandAPI::findFunctionsByName(PHANDLE, "renderLayer");
     for (const auto& match : renderLayerMatches) {
-        // Match the overload: IHyprRenderer::renderLayer(PHLLS, PHLMONITOR, steady_tp, bool, bool)
+        // Match the overload: Render::IHyprRenderer::renderLayer(PHLLS, PHLMONITOR, steady_tp, bool, bool)
         if (match.demangled.contains("renderLayer") && match.demangled.contains("LayerSurface")) {
             g_pGlobalState->renderLayerHook = HyprlandAPI::createFunctionHook(PHANDLE, match.address, (void*)hkRenderLayer);
             if (g_pGlobalState->renderLayerHook)
