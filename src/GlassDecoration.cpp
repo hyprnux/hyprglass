@@ -159,19 +159,19 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     float blurStrength   = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
     int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-    GlassRenderer::sampleBackground(m_sampleFramebuffer, *source, transformBox, m_samplePaddingRatio, downscale);
+    GlassRenderer::sampleBackground(m_sampleFramebuffer, source, transformBox, m_samplePaddingRatio, downscale);
 
     float blurRadius     = blurStrength * 12.0f / downscale;
     int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
     int viewportWidth    = static_cast<int>(g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.x);
     int viewportHeight   = static_cast<int>(g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.y);
-    GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source->getFBID(), viewportWidth, viewportHeight);
+    GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source, viewportWidth, viewportHeight);
 
     float monitorScale  = monitor->m_scale;
     float cornerRadius  = window->rounding() * monitorScale;
     float roundingPower = window->roundingPower();
 
-    GlassRenderer::applyGlassEffect(m_sampleFramebuffer, *source,
+    GlassRenderer::applyGlassEffect(m_sampleFramebuffer, source,
                                      windowBox, transformBox, alpha,
                                      cornerRadius, roundingPower, m_samplePaddingRatio, ctx);
 }
