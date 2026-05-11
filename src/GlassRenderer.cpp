@@ -34,8 +34,8 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
     int sampleWidth  = std::max(1, fullWidth / downscale);
     int sampleHeight = std::max(1, fullHeight / downscale);
 
-    if (sampleFramebuffer.m_size.x != sampleWidth || sampleFramebuffer.m_size.y != sampleHeight)
-        sampleFramebuffer.alloc(sampleWidth, sampleHeight, sourceFramebuffer.m_drmFormat);
+    if (sampleFramebuffer->m_size.x != sampleWidth || sampleFramebuffer->m_size.y != sampleHeight)
+        sampleFramebuffer->alloc(sampleWidth, sampleHeight, sourceFramebuffer->m_drmFormat);
 
     int srcX0 = static_cast<int>(box.x) - pad;
     int srcX1 = static_cast<int>(box.x + box.width) + pad;
@@ -43,8 +43,8 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
     int srcY1 = static_cast<int>(box.y + box.height) + pad;
 
     // Clamp source coordinates to framebuffer bounds to avoid reading black/undefined pixels
-    int framebufferWidth  = static_cast<int>(sourceFramebuffer.m_size.x);
-    int framebufferHeight = static_cast<int>(sourceFramebuffer.m_size.y);
+    int framebufferWidth  = static_cast<int>(sourceFramebuffer->m_size.x);
+    int framebufferHeight = static_cast<int>(sourceFramebuffer->m_size.y);
 
     // Destination coords in downscaled FBO space
     int dstX0 = 0, dstY0 = 0, dstX1 = sampleWidth, dstY1 = sampleHeight;
@@ -67,33 +67,36 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
     // The render pass scissors each element to its damage region.
     // That scissor state leaks here and clips glBlitFramebuffer on the
     // DRAW framebuffer, causing partial writes and stale noise artifacts.
-    g_pHyprRenderer->setCapStatus(GL_SCISSOR_TEST, false);
+    // TODO: I couldn't find a replacement for this
+    //g_pHyprRenderer->setCapStatus(GL_SCISSOR_TEST, false);
 
     // Clear the sample FBO before blitting. Clamped regions (near edges)
     // would otherwise contain uninitialized GPU memory (pink artifacts).
-    glBindFramebuffer(GL_FRAMEBUFFER, sampleFramebuffer.getFBID());
+    glBindFramebuffer(GL_FRAMEBUFFER, sampleFramebuffer);
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFramebuffer.getFBID());
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sampleFramebuffer.getFBID());
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFramebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sampleFramebuffer);
     glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1,
                       dstX0, dstY0, dstX1, dstY1,
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
 }
 
+// TODO: I have a feeling this and applyGlassEffect should be completely rewritten similar to this:
+// https://github.com/VirtCode/hypr-dynamic-cursors/pull/128/changes#diff-9411958b5959cf6246df3842003366a2c4bfe402c1e386b8513aa5ccb7b739e4R33
 void blurBackground(SP<Render::IFramebuffer>& sampleFramebuffer, float radius, int iterations,
                     GLuint callerFramebufferID, int viewportWidth, int viewportHeight) {
     auto& shaderManager = g_pGlobalState->shaderManager;
     if (radius <= 0.0f || iterations <= 0 || !shaderManager.isInitialized())
         return;
 
-    int width  = static_cast<int>(sampleFramebuffer.m_size.x);
-    int height = static_cast<int>(sampleFramebuffer.m_size.y);
+    int width  = static_cast<int>(sampleFramebuffer->m_size.x);
+    int height = static_cast<int>(sampleFramebuffer->m_size.y);
 
     auto& blurTempFramebuffer = g_pGlobalState->blurTempFramebuffer;
-    if (blurTempFramebuffer.m_size.x != width || blurTempFramebuffer.m_size.y != height)
-        blurTempFramebuffer.alloc(width, height, sampleFramebuffer.m_drmFormat);
+    if (blurTempFramebuffer->m_size.x != width || blurTempFramebuffer->m_size.y != height)
+        blurTempFramebuffer->alloc(width, height, sampleFramebuffer->m_drmFormat);
 
     // Fullscreen quad projection: maps VAO positions [0,1] to clip space [-1,1]
     static constexpr std::array<float, 9> FULLSCREEN_PROJECTION = {
@@ -115,14 +118,14 @@ void blurBackground(SP<Render::IFramebuffer>& sampleFramebuffer, float radius, i
     // Ping-pong at full resolution: sampleFramebuffer ↔ blurTempFramebuffer
     for (int iteration = 0; iteration < iterations; iteration++) {
         // Horizontal pass: sampleFramebuffer → blurTempFramebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, blurTempFramebuffer.getFBID());
-        sampleFramebuffer.getTexture()->bind();
+        glBindFramebuffer(GL_FRAMEBUFFER, blurTempFramebuffer);
+        sampleFramebuffer->getTexture()->bind();
         glUniform2f(blurUniforms.direction, 1.0f / width, 0.0f);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         // Vertical pass: blurTempFramebuffer → sampleFramebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, sampleFramebuffer.getFBID());
-        blurTempFramebuffer.getTexture()->bind();
+        glBindFramebuffer(GL_FRAMEBUFFER, sampleFramebuffer);
+        blurTempFramebuffer->getTexture()->bind();
         glUniform2f(blurUniforms.direction, 0.0f, 1.0f / height);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
@@ -146,11 +149,11 @@ void applyGlassEffect(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
 
     Mat3x3 matrix   = g_pHyprRenderer->m_renderData.monitorProjection.projectBox(rawBox, transform, rawBox.rot);
     Mat3x3 glMatrix = g_pHyprRenderer->m_renderData.projection.copy().multiply(matrix);
-    auto texture    = sampleFramebuffer.getTexture();
+    auto texture    = sampleFramebuffer->getTexture();
 
     glMatrix.transpose();
 
-    glBindFramebuffer(GL_FRAMEBUFFER, targetFramebuffer.getFBID());
+    glBindFramebuffer(GL_FRAMEBUFFER, targetFramebuffer);
     glActiveTexture(GL_TEXTURE0);
     texture->bind();
 
