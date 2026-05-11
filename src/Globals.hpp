@@ -23,7 +23,7 @@ struct SGlobalState {
     std::unordered_map<std::string, SCustomPreset> customPresets;
 
     // Shared blur temp framebuffer (reused across all decorations since they render sequentially)
-    CFramebuffer blurTempFramebuffer;
+    SP<Render::IFramebuffer> blurTempFramebuffer;
 
     // Layer surface glass state (one per tracked layer, keyed by raw pointer).
     // shared_ptr so CGlassLayerPassElement can hold a copy that survives map erasure mid-frame.

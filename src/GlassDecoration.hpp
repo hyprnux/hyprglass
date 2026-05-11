@@ -29,7 +29,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
 
   private:
     PHLWINDOWREF m_window;
-    CFramebuffer m_sampleFramebuffer;
+    SP<Render::IFramebuffer> m_sampleFramebuffer;
     Vector2D     m_samplePaddingRatio;
 
     // Track last rendered position/size to detect actual changes and seed damage

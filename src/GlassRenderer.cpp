@@ -24,7 +24,7 @@ static void uploadThemeUniforms(const SResolveContext& ctx) {
     glUniform1f(uniforms.adaptiveBoost, resolvePresetFloat(ctx, &SPresetValues::adaptiveBoost, &SOverridableConfig::adaptiveBoost, defaults.adaptiveBoost));
 }
 
-void sampleBackground(CFramebuffer& sampleFramebuffer, CFramebuffer& sourceFramebuffer,
+void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IFramebuffer>& sourceFramebuffer,
                        CBox box, Vector2D& outPaddingRatio, int downscale) {
     const int pad = SAMPLE_PADDING_PX;
     int fullWidth  = static_cast<int>(box.width) + 2 * pad;
@@ -83,7 +83,7 @@ void sampleBackground(CFramebuffer& sampleFramebuffer, CFramebuffer& sourceFrame
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
 }
 
-void blurBackground(CFramebuffer& sampleFramebuffer, float radius, int iterations,
+void blurBackground(SP<Render::IFramebuffer>& sampleFramebuffer, float radius, int iterations,
                     GLuint callerFramebufferID, int viewportWidth, int viewportHeight) {
     auto& shaderManager = g_pGlobalState->shaderManager;
     if (radius <= 0.0f || iterations <= 0 || !shaderManager.isInitialized())
@@ -134,7 +134,7 @@ void blurBackground(CFramebuffer& sampleFramebuffer, float radius, int iteration
     g_pHyprOpenGL->setViewport(0, 0, viewportWidth, viewportHeight);
 }
 
-void applyGlassEffect(CFramebuffer& sampleFramebuffer, CFramebuffer& targetFramebuffer,
+void applyGlassEffect(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IFramebuffer>& targetFramebuffer,
                        CBox& rawBox, CBox& transformedBox,
                        float alpha, float cornerRadius, float roundingPower,
                        const Vector2D& paddingRatio, const SResolveContext& resolveContext,
