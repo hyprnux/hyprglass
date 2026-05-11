@@ -219,8 +219,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // Shadows must be enabled for the glass effect to sample the correct background.
     // Force-enable if the user has disabled them.
-    static auto* const PSHADOWENABLED = (Hyprlang::INT* const*)g_pConfigManager->getConfigValuePtr("decoration:shadow:enabled");
-    if (PSHADOWENABLED && !**PSHADOWENABLED) {
+    static auto PSHADOWENABLED = CConfigValue<Hyprlang::INT>("decoration:shadow:enabled");
+    if (!*PSHADOWENABLED) {
         HyprlandAPI::invokeHyprctlCommand("keyword", "decoration:shadow:enabled true");
     }
 
