@@ -17,13 +17,18 @@ class CGlassLayerPassElement : public IPassElement {
     explicit CGlassLayerPassElement(const SGlassLayerPassData& data);
     ~CGlassLayerPassElement() override = default;
 
-    void                draw(const CRegion& damage) override;
     [[nodiscard]] bool                needsLiveBlur() override;
     [[nodiscard]] bool                needsPrecomputeBlur() override;
     [[nodiscard]] std::optional<CBox> boundingBox() override;
     [[nodiscard]] bool                disableSimplification() override;
 
     [[nodiscard]] const char* passName() override { return "CGlassLayerPassElement"; }
+
+    virtual std::vector<UP<IPassElement>> draw(const CRegion& damage);
+
+    virtual ePassElementType type() override {
+        return EK_CUSTOM;
+    };
 
   private:
     SGlassLayerPassData m_data;
