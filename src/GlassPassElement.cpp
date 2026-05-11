@@ -7,11 +7,13 @@
 CGlassPassElement::CGlassPassElement(const SGlassPassData& data)
     : m_data(data) {}
 
-void CGlassPassElement::draw(const CRegion& damage) {
+std::vector<UP<IPassElement>> CGlassPassElement::draw(const CRegion& damage) {
     if (!m_data.decoration)
-        return;
+        return {};
 
+    // TODO: This most likely has to be changed, I just did an empty return
     m_data.decoration->renderPass(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.alpha);
+    return {};
 }
 
 std::optional<CBox> CGlassPassElement::boundingBox() {
