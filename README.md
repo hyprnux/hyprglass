@@ -283,7 +283,7 @@ The window/layer is modeled as a **thick convex glass slab**. The rendering pipe
 9. **Fresnel edge glow** — Schlick-based fresnel approximation at the glass edge.
 10. **Specular highlight + inner shadow** — Top-biased highlight and bottom-rim shadow for depth.
 
-For windows, the plugin integrates with Hyprland's render pass system as a `DECORATION_LAYER_BOTTOM` decoration, drawing before the window surface so the glass shows through transparent windows. For layer surfaces, the plugin hooks `CHyprRenderer::renderLayer` and uses a temp FBO redirect: the background is sampled and blurred, then Hyprland's surface rendering is redirected into a transparent temporary framebuffer to capture the surface's exact alpha. A post-surface pass then composites the glass effect (masked to visible content only) and the surface content back onto the main framebuffer in a single shader pass.
+For windows, the plugin integrates with Hyprland's render pass system as a `DECORATION_LAYER_BOTTOM` decoration, drawing before the window surface so the glass shows through transparent windows. For layer surfaces, the plugin hooks `IHyprRenderer::renderLayer` and uses a temp FBO redirect: the background is sampled and blurred, then Hyprland's surface rendering is redirected into a transparent temporary framebuffer to capture the surface's exact alpha. A post-surface pass then composites the glass effect (masked to visible content only) and the surface content back onto the main framebuffer in a single shader pass.
 
 ## Unloading
 
