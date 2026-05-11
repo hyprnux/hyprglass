@@ -16,7 +16,7 @@ Builds against your exact Hyprland version, no ABI mismatch headaches:
 
 ```bash
 hyprpm add https://github.com/hyprnux/hyprglass
-hyprpm enable HyprGlass
+hyprpm enable hyprglass
 ```
 
 ### Pre-built release
