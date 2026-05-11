@@ -9,7 +9,6 @@
 #include <GLES3/gl32.h>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
-#include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprutils/math/Misc.hpp>
 
@@ -138,7 +137,7 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     if (!window)
         return;
 
-    const auto source = g_pHyprOpenGL->m_renderData.currentFB;
+    const auto source = g_pHyprRenderer->m_renderData.currentFB;
 
     auto optBox = WindowGeometry::computeWindowBox(window, monitor);
     if (!optBox)
@@ -148,10 +147,10 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     CBox transformBox = windowBox;
 
     const auto transform = Math::wlTransformToHyprutils(
-        Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
+        Math::invertTransform(g_pHyprRenderer->m_renderData.pMonitor->m_transform));
     transformBox.transform(transform,
-        g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x,
-        g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
+        g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.x,
+        g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.y);
 
     const bool isDark          = resolveThemeIsDark();
     const std::string preset   = resolvePresetName();
@@ -164,8 +163,8 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
 
     float blurRadius     = blurStrength * 12.0f / downscale;
     int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
-    int viewportWidth    = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x);
-    int viewportHeight   = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
+    int viewportWidth    = static_cast<int>(g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.x);
+    int viewportHeight   = static_cast<int>(g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.y);
     GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source->getFBID(), viewportWidth, viewportHeight);
 
     float monitorScale  = monitor->m_scale;

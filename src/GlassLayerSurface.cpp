@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <GLES3/gl32.h>
-#include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprutils/math/Misc.hpp>
 
@@ -114,7 +113,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     if (!layerSurface)
         return;
 
-    auto* source = g_pHyprOpenGL->m_renderData.currentFB;
+    auto* source = g_pHyprRenderer->m_renderData.currentFB;
 
     auto layerBox = LayerGeometry::computeLayerBox(layerSurface, monitor);
     if (!layerBox)
@@ -123,10 +122,10 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     CBox transformBox = *layerBox;
 
     const auto transform = Math::wlTransformToHyprutils(
-        Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
+        Math::invertTransform(g_pHyprRenderer->m_renderData.pMonitor->m_transform));
     transformBox.transform(transform,
-        g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x,
-        g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
+        g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.x,
+        g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.y);
 
     // Decide whether we need to re-sample and re-blur the background.
     // When only the layer surface content changed (e.g. waybar clock tick)
@@ -158,8 +157,8 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
 
         float blurRadius     = blurStrength * 12.0f / downscale;
         int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
-        int viewportWidth    = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x);
-        int viewportHeight   = static_cast<int>(g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
+        int viewportWidth    = static_cast<int>(g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.x);
+        int viewportHeight   = static_cast<int>(g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.y);
         GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source->getFBID(), viewportWidth, viewportHeight);
 
         m_hasCachedSample      = true;
@@ -182,7 +181,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
 
     m_savedCurrentFB = source;
 
-    g_pHyprOpenGL->m_renderData.currentFB = &m_surfaceTempFramebuffer;
+    g_pHyprRenderer->m_renderData.currentFB = &m_surfaceTempFramebuffer;
     glBindFramebuffer(GL_FRAMEBUFFER, m_surfaceTempFramebuffer.getFBID());
 
     // Scissored clear: only clear the layer's area + margin in the temp FBO.
@@ -200,14 +199,14 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         glDisable(GL_SCISSOR_TEST);
-        g_pHyprOpenGL->setCapStatus(GL_SCISSOR_TEST, false);
+        g_pHyprRenderer->setCapStatus(GL_SCISSOR_TEST, false);
     }
 }
 
 void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
     // Restore the original currentFB before compositing
     if (m_savedCurrentFB) {
-        g_pHyprOpenGL->m_renderData.currentFB = m_savedCurrentFB;
+        g_pHyprRenderer->m_renderData.currentFB = m_savedCurrentFB;
         glBindFramebuffer(GL_FRAMEBUFFER, m_savedCurrentFB->getFBID());
         m_savedCurrentFB = nullptr;
     }
@@ -220,7 +219,7 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
     if (!layerSurface)
         return;
 
-    auto* target = g_pHyprOpenGL->m_renderData.currentFB;
+    auto* target = g_pHyprRenderer->m_renderData.currentFB;
 
     auto layerBox = LayerGeometry::computeLayerBox(layerSurface, monitor);
     if (!layerBox)
@@ -230,10 +229,10 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
     CBox transformBox = rawBox;
 
     const auto transform = Math::wlTransformToHyprutils(
-        Math::invertTransform(g_pHyprOpenGL->m_renderData.pMonitor->m_transform));
+        Math::invertTransform(g_pHyprRenderer->m_renderData.pMonitor->m_transform));
     transformBox.transform(transform,
-        g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.x,
-        g_pHyprOpenGL->m_renderData.pMonitor->m_transformedSize.y);
+        g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.x,
+        g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.y);
 
     const bool isDark          = resolveThemeIsDark();
     const std::string preset   = resolvePresetName();

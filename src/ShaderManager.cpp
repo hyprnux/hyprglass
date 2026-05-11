@@ -1,11 +1,11 @@
 #include "ShaderManager.hpp"
 #include "Globals.hpp"
 #include "Shaders.hpp"
+#include "render/Renderer.hpp"
 
 #include <GLES3/gl32.h>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
-#include <hyprland/src/render/OpenGL.hpp>
 
 std::string CShaderManager::loadShaderSource(const char* fileName) {
     if (SHADERS.contains(fileName))
@@ -18,7 +18,7 @@ std::string CShaderManager::loadShaderSource(const char* fileName) {
 
 bool CShaderManager::compileGlassShader() {
     if (!glassShader->createProgram(
-            g_pHyprOpenGL->m_shaders->TEXVERTSRC,
+            g_pHyprRenderer->m_shaders->TEXVERTSRC,
             loadShaderSource("liquidglass.frag"),
             true
         )) {
@@ -55,7 +55,7 @@ bool CShaderManager::compileGlassShader() {
 
 bool CShaderManager::compileBlurShader() {
     if (!blurShader->createProgram(
-            g_pHyprOpenGL->m_shaders->TEXVERTSRC,
+            g_pHyprRenderer->m_shaders->TEXVERTSRC,
             loadShaderSource("gaussianblur.frag"),
             true
         )) {
