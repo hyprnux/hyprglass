@@ -3,7 +3,7 @@
 #include "GlassRenderer.hpp"
 #include "Globals.hpp"
 #include "LayerGeometry.hpp"
-#include "render/Renderer.hpp"
+#include <hyprland/src/render/Renderer.hpp>
 
 CGlassLayerPassElement::CGlassLayerPassElement(const SGlassLayerPassData& data)
     : m_data(data) {}

@@ -2,7 +2,7 @@
 #include "GlassDecoration.hpp"
 #include "Globals.hpp"
 #include "WindowGeometry.hpp"
-#include "render/Renderer.hpp"
+#include <hyprland/src/render/Renderer.hpp>
 
 CGlassPassElement::CGlassPassElement(const SGlassPassData& data)
     : m_data(data) {}

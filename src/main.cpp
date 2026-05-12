@@ -14,7 +14,7 @@
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/event/EventBus.hpp>
-#include <render/Renderer.hpp>
+#include <hyprland/src/render/Renderer.hpp>
 
 #include <sstream>
 
