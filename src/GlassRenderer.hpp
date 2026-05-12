@@ -34,7 +34,7 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, const SP<Rend
                        CBox box, Vector2D& outPaddingRatio, int downscale = 1);
 
 void blurBackground(SP<Render::IFramebuffer>& sampleFramebuffer, float radius, int iterations,
-                    GLuint callerFramebufferID, int viewportWidth, int viewportHeight);
+                    const SP<Render::IFramebuffer>& callerFramebuffer, int viewportWidth, int viewportHeight);
 
 // When mask is non-null (layers only), the shader composites the surface content
 // over the glass effect in a single pass. When mask is null (windows), the shader
