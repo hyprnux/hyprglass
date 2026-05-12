@@ -1,6 +1,7 @@
 #include "GlassRenderer.hpp"
 #include "BuiltInPresets.hpp"
 #include "Globals.hpp"
+#include "render/OpenGL.hpp"
 
 #include <array>
 #include <GLES3/gl32.h>
@@ -67,8 +68,7 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, const SP<Rend
     // The render pass scissors each element to its damage region.
     // That scissor state leaks here and clips glBlitFramebuffer on the
     // DRAW framebuffer, causing partial writes and stale noise artifacts.
-    // TODO: I couldn't find a replacement for this
-    //g_pHyprRenderer->setCapStatus(GL_SCISSOR_TEST, false);
+    g_pHyprRenderer->disableScissor();
 
     // Clear the sample FBO before blitting. Clamped regions (near edges)
     // would otherwise contain uninitialized GPU memory (pink artifacts).
@@ -106,7 +106,7 @@ void blurBackground(SP<Render::IFramebuffer>& sampleFramebuffer, float radius, i
 
     const auto& blurUniforms = shaderManager.blurUniforms;
 
-    auto shader = g_pHyprRenderer->useShader(shaderManager.blurShader);
+    auto shader = Render::GL::g_pHyprOpenGL->useShader(shaderManager.blurShader);
     shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, FULLSCREEN_PROJECTION);
     shader->setUniformInt(SHADER_TEX, 0);
     glUniform1f(blurUniforms.radius, radius);
@@ -146,8 +146,7 @@ void applyGlassEffect(const SP<Render::IFramebuffer>& sampleFramebuffer, const S
     const auto transform = Math::wlTransformToHyprutils(
         Math::invertTransform(g_pHyprRenderer->m_renderData.pMonitor->m_transform));
 
-    Mat3x3 matrix   = g_pHyprRenderer->m_renderData.monitorProjection.projectBox(rawBox, transform, rawBox.rot);
-    Mat3x3 glMatrix = g_pHyprRenderer->m_renderData.projection.copy().multiply(matrix);
+    Mat3x3 glMatrix = g_pHyprRenderer->projectBoxToTarget(rawBox, transform).copy();
     auto texture    = sampleFramebuffer->getTexture();
 
     glMatrix.transpose();
@@ -166,7 +165,7 @@ void applyGlassEffect(const SP<Render::IFramebuffer>& sampleFramebuffer, const S
         glActiveTexture(GL_TEXTURE0);
     }
 
-    auto shader = g_pHyprRenderer->useShader(shaderManager.glassShader);
+    auto shader = Render::GL::g_pHyprOpenGL->useShader(shaderManager.glassShader);
 
     shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, glMatrix.getMatrix());
     shader->setUniformInt(SHADER_TEX, 0);
