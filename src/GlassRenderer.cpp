@@ -1,11 +1,12 @@
 #include "GlassRenderer.hpp"
 #include "BuiltInPresets.hpp"
 #include "Globals.hpp"
-#include "render/OpenGL.hpp"
 
 #include <array>
 #include <GLES3/gl32.h>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/render/OpenGL.hpp>
+using Render::GL::g_pHyprOpenGL;
 
 namespace GlassRenderer {
 
@@ -106,7 +107,7 @@ void blurBackground(SP<Render::IFramebuffer>& sampleFramebuffer, float radius, i
 
     const auto& blurUniforms = shaderManager.blurUniforms;
 
-    auto shader = Render::GL::g_pHyprOpenGL->useShader(shaderManager.blurShader);
+    auto shader = g_pHyprOpenGL->useShader(shaderManager.blurShader);
     shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, FULLSCREEN_PROJECTION);
     shader->setUniformInt(SHADER_TEX, 0);
     glUniform1f(blurUniforms.radius, radius);
@@ -165,7 +166,7 @@ void applyGlassEffect(const SP<Render::IFramebuffer>& sampleFramebuffer, const S
         glActiveTexture(GL_TEXTURE0);
     }
 
-    auto shader = Render::GL::g_pHyprOpenGL->useShader(shaderManager.glassShader);
+    auto shader = g_pHyprOpenGL->useShader(shaderManager.glassShader);
 
     shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, glMatrix.getMatrix());
     shader->setUniformInt(SHADER_TEX, 0);
@@ -217,9 +218,9 @@ void applyGlassEffect(const SP<Render::IFramebuffer>& sampleFramebuffer, const S
     shader->setUniformFloat(SHADER_ROUNDING_POWER, roundingPower);
 
     glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
-    g_pHyprRenderer->scissor(rawBox);
+    g_pHyprOpenGL->scissor(rawBox);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    g_pHyprRenderer->scissor(nullptr);
+    g_pHyprOpenGL->scissor(nullptr);
 }
 
 } // namespace GlassRenderer
