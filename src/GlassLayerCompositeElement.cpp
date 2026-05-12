@@ -8,11 +8,12 @@
 CGlassLayerCompositeElement::CGlassLayerCompositeElement(const SGlassLayerCompositeData& data)
     : m_data(data) {}
 
-void CGlassLayerCompositeElement::draw(const CRegion& damage) {
+std::vector<UP<IPassElement>> CGlassLayerCompositeElement::draw() {
     if (!m_data.layerState || !m_data.layerState->getLayerSurface())
-        return;
+        return {};
 
     m_data.layerState->compositeAndRestore(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.alpha);
+    return {};
 }
 
 std::optional<CBox> CGlassLayerCompositeElement::boundingBox() {
