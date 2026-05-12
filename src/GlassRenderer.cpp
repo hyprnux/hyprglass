@@ -85,7 +85,7 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, const SP<Rend
 
 // https://github.com/VirtCode/hypr-dynamic-cursors/pull/128/changes#diff-9411958b5959cf6246df3842003366a2c4bfe402c1e386b8513aa5ccb7b739e4R33
 void blurBackground(SP<Render::IFramebuffer>& sampleFramebuffer, float radius, int iterations,
-                    SP<Render::IFramebuffer>& callerFramebuffer, int viewportWidth, int viewportHeight) {
+                    const SP<Render::IFramebuffer>& callerFramebuffer, int viewportWidth, int viewportHeight) {
     auto& shaderManager = g_pGlobalState->shaderManager;
     if (radius <= 0.0f || iterations <= 0 || !shaderManager.isInitialized())
         return;
