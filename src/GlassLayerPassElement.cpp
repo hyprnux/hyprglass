@@ -8,9 +8,9 @@
 CGlassLayerPassElement::CGlassLayerPassElement(const SGlassLayerPassData& data)
     : m_data(data) {}
 
-void CGlassLayerPassElement::draw(const CRegion& damage) {
+std::vector<UP<IPassElement>> CGlassLayerPassElement::draw() {
     if (!m_data.layerState || !m_data.layerState->getLayerSurface())
-        return;
+        return {};
 
     m_data.layerState->sampleAndRedirect(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.alpha);
 }

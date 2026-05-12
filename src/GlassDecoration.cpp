@@ -14,6 +14,7 @@
 
 CGlassDecoration::CGlassDecoration(PHLWINDOW window)
     : IHyprWindowDecoration(window), m_window(window) {
+    m_sampleFramebuffer = g_pHyprRenderer->createFB("hyprglass-sample");
 }
 
 bool CGlassDecoration::resolveEnabled() const {

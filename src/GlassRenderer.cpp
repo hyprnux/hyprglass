@@ -23,7 +23,7 @@ static void uploadThemeUniforms(const SResolveContext& ctx) {
     glUniform1f(uniforms.adaptiveBoost, resolvePresetFloat(ctx, &SPresetValues::adaptiveBoost, &SOverridableConfig::adaptiveBoost, defaults.adaptiveBoost));
 }
 
-void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IFramebuffer>& sourceFramebuffer,
+void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, const SP<Render::IFramebuffer>& sourceFramebuffer,
                        CBox box, Vector2D& outPaddingRatio, int downscale) {
     const int pad = SAMPLE_PADDING_PX;
     int fullWidth  = static_cast<int>(box.width) + 2 * pad;
@@ -72,7 +72,7 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
 
     // Clear the sample FBO before blitting. Clamped regions (near edges)
     // would otherwise contain uninitialized GPU memory (pink artifacts).
-    glBindFramebuffer(GL_FRAMEBUFFER, sampleFramebuffer);
+    sampleFramebuffer->bind();
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -83,7 +83,6 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
 }
 
-// TODO: I have a feeling this and applyGlassEffect should be completely rewritten similar to this:
 // https://github.com/VirtCode/hypr-dynamic-cursors/pull/128/changes#diff-9411958b5959cf6246df3842003366a2c4bfe402c1e386b8513aa5ccb7b739e4R33
 void blurBackground(SP<Render::IFramebuffer>& sampleFramebuffer, float radius, int iterations,
                     GLuint callerFramebufferID, int viewportWidth, int viewportHeight) {
@@ -118,13 +117,13 @@ void blurBackground(SP<Render::IFramebuffer>& sampleFramebuffer, float radius, i
     // Ping-pong at full resolution: sampleFramebuffer ↔ blurTempFramebuffer
     for (int iteration = 0; iteration < iterations; iteration++) {
         // Horizontal pass: sampleFramebuffer → blurTempFramebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, blurTempFramebuffer);
+        blurTempFramebuffer->bind();
         sampleFramebuffer->getTexture()->bind();
         glUniform2f(blurUniforms.direction, 1.0f / width, 0.0f);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         // Vertical pass: blurTempFramebuffer → sampleFramebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, sampleFramebuffer);
+        sampleFramebuffer->bind();
         blurTempFramebuffer->getTexture()->bind();
         glUniform2f(blurUniforms.direction, 0.0f, 1.0f / height);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -136,7 +135,7 @@ void blurBackground(SP<Render::IFramebuffer>& sampleFramebuffer, float radius, i
     g_pHyprRenderer->setViewport(0, 0, viewportWidth, viewportHeight);
 }
 
-void applyGlassEffect(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IFramebuffer>& targetFramebuffer,
+void applyGlassEffect(const SP<Render::IFramebuffer>& sampleFramebuffer, const SP<Render::IFramebuffer>& targetFramebuffer,
                        CBox& rawBox, CBox& transformedBox,
                        float alpha, float cornerRadius, float roundingPower,
                        const Vector2D& paddingRatio, const SResolveContext& resolveContext,
@@ -154,6 +153,7 @@ void applyGlassEffect(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
     glMatrix.transpose();
 
     glBindFramebuffer(GL_FRAMEBUFFER, targetFramebuffer);
+    targetFramebuffer->bind();
     glActiveTexture(GL_TEXTURE0);
     texture->bind();
 

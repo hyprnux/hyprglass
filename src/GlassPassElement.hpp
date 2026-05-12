@@ -23,7 +23,7 @@ class CGlassPassElement : public IPassElement {
 
     [[nodiscard]] const char* passName() override { return "CGlassPassElement"; }
 
-    virtual std::vector<UP<IPassElement>> draw(const CRegion& damage);
+    virtual std::vector<UP<IPassElement>> draw() override;
 
     virtual ePassElementType type() override {
         return EK_CUSTOM;

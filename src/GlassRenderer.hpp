@@ -30,16 +30,16 @@ struct SMaskInfo {
     float    alphaThreshold = 0.001f;
 };
 
-void sampleBackground(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> sourceFramebuffer,
+void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, const SP<Render::IFramebuffer>& sourceFramebuffer,
                        CBox box, Vector2D& outPaddingRatio, int downscale = 1);
 
-void blurBackground(SP<Render::IFramebuffer> sampleFramebuffer, float radius, int iterations,
+void blurBackground(SP<Render::IFramebuffer>& sampleFramebuffer, float radius, int iterations,
                     GLuint callerFramebufferID, int viewportWidth, int viewportHeight);
 
 // When mask is non-null (layers only), the shader composites the surface content
 // over the glass effect in a single pass. When mask is null (windows), the shader
 // outputs the glass effect alone.
-void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> targetFramebuffer,
+void applyGlassEffect(const SP<Render::IFramebuffer>& sampleFramebuffer, const SP<Render::IFramebuffer>& targetFramebuffer,
                        CBox& rawBox, CBox& transformedBox,
                        float alpha, float cornerRadius, float roundingPower,
                        const Vector2D& paddingRatio, const SResolveContext& resolveContext,

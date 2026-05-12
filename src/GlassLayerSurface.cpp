@@ -12,6 +12,8 @@
 
 CGlassLayerSurface::CGlassLayerSurface(PHLLS layerSurface)
     : m_layerSurface(layerSurface) {
+    m_sampleFramebuffer = g_pHyprRenderer->createFB("hyprglass-sample");
+    m_surfaceTempFramebuffer = g_pHyprRenderer->createFB("hyprglass-surface-temp");
 }
 
 CGlassLayerSurface::~CGlassLayerSurface() {
@@ -113,7 +115,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     if (!layerSurface)
         return;
 
-    auto* source = g_pHyprRenderer->m_renderData.currentFB;
+    auto source = g_pHyprRenderer->m_renderData.currentFB;
 
     auto layerBox = LayerGeometry::computeLayerBox(layerSurface, monitor);
     if (!layerBox)
@@ -153,13 +155,13 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
         float blurStrength   = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
         int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-        GlassRenderer::sampleBackground(m_sampleFramebuffer, *source, transformBox, m_samplePaddingRatio, downscale);
+        GlassRenderer::sampleBackground(m_sampleFramebuffer, source, transformBox, m_samplePaddingRatio, downscale);
 
         float blurRadius     = blurStrength * 12.0f / downscale;
         int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
         int viewportWidth    = static_cast<int>(g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.x);
         int viewportHeight   = static_cast<int>(g_pHyprRenderer->m_renderData.pMonitor->m_transformedSize.y);
-        GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source->getFBID(), viewportWidth, viewportHeight);
+        GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source, viewportWidth, viewportHeight);
 
         m_hasCachedSample      = true;
         m_lastSceneGeneration  = currentGeneration;
@@ -176,13 +178,13 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     // Monitor FBOs use XRGB formats (no usable alpha); XRGB2101010 (10-bit)
     // has only 2-bit alpha, quantizing values below ~0.17 to zero and breaking
     // the mask discard for low-opacity layers.
-    if (m_surfaceTempFramebuffer.m_size.x != monitorWidth || m_surfaceTempFramebuffer.m_size.y != monitorHeight)
-        m_surfaceTempFramebuffer.alloc(monitorWidth, monitorHeight, DRM_FORMAT_ARGB8888);
+    if (m_surfaceTempFramebuffer->m_size.x != monitorWidth || m_surfaceTempFramebuffer->m_size.y != monitorHeight)
+        m_surfaceTempFramebuffer->alloc(monitorWidth, monitorHeight, DRM_FORMAT_ARGB8888);
 
     m_savedCurrentFB = source;
 
-    g_pHyprRenderer->m_renderData.currentFB = &m_surfaceTempFramebuffer;
-    glBindFramebuffer(GL_FRAMEBUFFER, m_surfaceTempFramebuffer.getFBID());
+    g_pHyprRenderer->bindFB(m_surfaceTempFramebuffer);
+    m_surfaceTempFramebuffer->bind();
 
     // Scissored clear: only clear the layer's area + margin in the temp FBO.
     // The mask shader only reads within the layer's UV bounds, so content outside
@@ -199,15 +201,15 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         glDisable(GL_SCISSOR_TEST);
-        g_pHyprRenderer->setCapStatus(GL_SCISSOR_TEST, false);
+        g_pHyprRenderer->disableScissor();
     }
 }
 
 void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
     // Restore the original currentFB before compositing
     if (m_savedCurrentFB) {
-        g_pHyprRenderer->m_renderData.currentFB = m_savedCurrentFB;
-        glBindFramebuffer(GL_FRAMEBUFFER, m_savedCurrentFB->getFBID());
+        g_pHyprRenderer->bindFB(m_savedCurrentFB);
+        glBindFramebuffer(GL_FRAMEBUFFER, m_savedCurrentFB);
         m_savedCurrentFB = nullptr;
     }
 
@@ -219,7 +221,7 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
     if (!layerSurface)
         return;
 
-    auto* target = g_pHyprRenderer->m_renderData.currentFB;
+    auto target = g_pHyprRenderer->m_renderData.currentFB;
 
     auto layerBox = LayerGeometry::computeLayerBox(layerSurface, monitor);
     if (!layerBox)
@@ -253,7 +255,7 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
         maskThreshold = threshIt->second;
 
     GlassRenderer::SMaskInfo maskInfo{
-        .textureId      = m_surfaceTempFramebuffer.getTexture()->m_texID,
+        .textureId      = m_surfaceTempFramebuffer->getTexture()->m_texID,
         .target         = GL_TEXTURE_2D,
         .uvOffset       = {transformBox.x / monitorWidth, transformBox.y / monitorHeight},
         .uvScale        = {transformBox.w / monitorWidth, transformBox.h / monitorHeight},
@@ -262,7 +264,7 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
 
     // The glass shader composites both the glass effect and the surface content
     // in a single pass: glass behind, surface on top, using the temp FBO alpha.
-    GlassRenderer::applyGlassEffect(m_sampleFramebuffer, *target,
+    GlassRenderer::applyGlassEffect(m_sampleFramebuffer, target,
                                      rawBox, transformBox, alpha,
                                      cornerRadius, roundingPower, m_samplePaddingRatio, ctx,
                                      &maskInfo);

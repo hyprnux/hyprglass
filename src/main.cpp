@@ -183,6 +183,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     g_pGlobalState = std::make_unique<SGlobalState>();
+    g_pGlobalState->blurTempFramebuffer = g_pHyprRenderer->createFB("hyprglass-blur-temp");
 
     static auto onOpen = Event::bus()->m_events.window.open.listen([&](PHLWINDOW w) { onNewWindow(w); });
 

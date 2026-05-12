@@ -37,7 +37,7 @@ class CGlassLayerSurface {
     uint64_t     m_lastSceneGeneration = 0;
 
     // Saved currentFB pointer, restored in compositeAndRestore
-    SP<Render::IFramebuffer>* m_savedCurrentFB = nullptr;
+    SP<Render::IFramebuffer> m_savedCurrentFB = nullptr;
 
     [[nodiscard]] bool        resolveThemeIsDark() const;
     [[nodiscard]] std::string resolvePresetName() const;
