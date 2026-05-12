@@ -77,11 +77,10 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, const SP<Rend
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFramebuffer);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sampleFramebuffer);
-    glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1,
-                      dstX0, dstY0, dstX1, dstY1,
-                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    auto srcGL = Hyprutils::Memory::reinterpretPointerCast<Render::GL::CGLFramebuffer>(sourceFramebuffer);
+    auto dstGL = Hyprutils::Memory::reinterpretPointerCast<Render::GL::CGLFramebuffer>(sampleFramebuffer);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, srcGL->getFBID());
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dstGL->getFBID());
 }
 
 // https://github.com/VirtCode/hypr-dynamic-cursors/pull/128/changes#diff-9411958b5959cf6246df3842003366a2c4bfe402c1e386b8513aa5ccb7b739e4R33
