@@ -17,12 +17,13 @@ class CGlassLayerCompositeElement : public IPassElement {
     explicit CGlassLayerCompositeElement(const SGlassLayerCompositeData& data);
     ~CGlassLayerCompositeElement() override = default;
 
-    void                draw(const CRegion& damage) override;
-    [[nodiscard]] bool                needsLiveBlur() override;
-    [[nodiscard]] bool                needsPrecomputeBlur() override;
+    std::vector<UP<IPassElement>> draw() override;
+    [[nodiscard]] bool            needsLiveBlur() override;
+    [[nodiscard]] bool            needsPrecomputeBlur() override;
     [[nodiscard]] std::optional<CBox> boundingBox() override;
 
     [[nodiscard]] const char* passName() override { return "CGlassLayerCompositeElement"; }
+    [[nodiscard]] ePassElementType type() override { return EK_CUSTOM; }
 
   private:
     SGlassLayerCompositeData m_data;

@@ -4,16 +4,17 @@
 #include "Globals.hpp"
 #include "LayerGeometry.hpp"
 
-#include <hyprland/src/render/OpenGL.hpp>
+#include <hyprland/src/render/Renderer.hpp>
 
 CGlassLayerCompositeElement::CGlassLayerCompositeElement(const SGlassLayerCompositeData& data)
     : m_data(data) {}
 
-void CGlassLayerCompositeElement::draw(const CRegion& damage) {
+std::vector<UP<IPassElement>> CGlassLayerCompositeElement::draw() {
     if (!m_data.layerState || !m_data.layerState->getLayerSurface())
-        return;
+        return {};
 
-    m_data.layerState->compositeAndRestore(g_pHyprOpenGL->m_renderData.pMonitor.lock(), m_data.alpha);
+    m_data.layerState->compositeAndRestore(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.alpha);
+    return {};
 }
 
 std::optional<CBox> CGlassLayerCompositeElement::boundingBox() {
@@ -24,7 +25,7 @@ std::optional<CBox> CGlassLayerCompositeElement::boundingBox() {
     if (!layerSurface)
         return std::nullopt;
 
-    const auto monitor = g_pHyprOpenGL->m_renderData.pMonitor.lock();
+    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
     auto box = LayerGeometry::computeLayerBox(layerSurface, monitor);
     if (!box)
         return std::nullopt;

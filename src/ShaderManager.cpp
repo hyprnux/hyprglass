@@ -7,6 +7,8 @@
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 
+using Render::GL::g_pHyprOpenGL;
+
 std::string CShaderManager::loadShaderSource(const char* fileName) {
     if (SHADERS.contains(fileName))
         return SHADERS.at(fileName);

@@ -23,8 +23,8 @@ class CGlassLayerSurface {
 
   private:
     PHLLSREF     m_layerSurface;
-    CFramebuffer m_sampleFramebuffer;
-    CFramebuffer m_surfaceTempFramebuffer;
+    SP<Render::IFramebuffer> m_sampleFramebuffer;
+    SP<Render::IFramebuffer> m_surfaceTempFramebuffer;
     Vector2D     m_samplePaddingRatio;
     bool         m_hasCachedSample = false;
 
@@ -37,7 +37,7 @@ class CGlassLayerSurface {
     uint64_t     m_lastSceneGeneration = 0;
 
     // Saved currentFB pointer, restored in compositeAndRestore
-    CFramebuffer* m_savedCurrentFB = nullptr;
+    SP<Render::IFramebuffer> m_savedCurrentFB = nullptr;
 
     [[nodiscard]] bool        resolveThemeIsDark() const;
     [[nodiscard]] std::string resolvePresetName() const;

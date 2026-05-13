@@ -16,13 +16,14 @@ class CGlassPassElement : public IPassElement {
     explicit CGlassPassElement(const SGlassPassData& data);
     ~CGlassPassElement() override = default;
 
-    void                draw(const CRegion& damage) override;
-    [[nodiscard]] bool                needsLiveBlur() override;
-    [[nodiscard]] bool                needsPrecomputeBlur() override;
+    std::vector<UP<IPassElement>> draw() override;
+    [[nodiscard]] bool            needsLiveBlur() override;
+    [[nodiscard]] bool            needsPrecomputeBlur() override;
     [[nodiscard]] std::optional<CBox> boundingBox() override;
     [[nodiscard]] bool                disableSimplification() override;
 
     [[nodiscard]] const char* passName() override { return "CGlassPassElement"; }
+    [[nodiscard]] ePassElementType type() override { return EK_CUSTOM; }
 
   private:
     SGlassPassData m_data;
