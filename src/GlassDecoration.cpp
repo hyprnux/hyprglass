@@ -95,6 +95,9 @@ void CGlassDecoration::draw(PHLMONITOR monitor, float const& alpha) {
 
     const auto window = m_window.lock();
     if (window) {
+        if (window->m_ruleApplicator)
+            window->m_ruleApplicator->xray().set(false, Desktop::Types::PRIORITY_SET_PROP);
+
         const auto workspace = window->m_workspace;
 
         const bool wsAnimating = workspace && !window->m_pinned && workspace->m_renderOffset->isBeingAnimated();

@@ -15,6 +15,7 @@
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
 
 #include <sstream>
 
@@ -42,6 +43,10 @@ static void onNewWindow(PHLWINDOW window) {
     g_pGlobalState->decorations.emplace_back(decoration);
     decoration->m_self = decoration;
     HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(decoration));
+
+    if (window->m_ruleApplicator) {
+        window->m_ruleApplicator->xray().set(false, Desktop::Types::PRIORITY_SET_PROP);
+    }
 }
 
 static void onCloseWindow(PHLWINDOW window) {
@@ -313,6 +318,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
         HyprlandAPI::removeFunctionHook(PHANDLE, g_pGlobalState->renderLayerHook);
         g_pGlobalState->renderLayerHook = nullptr;
     }
+
 
     g_pGlobalState->layerSurfaces.clear();
     g_pGlobalState->shaderManager.destroy();
