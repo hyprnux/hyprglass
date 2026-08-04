@@ -9,6 +9,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
+#include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/helpers/Color.hpp>
@@ -50,6 +51,45 @@ static void onCloseWindow(PHLWINDOW window) {
         auto* deco = decoration.get();
         return !deco || deco->getOwner() == window;
     });
+}
+
+static CGlassDecoration* glassDecorationFor(const PHLWINDOW& window) {
+    for (const auto& decoration : g_pGlobalState->decorations) {
+        auto* deco = decoration.get();
+        if (deco && deco->getOwner() == window)
+            return deco;
+    }
+    return nullptr;
+}
+
+// Hyprland skips window decorations when internal fullscreen mode is
+// FSMODE_FULLSCREEN, queue the glass pass from RENDER_PRE_WINDOW to avoid double-queue.
+static void drawGlassForFullscreenWindow() {
+    if (!g_pGlobalState)
+        return;
+
+    // screenshare/export and snapshots render standalone — no scene behind to sample
+    if (g_pHyprRenderer->m_renderData.projectionType != Render::RPT_MONITOR || g_pHyprRenderer->m_bRenderingSnapshot)
+        return;
+
+    const auto window = g_pHyprRenderer->m_renderData.currentWindow.lock();
+    if (!window)
+        return;
+
+    // decorations render normally, draw() already ran
+    if (Fullscreen::controller()->getFullscreenModes(window).internal != Fullscreen::FSMODE_FULLSCREEN)
+        return;
+
+    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
+    if (!monitor)
+        return;
+
+    // solitary frames render no background to sample
+    if (monitor->m_solitaryClient.lock() == window)
+        return;
+
+    if (auto* deco = glassDecorationFor(window))
+        deco->draw(monitor, 1.f); // alpha unused, recomputed in renderPass
 }
 
 // ── Layer surface support ────────────────────────────────────────────────────
@@ -246,7 +286,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.active.listen(
         [=](PHLWINDOW w, Desktop::eFocusReason) { bumpWindowMonitor(w); }));
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.fullscreen.listen(
-        [=](PHLWINDOW w) { bumpWindowMonitor(w); }));
+        [=](PHLWINDOW w) {
+            bumpWindowMonitor(w);
+            if (auto* deco = glassDecorationFor(w))
+                deco->onFullscreenStateChanged();
+        }));
+
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen(
+        [](eRenderStage stage) {
+            if (stage == RENDER_PRE_WINDOW)
+                drawGlassForFullscreenWindow();
+        }));
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.moveToWorkspace.listen(
         [=](PHLWINDOW w, PHLWORKSPACE) { bumpWindowMonitor(w); }));
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.workspace.active.listen(

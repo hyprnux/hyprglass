@@ -24,6 +24,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
 
     [[nodiscard]] PHLWINDOW getOwner();
     void                    renderPass(PHLMONITOR monitor, const float& alpha);
+    void                    onFullscreenStateChanged();
 
     WP<CGlassDecoration> m_self;
 
