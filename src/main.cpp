@@ -138,10 +138,12 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PH
     // pipeline while that snapshot is being captured: the snapshot framebuffer
     // starts transparent/black, so sampling it as a background can bake a black
     // rectangle into the fade-out snapshot.
+    /*
     if (g_pHyprRenderer->m_bRenderingSnapshot) {
         ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, layerSurface, monitor, now, popups, lockscreen);
         return;
     }
+    */
 
     // Prune dead layer surfaces whose weak_ptr has expired (layer was destroyed
     // but never got a replacement at the same raw pointer address)
