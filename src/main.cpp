@@ -162,10 +162,10 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PH
             it = layerStates.emplace(rawPtr, std::make_shared<CGlassLayerSurface>(layerSurface)).first;
         }
 
-        if (!layerSurface->m_mapped) {
-            ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, layerSurface, monitor, now, popups, lockscreen);
-            return;
-        }
+        // Allow glass to keep rendering during close/fade-out animations.
+        // sampleAndRedirect() already handles !m_mapped by reusing the cached
+        // blurred background instead of re-sampling, so the glass effect stays
+        // visible for the full duration of the exit animation.
 
         float alpha = layerSurface->alpha().getTotal();
         if (alpha < 0.001f) {
