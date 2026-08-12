@@ -1,5 +1,4 @@
 #pragma once
-#include <chrono>
 
 #include "GlassRenderer.hpp"
 #include "PluginConfig.hpp"
@@ -41,7 +40,6 @@ class CGlassLayerSurface {
     // Scene generation at last blur — skip re-sampling when only the layer
     // surface content changed (e.g. clock tick) but the background didn't.
     uint64_t     m_lastSceneGeneration = 0;
-    std::chrono::steady_clock::time_point m_lastSampleTime{};
 
     // Saved currentFB pointer, restored in compositeAndRestore
     SP<Render::IFramebuffer> m_savedCurrentFB;

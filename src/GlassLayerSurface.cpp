@@ -159,13 +159,9 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
                              layerSurface->alpha()[Desktop::View::LS_ALPHA_FADE]->isBeingAnimated() ||
                              (activeWs && activeWs->m_renderOffset->isBeingAnimated()));
     const bool isUnmapped = !layerSurface || !layerSurface->m_mapped;
-    auto nowTime = std::chrono::steady_clock::now();
-    const bool isTimeExpired = (nowTime - m_lastSampleTime) > std::chrono::milliseconds(500);
-
     const bool backgroundChanged = !m_hasCachedSample ||
                                    currentGeneration != m_lastSceneGeneration ||
-                                   isAnimating ||
-                                   isTimeExpired;
+                                   isAnimating;
 
     if (!g_pHyprRenderer->m_bRenderingSnapshot && (isUnmapped || backgroundChanged)) {
         const bool isDark          = resolveThemeIsDark();
@@ -183,7 +179,6 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
 
         m_hasCachedSample      = true;
         m_lastSceneGeneration  = currentGeneration;
-        m_lastSampleTime       = nowTime;
     }
 
     int monitorWidth  = static_cast<int>(monitor->m_transformedSize.x);
