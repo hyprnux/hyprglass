@@ -139,6 +139,24 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PH
     // starts transparent/black, so sampling it as a background can bake a black
     // rectangle into the fade-out snapshot.
     if (g_pHyprRenderer->m_bRenderingSnapshot) {
+        auto it = g_pGlobalState->layerSurfaces.find(layerSurface.get());
+        if (it != g_pGlobalState->layerSurfaces.end() && it->second->hasCachedSample()) {
+            float alpha = layerSurface->alpha().getTotal();
+
+            // Pre-surface: redirect currentFB using the CACHED sample only
+            // (skip re-sampling — currentFB is the empty snapshot target)
+            CGlassLayerPassElement::SGlassLayerPassData preData{it->second, alpha};
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassLayerPassElement>(preData));
+
+            ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, layerSurface, monitor, now, popups, lockscreen);
+
+            // Post-surface: composite glass using the cached blur, bake it into
+            // the one-shot snapshot texture
+            CGlassLayerCompositeElement::SGlassLayerCompositeData postData{it->second, alpha};
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassLayerCompositeElement>(postData));
+            return;
+        }
+
         ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, layerSurface, monitor, now, popups, lockscreen);
         return;
     }
