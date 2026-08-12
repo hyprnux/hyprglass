@@ -10,7 +10,14 @@ CGlassLayerCompositeElement::CGlassLayerCompositeElement(const SGlassLayerCompos
     : m_data(data) {}
 
 std::vector<UP<IPassElement>> CGlassLayerCompositeElement::draw() {
-    if (m_data.layerState && m_data.layerState->getLayerSurface())
+    // Always call compositeAndRestore even if the layerSurface weak_ptr has
+    // expired. sampleAndRedirect() may have redirected currentFB to our temp
+    // FBO; if compositeAndRestore is skipped, currentFB is never restored and
+    // all subsequent rendering for this frame goes into the temp FBO instead
+    // of the monitor — producing a black box.
+    // compositeAndRestore() handles a null layerSurface safely: it restores
+    // the FB first, then returns early without compositing.
+    if (m_data.layerState)
         m_data.layerState->compositeAndRestore(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.alpha);
 
     return {};
