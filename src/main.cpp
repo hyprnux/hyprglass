@@ -26,9 +26,7 @@ static void clearLayerGlassOnClose(PHLLS layerSurface) {
     // Drop cached layer glass immediately. Otherwise the previous glass output
     // can remain in the damage history while Hyprland switches to its close
     // snapshot path, showing stale/black pixels for a frame.
-    std::erase_if(g_pGlobalState->layerSurfaces, [&](const auto& pair) {
-        return pair.first == layerSurface.get() || pair.second->getLayerSurface() == layerSurface;
-    });
+    // Preserve cache so makeSnapshotFB can reuse glass blur during exit snapshot
 
     if (auto monitor = layerSurface->m_monitor.lock())
         g_pHyprRenderer->damageMonitor(monitor);
@@ -139,6 +137,24 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PH
     // starts transparent/black, so sampling it as a background can bake a black
     // rectangle into the fade-out snapshot.
     if (g_pHyprRenderer->m_bRenderingSnapshot) {
+        auto it = g_pGlobalState->layerSurfaces.find(layerSurface.get());
+        if (it != g_pGlobalState->layerSurfaces.end() && it->second->hasCachedSample()) {
+            float alpha = layerSurface->alpha().getTotal();
+
+            // Pre-surface: redirect currentFB using the CACHED sample only
+            // (skip re-sampling — currentFB is the empty snapshot target)
+            CGlassLayerPassElement::SGlassLayerPassData preData{it->second, alpha};
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassLayerPassElement>(preData));
+
+            ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, layerSurface, monitor, now, popups, lockscreen);
+
+            // Post-surface: composite glass using the cached blur, bake it into
+            // the one-shot snapshot texture
+            CGlassLayerCompositeElement::SGlassLayerCompositeData postData{it->second, alpha};
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassLayerCompositeElement>(postData));
+            return;
+        }
+
         ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, layerSurface, monitor, now, popups, lockscreen);
         return;
     }
@@ -162,10 +178,10 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PH
             it = layerStates.emplace(rawPtr, std::make_shared<CGlassLayerSurface>(layerSurface)).first;
         }
 
-        if (!layerSurface->m_mapped) {
-            ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, layerSurface, monitor, now, popups, lockscreen);
-            return;
-        }
+        // Allow glass to keep rendering during close/fade-out animations.
+        // sampleAndRedirect() already handles !m_mapped by reusing the cached
+        // blurred background instead of re-sampling, so the glass effect stays
+        // visible for the full duration of the exit animation.
 
         float alpha = layerSurface->alpha().getTotal();
         if (alpha < 0.001f) {

@@ -20,6 +20,9 @@ class CGlassLayerSurface {
     void damageIfMoved();
 
     [[nodiscard]] PHLLS getLayerSurface() const;
+    [[nodiscard]] Vector2D getLastPosition() const { return m_lastPosition; }
+    [[nodiscard]] Vector2D getLastSize() const { return m_lastSize; }
+    [[nodiscard]] bool hasCachedSample() const { return m_hasCachedSample; }
 
   private:
     PHLLSREF     m_layerSurface;
@@ -31,6 +34,8 @@ class CGlassLayerSurface {
     // Track last position/size to detect movement and expand damage
     Vector2D     m_lastPosition;
     Vector2D     m_lastSize;
+    CBox         m_lastRawBox;
+    CBox         m_lastTransformBox;
 
     // Scene generation at last blur — skip re-sampling when only the layer
     // surface content changed (e.g. clock tick) but the background didn't.

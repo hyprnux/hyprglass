@@ -63,10 +63,10 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
     const float xScale = static_cast<float>(sampleWidth) / fullWidth;
     const float yScale = static_cast<float>(sampleHeight) / fullHeight;
 
-    if (srcX0 < 0) { dstX0 += static_cast<int>(-srcX0 * xScale); srcX0 = 0; }
-    if (srcY0 < 0) { dstY0 += static_cast<int>(-srcY0 * yScale); srcY0 = 0; }
-    if (srcX1 > framebufferWidth)  { dstX1 -= static_cast<int>((srcX1 - framebufferWidth) * xScale);  srcX1 = framebufferWidth; }
-    if (srcY1 > framebufferHeight) { dstY1 -= static_cast<int>((srcY1 - framebufferHeight) * yScale); srcY1 = framebufferHeight; }
+    srcX0 = std::clamp(srcX0, 0, framebufferWidth);
+    srcX1 = std::clamp(srcX1, 0, framebufferWidth);
+    srcY0 = std::clamp(srcY0, 0, framebufferHeight);
+    srcY1 = std::clamp(srcY1, 0, framebufferHeight);
 
     // Padding ratio is relative to the logical content area (resolution-independent)
     outPaddingRatio = Vector2D(

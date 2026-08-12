@@ -29,6 +29,25 @@ std::optional<CBox> CGlassLayerPassElement::boundingBox() {
     if (!box)
         return std::nullopt;
 
+    // Include the previous box position in boundingBox so Hyprland's needsLiveBlur()
+    // forces damage re-rendering of background windows (like Kitty) across the ENTIRE
+    // movement path, preventing stale glass feedback artifacts.
+    Vector2D lastPos = m_data.layerState->getLastPosition();
+    Vector2D lastSize = m_data.layerState->getLastSize();
+    if (lastSize.x > 0.0 && lastSize.y > 0.0 && std::isfinite(lastPos.x) && std::isfinite(lastPos.y)) {
+        CBox lastBox{lastPos, lastSize};
+        lastBox.translate(-monitor->m_position);
+        lastBox.scale(monitor->m_scale).round().noNegativeSize();
+        double minX = std::min(box->x, lastBox.x);
+        double minY = std::min(box->y, lastBox.y);
+        double maxX = std::max(box->x + box->w, lastBox.x + lastBox.w);
+        double maxY = std::max(box->y + box->h, lastBox.y + lastBox.h);
+        box->x = minX;
+        box->y = minY;
+        box->w = maxX - minX;
+        box->h = maxY - minY;
+    }
+
     const float scale = monitor->m_scale > 0.0f ? monitor->m_scale : 1.0f;
     box->scale(1.0 / scale).expand(GlassRenderer::SAMPLE_PADDING_PX / scale).noNegativeSize().round();
     if (!std::isfinite(box->x) || !std::isfinite(box->y) || !std::isfinite(box->w) || !std::isfinite(box->h) || box->w <= 0.0 || box->h <= 0.0)
