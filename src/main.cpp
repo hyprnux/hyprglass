@@ -26,9 +26,7 @@ static void clearLayerGlassOnClose(PHLLS layerSurface) {
     // Drop cached layer glass immediately. Otherwise the previous glass output
     // can remain in the damage history while Hyprland switches to its close
     // snapshot path, showing stale/black pixels for a frame.
-    std::erase_if(g_pGlobalState->layerSurfaces, [&](const auto& pair) {
-        return pair.first == layerSurface.get() || pair.second->getLayerSurface() == layerSurface;
-    });
+    // Preserve cache so makeSnapshotFB can reuse glass blur during exit snapshot
 
     if (auto monitor = layerSurface->m_monitor.lock())
         g_pHyprRenderer->damageMonitor(monitor);
