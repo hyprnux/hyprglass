@@ -19,10 +19,13 @@ class CGlassLayerSurface {
 
     void damageIfMoved();
 
+    void requestResampleIfOn(PHLMONITOR monitor, int frames = 4);
+
     [[nodiscard]] PHLLS getLayerSurface() const;
 
   private:
     PHLLSREF     m_layerSurface;
+    int          m_pendingResampleFrames = 0;
     SP<Render::IFramebuffer> m_sampleFramebuffer;
     SP<Render::IFramebuffer> m_surfaceTempFramebuffer;
     Vector2D     m_samplePaddingRatio;

@@ -114,6 +114,27 @@ void CGlassLayerSurface::damageIfMoved() {
     }
 }
 
+void CGlassLayerSurface::requestResampleIfOn(PHLMONITOR monitor, int frames) {
+    const auto layerSurface = m_layerSurface.lock();
+    if (!layerSurface || layerSurface->m_monitor.lock() != monitor)
+        return;
+
+    m_pendingResampleFrames = std::max(m_pendingResampleFrames, frames);
+
+    const auto position = layerSurface->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    const auto size     = layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    if (size.x <= 0.0 || size.y <= 0.0 ||
+        !std::isfinite(position.x) || !std::isfinite(position.y) ||
+        !std::isfinite(size.x) || !std::isfinite(size.y))
+        return;
+
+    auto box = CBox{position, size};
+    const float scale = monitor ? monitor->m_scale : 1.0f;
+    box.expand(GlassRenderer::SAMPLE_PADDING_PX / scale).noNegativeSize();
+    if (box.w > 0.0 && box.h > 0.0)
+        g_pHyprRenderer->damageBox(box);
+}
+
 void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     auto& shaderManager = g_pGlobalState->shaderManager;
     shaderManager.initializeIfNeeded();
@@ -148,9 +169,19 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     const bool isDragging = g_layoutManager && g_layoutManager->dragController() &&
                             g_layoutManager->dragController()->mode() != MBIND_INVALID;
 
+    const bool pendingResample = m_pendingResampleFrames > 0;
+    if (pendingResample) {
+        --m_pendingResampleFrames;
+        auto box = CBox{layerSurface->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT),
+                        layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
+        box.expand(GlassRenderer::SAMPLE_PADDING_PX / (monitor ? monitor->m_scale : 1.0f)).noNegativeSize();
+        if (box.w > 0.0 && box.h > 0.0)
+            g_pHyprRenderer->damageBox(box);
+    }
+
     const bool backgroundChanged = !m_hasCachedSample ||
                                    currentGeneration != m_lastSceneGeneration ||
-                                   isAnimating || isDragging;
+                                   isAnimating || isDragging || pendingResample;
 
     if (!layerSurface->m_mapped) {
         // During fade-out, re-sampling captures stale pixels. Reuse cached sample.
