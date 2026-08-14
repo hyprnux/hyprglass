@@ -50,6 +50,10 @@ static void onCloseWindow(PHLWINDOW window) {
         auto* deco = decoration.get();
         return !deco || deco->getOwner() == window;
     });
+
+    if (window)
+        if (auto mon = window->m_monitor.lock())
+            g_pGlobalState->bumpSceneGeneration(mon);
 }
 
 // ── Layer surface support ────────────────────────────────────────────────────
