@@ -45,11 +45,25 @@ static void onNewWindow(PHLWINDOW window) {
     HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(decoration));
 }
 
+static void invalidateGlassLayers(PHLMONITOR monitor, int frames = 4) {
+    if (!monitor)
+        return;
+
+    g_pGlobalState->bumpSceneGeneration(monitor);
+
+    for (auto& [_, glass] : g_pGlobalState->layerSurfaces)
+        if (glass)
+            glass->requestResampleIfOn(monitor, frames);
+}
+
 static void onCloseWindow(PHLWINDOW window) {
     std::erase_if(g_pGlobalState->decorations, [&window](const auto& decoration) {
         auto* deco = decoration.get();
         return !deco || deco->getOwner() == window;
     });
+
+    if (window)
+        invalidateGlassLayers(window->m_monitor.lock(), 90);
 }
 
 // ── Layer surface support ────────────────────────────────────────────────────
@@ -232,7 +246,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pGlobalState = std::make_unique<SGlobalState>();
 
-    static auto onOpen = Event::bus()->m_events.window.open.listen([&](PHLWINDOW w) { onNewWindow(w); });
+    static auto onOpen = Event::bus()->m_events.window.open.listen([&](PHLWINDOW w) { onNewWindow(w); if (w) invalidateGlassLayers(w->m_monitor.lock(), 90); });
 
     static auto onClose = Event::bus()->m_events.window.close.listen([&](PHLWINDOW w) { onCloseWindow(w); });
 
@@ -241,7 +255,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // Z-order / visibility changes invalidate layer glass caches on the affected monitor only.
     // Per-monitor to avoid triggering re-samples on idle monitors (feedback loop).
     auto bumpWindowMonitor = [&](PHLWINDOW w) {
-        if (w) if (auto mon = w->m_monitor.lock()) g_pGlobalState->bumpSceneGeneration(mon);
+        if (w) invalidateGlassLayers(w->m_monitor.lock());
     };
     static auto onWindowActive = Event::bus()->m_events.window.active.listen(
         [=](PHLWINDOW w, Desktop::eFocusReason) { bumpWindowMonitor(w); });
@@ -251,7 +265,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         [=](PHLWINDOW w, PHLWORKSPACE) { bumpWindowMonitor(w); });
     static auto onWorkspaceActive = Event::bus()->m_events.workspace.active.listen(
         [&](PHLWORKSPACE ws) {
-            if (ws) if (auto mon = ws->m_monitor.lock()) g_pGlobalState->bumpSceneGeneration(mon);
+            if (ws) invalidateGlassLayers(ws->m_monitor.lock());
         });
 
     // Clear pending presets/layers before config re-parse, commit after
