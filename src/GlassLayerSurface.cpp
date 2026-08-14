@@ -173,8 +173,10 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     // Redirect surface rendering to a temp FBO cleared to transparent.
     // The original renderLayer (called between pre/post elements) will render
     // the surface into this FBO. compositeAndRestore uses its alpha as a mask.
-    int monitorWidth  = static_cast<int>(monitor->m_transformedSize.x);
-    int monitorHeight = static_cast<int>(monitor->m_transformedSize.y);
+    // Size from the source FB, not the monitor: m_transformedSize is swapped
+    // relative to the framebuffer's native orientation on 90°/270° monitors (#41).
+    int monitorWidth  = static_cast<int>(source->m_size.x);
+    int monitorHeight = static_cast<int>(source->m_size.y);
 
     // In FP16/HDR mode, the source FB uses RGBA16F which has full alpha precision.
     // Use the source format to avoid clipping HDR color values.
@@ -244,8 +246,8 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
     // Use the temp FBO's rendered alpha as a mask: glass only where the surface
     // has visible content (alpha > 0). The temp FBO is in monitor coordinates,
     // so we map from the glass quad UV to monitor UV.
-    int monitorWidth  = static_cast<int>(monitor->m_transformedSize.x);
-    int monitorHeight = static_cast<int>(monitor->m_transformedSize.y);
+    int monitorWidth  = static_cast<int>(m_surfaceTempFramebuffer->m_size.x);
+    int monitorHeight = static_cast<int>(m_surfaceTempFramebuffer->m_size.y);
 
     float maskThreshold = 0.001f;
     auto threshIt = g_pGlobalState->layerNamespaceMaskThresholds.find(layerSurface->m_namespace);
