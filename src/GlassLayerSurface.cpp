@@ -6,7 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <GLES3/gl32.h>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
@@ -134,7 +134,7 @@ void CGlassLayerSurface::damageIfMoved() {
     const bool isAnimating = layerSurface->positionAnimation()->isBeingAnimated() ||
                              layerSurface->sizeAnimation()->isBeingAnimated() ||
                              layerSurface->alpha()[Desktop::View::LS_ALPHA_FADE]->isBeingAnimated() ||
-                             !layerSurface->m_mapped;
+                             !layerSurface->mapped();
 
     const bool moved = currentPosition != m_lastPosition || currentSize != m_lastSize;
 
@@ -222,7 +222,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
                                    currentGeneration != m_lastSceneGeneration ||
                                    isAnimating || m_backgroundDirty || forceLive;
 
-    if (!layerSurface->m_mapped) {
+    if (!layerSurface->mapped()) {
         // During fade-out, re-sampling captures stale pixels. Reuse cached sample.
         if (!m_hasCachedSample)
             return;
