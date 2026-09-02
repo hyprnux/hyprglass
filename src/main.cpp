@@ -232,41 +232,43 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pGlobalState = std::make_unique<SGlobalState>();
 
-    static auto onOpen = Event::bus()->m_events.window.open.listen([&](PHLWINDOW w) { onNewWindow(w); });
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.open.listen([&](PHLWINDOW w) { onNewWindow(w); }));
 
-    static auto onClose = Event::bus()->m_events.window.close.listen([&](PHLWINDOW w) { onCloseWindow(w); });
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.close.listen([&](PHLWINDOW w) { onCloseWindow(w); }));
 
-    static auto onLayerClosed = Event::bus()->m_events.layer.closed.listen([&](PHLLS layerSurface) { clearLayerGlassOnClose(layerSurface); });
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.layer.closed.listen([&](PHLLS layerSurface) { clearLayerGlassOnClose(layerSurface); }));
 
     // Z-order / visibility changes invalidate layer glass caches on the affected monitor only.
     // Per-monitor to avoid triggering re-samples on idle monitors (feedback loop).
     auto bumpWindowMonitor = [&](PHLWINDOW w) {
         if (w) if (auto mon = w->m_monitor.lock()) g_pGlobalState->bumpSceneGeneration(mon);
     };
-    static auto onWindowActive = Event::bus()->m_events.window.active.listen(
-        [=](PHLWINDOW w, Desktop::eFocusReason) { bumpWindowMonitor(w); });
-    static auto onWindowFullscreen = Event::bus()->m_events.window.fullscreen.listen(
-        [=](PHLWINDOW w) { bumpWindowMonitor(w); });
-    static auto onWindowMoveToWorkspace = Event::bus()->m_events.window.moveToWorkspace.listen(
-        [=](PHLWINDOW w, PHLWORKSPACE) { bumpWindowMonitor(w); });
-    static auto onWorkspaceActive = Event::bus()->m_events.workspace.active.listen(
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.active.listen(
+        [=](PHLWINDOW w, Desktop::eFocusReason) { bumpWindowMonitor(w); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.fullscreen.listen(
+        [=](PHLWINDOW w) { bumpWindowMonitor(w); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.moveToWorkspace.listen(
+        [=](PHLWINDOW w, PHLWORKSPACE) { bumpWindowMonitor(w); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.workspace.active.listen(
         [&](PHLWORKSPACE ws) {
             if (ws) if (auto mon = ws->m_monitor.lock()) g_pGlobalState->bumpSceneGeneration(mon);
-        });
+        }));
 
     // Clear pending presets/layers before config re-parse, commit after
-    static auto onPreConfigReload = Event::bus()->m_events.config.preReload.listen([&]() {
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.preReload.listen([&]() {
         clearPendingPresets();
         clearPendingLayers();
-    });
+    }));
 
-    static auto onConfigReloaded = Event::bus()->m_events.config.reloaded.listen([&]() {
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([&]() {
+        if (!g_pGlobalState)
+            return;
         initConfigPointers(PHANDLE, g_pGlobalState->config);
         commitPendingPresets();
         parseLayerNamespaceFilters();
         commitPendingLayers(); // merge Lua layer() calls on top of string config
         validateConfig();
-    });
+    }));
 
 
     registerConfig(PHANDLE);
@@ -319,6 +321,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 APICALL EXPORT void PLUGIN_EXIT() {
     if (!g_pGlobalState)
         return;
+
+    g_pGlobalState->listeners.clear();
 
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassPassElement");
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassLayerPassElement");
