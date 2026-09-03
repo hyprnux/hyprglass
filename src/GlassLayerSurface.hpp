@@ -3,6 +3,7 @@
 #include "GlassRenderer.hpp"
 #include "PluginConfig.hpp"
 
+#include <chrono>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
 
@@ -19,6 +20,9 @@ class CGlassLayerSurface {
 
     void damageIfMoved();
 
+    // Content below committed damage in our sample region — resample next frame
+    void markBackgroundDirty();
+
     [[nodiscard]] PHLLS getLayerSurface() const;
 
   private:
@@ -27,6 +31,10 @@ class CGlassLayerSurface {
     SP<Render::IFramebuffer> m_surfaceTempFramebuffer;
     Vector2D     m_samplePaddingRatio;
     bool         m_hasCachedSample = false;
+    bool         m_backgroundDirty = false;
+    std::chrono::steady_clock::time_point m_lastDirtyMark{};
+
+    void damageSampleRegion();
 
     // Track last position/size to detect movement and expand damage
     Vector2D     m_lastPosition;

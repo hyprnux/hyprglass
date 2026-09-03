@@ -72,6 +72,9 @@ inline constexpr auto LAYERS_EXCLUDE_NAMESPACES = "plugin:hyprglass:layers:exclu
 inline constexpr auto LAYERS_PRESET             = "plugin:hyprglass:layers:preset";
 inline constexpr auto LAYERS_NAMESPACE_PRESETS          = "plugin:hyprglass:layers:namespace_presets";
 inline constexpr auto LAYERS_NAMESPACE_MASK_THRESHOLDS  = "plugin:hyprglass:layers:namespace_mask_thresholds";
+inline constexpr auto LAYERS_LIVE_RESAMPLE              = "plugin:hyprglass:layers:live_resample";
+inline constexpr auto LAYERS_LIVE_RESAMPLE_FPS          = "plugin:hyprglass:layers:live_resample_fps";
+inline constexpr auto LAYERS_FORCE_LIVE_RESAMPLE        = "plugin:hyprglass:layers:force_live_resample";
 
 // Overridable — dark theme overrides
 inline constexpr auto DARK_BLUR_STRENGTH        = "plugin:hyprglass:dark:blur_strength";
@@ -201,6 +204,9 @@ struct SPluginConfig {
     StringConfigPtr       layersPreset;
     StringConfigPtr       layersNamespacePresets;
     StringConfigPtr       layersNamespaceMaskThresholds;
+    Hyprlang::INT* const* layersLiveResample             = nullptr;
+    Hyprlang::INT* const* layersLiveResampleFps          = nullptr;
+    Hyprlang::INT* const* layersForceLiveResample        = nullptr;
 
     SOverridableConfig global;
     SOverridableConfig dark;

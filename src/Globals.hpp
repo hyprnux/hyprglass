@@ -68,6 +68,8 @@ struct SGlobalState {
 
     // renderLayer hook
     CFunctionHook* renderLayerHook = nullptr;
+    // damageSurface hook (live layer re-render)
+    CFunctionHook* damageSurfaceHook = nullptr;
 };
 
 using Render::GL::g_pHyprOpenGL;

@@ -100,16 +100,47 @@ void CGlassLayerSurface::damageIfMoved() {
         m_lastPosition  = currentPosition;
         m_lastSize      = currentSize;
 
-        auto box = CBox{currentPosition, currentSize};
-        const auto monitor = layerSurface->m_monitor.lock();
-        const float scale = monitor ? monitor->m_scale : 1.0f;
-        box.expand(GlassRenderer::SAMPLE_PADDING_PX / scale).noNegativeSize();
-        if (box.w > 0.0 && box.h > 0.0)
-            g_pHyprRenderer->damageBox(box);
+        damageSampleRegion();
 
-        if (monitor)
+        if (const auto monitor = layerSurface->m_monitor.lock())
             g_pGlobalState->bumpSceneGeneration(monitor);
+    } else if (const auto& config = g_pGlobalState->config;
+               config.layersForceLiveResample && **config.layersForceLiveResample) {
+        // keep frames flowing so the forced per-frame resample actually runs
+        damageSampleRegion();
     }
+}
+
+void CGlassLayerSurface::damageSampleRegion() {
+    const auto layerSurface = m_layerSurface.lock();
+    if (!layerSurface)
+        return;
+
+    const auto monitor = layerSurface->m_monitor.lock();
+    const float scale = monitor ? monitor->m_scale : 1.0f;
+    auto box = CBox{layerSurface->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT),
+                    layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
+    box.expand(GlassRenderer::SAMPLE_PADDING_PX / scale).noNegativeSize();
+    if (box.w > 0.0 && box.h > 0.0 &&
+        std::isfinite(box.x) && std::isfinite(box.y) && std::isfinite(box.w) && std::isfinite(box.h))
+        g_pHyprRenderer->damageBox(box);
+}
+
+void CGlassLayerSurface::markBackgroundDirty() {
+    if (m_backgroundDirty)
+        return;
+
+    const auto& config = g_pGlobalState->config;
+    const int64_t fps = config.layersLiveResampleFps ? **config.layersLiveResampleFps : 0;
+    const auto now = std::chrono::steady_clock::now();
+    if (fps > 0 && now - m_lastDirtyMark < std::chrono::nanoseconds(1'000'000'000 / fps))
+        return;
+    m_lastDirtyMark = now;
+
+    m_backgroundDirty = true;
+    // damage the full sample region: outside the committed area the framebuffer
+    // still holds our previous glass output, which must not be re-sampled
+    damageSampleRegion();
 }
 
 void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
@@ -143,9 +174,11 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
                              layerSurface->sizeAnimation()->isBeingAnimated() ||
                              layerSurface->alpha()[Desktop::View::LS_ALPHA_FADE]->isBeingAnimated() ||
                              (activeWs && activeWs->m_renderOffset->isBeingAnimated());
+    const auto& config = g_pGlobalState->config;
+    const bool forceLive = config.layersForceLiveResample && **config.layersForceLiveResample;
     const bool backgroundChanged = !m_hasCachedSample ||
                                    currentGeneration != m_lastSceneGeneration ||
-                                   isAnimating;
+                                   isAnimating || m_backgroundDirty || forceLive;
 
     if (!layerSurface->m_mapped) {
         // During fade-out, re-sampling captures stale pixels. Reuse cached sample.
@@ -167,6 +200,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
 
         m_hasCachedSample      = true;
         m_lastSceneGeneration  = currentGeneration;
+        m_backgroundDirty      = false;
     }
     // else: background unchanged, reuse cached blur — skip 7 GPU operations
 
