@@ -1,4 +1,11 @@
 
+## [v0.8.1](https://github.com/Hyprnux/hyprglass/compare/v0.8.0...v0.8.1) - 2026-09-04
+
+### Bug Fixes
+
+* issue provoking black artifacts in some monitors configurations ([#56](https://github.com/Hyprnux/hyprglass/issues/56))
+
+
 ## [v0.8.0](https://github.com/Hyprnux/hyprglass/compare/v0.7.0...v0.8.0) - 2026-09-03
 
 ### Bug Fixes
@@ -13,6 +20,10 @@
 * rebuild objects when headers change
 * update hyprland compatibility to v0.56.2
 * update hyprland compatibility to v0.56.1
+
+### Chores
+
+* **release:** v0.8.0 [skip ci]
 
 ### Features
 
