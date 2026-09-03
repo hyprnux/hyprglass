@@ -8,6 +8,7 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/desktop/view/WLSurface.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -121,7 +122,18 @@ static void hkDamageSurface(Render::IHyprRenderer* thisptr, SP<CWLSurfaceResourc
         g_pGlobalState->layerSurfaces.empty())
         return;
 
-    const CBox damagedBox = {x, y, surface->m_current.size.x, surface->m_current.size.y};
+    const auto wlSurface = Desktop::View::CWLSurface::fromResource(surface);
+    if (!wlSurface)
+        return;
+
+    // same region Hyprland damaged: commits without damage change nothing behind us
+    CRegion damage = wlSurface->computeDamage();
+    if (damage.empty())
+        return;
+    if (scale != 1.0)
+        damage.scale(scale);
+    damage.translate({x, y});
+    const CBox damagedBox = damage.getExtents();
 
     for (const auto& [_, state] : g_pGlobalState->layerSurfaces) {
         const auto layer = state->getLayerSurface();
