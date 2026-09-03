@@ -275,7 +275,10 @@ void main() {
         color *= 1.0 - shadow;
     }
 
-    float glassA = glassOpacity * cornerAlpha;
+    // float framebuffers (FP16 under wide-gamut cm) store unbounded values and
+    // the glass re-samples its own output: unclamped color diverges over frames
+    color = clamp(color, 0.0, 1.0);
+    float glassA = clamp(glassOpacity * cornerAlpha, 0.0, 1.0);
 
     if (hasMask) {
         // Layers only: composite the rendered surface over the glass effect
@@ -318,9 +321,9 @@ void main() {
 
     int samples = min(int(ceil(blurRadius)), 8);
 
-    // Center tap
+    // Center tap, clamped: an out-of-range texel from a float framebuffer would otherwise dominate the kernel
     float w0 = 1.0;
-    vec4 result = texture(tex, v_texcoord) * w0;
+    vec4 result = clamp(texture(tex, v_texcoord), 0.0, 1.0) * w0;
     float totalWeight = w0;
 
     // Linear sampling: pair adjacent taps (i, i+1) into a single bilinear fetch.
@@ -337,8 +340,8 @@ void main() {
         // Offset biased toward the heavier weight
         float offset = (x1 * w1 + x2 * w2) / wSum;
 
-        result += texture(tex, v_texcoord + direction * offset) * wSum;
-        result += texture(tex, v_texcoord - direction * offset) * wSum;
+        result += clamp(texture(tex, v_texcoord + direction * offset), 0.0, 1.0) * wSum;
+        result += clamp(texture(tex, v_texcoord - direction * offset), 0.0, 1.0) * wSum;
         totalWeight += 2.0 * wSum;
     }
 
