@@ -45,6 +45,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_PRESET, Config::STRING{});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_PRESETS, Config::STRING{});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_THRESHOLDS, Config::STRING{});
+    addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_LIVE_RESAMPLE, Config::STRING{});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE, Config::INTEGER{1});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE_FPS, Config::INTEGER{30});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_FORCE_LIVE_RESAMPLE, Config::INTEGER{0});
@@ -167,6 +168,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.layersPreset            = getStringPtr(handle, ConfigKeys::LAYERS_PRESET);
     config.layersNamespacePresets         = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_PRESETS);
     config.layersNamespaceMaskThresholds = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_THRESHOLDS);
+    config.layersNamespaceLiveResample = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_LIVE_RESAMPLE);
     config.layersLiveResample      = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE);
     config.layersLiveResampleFps   = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE_FPS);
     config.layersForceLiveResample = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_FORCE_LIVE_RESAMPLE);
@@ -483,6 +485,7 @@ struct SPendingLayer {
     std::string preset;
     float       maskThreshold = -1.0f;
     bool        exclude       = false;
+    int         liveResample  = -1; // -1 = not set
 };
 
 static std::vector<SPendingLayer> s_pendingLayers;
@@ -509,6 +512,11 @@ static int handleLuaLayer(lua_State* L) {
         if (lua_isnumber(L, -1))
             entry.maskThreshold = static_cast<float>(lua_tonumber(L, -1));
         lua_pop(L, 1);
+
+        lua_getfield(L, 2, "live_resample");
+        if (lua_isboolean(L, -1))
+            entry.liveResample = lua_toboolean(L, -1) ? 1 : 0;
+        lua_pop(L, 1);
     }
 
     s_pendingLayers.push_back(std::move(entry));
@@ -530,6 +538,8 @@ void commitPendingLayers() {
                 g_pGlobalState->layerNamespacePresets[entry.ns] = entry.preset;
             if (entry.maskThreshold >= 0.0f)
                 g_pGlobalState->layerNamespaceMaskThresholds[entry.ns] = entry.maskThreshold;
+            if (entry.liveResample >= 0)
+                g_pGlobalState->layerNamespaceLiveResample[entry.ns] = entry.liveResample != 0;
         }
     }
     s_pendingLayers.clear();

@@ -23,6 +23,8 @@ class CGlassLayerSurface {
     // Content below committed damage in our sample region — resample next frame
     void markBackgroundDirty();
 
+    [[nodiscard]] bool liveResampleEnabled() const;
+
     [[nodiscard]] PHLLS getLayerSurface() const;
 
   private:

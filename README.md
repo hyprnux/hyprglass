@@ -170,7 +170,7 @@ The effect uses the layer surface opacity as a mask:
 hg.config({ layers = { enabled = true } })
 
 -- Each call whitelists the namespace and optionally configures it
-hg.layer("waybar", { preset = "subtle", mask_threshold = 0.05 })
+hg.layer("waybar", { preset = "subtle", mask_threshold = 0.05, live_resample = false })
 hg.layer("swaync")
 hg.layer("quickshell:bezel", { preset = "ui", mask_threshold = 0.3 })
 hg.layer("debug-panel", { exclude = true })
@@ -180,6 +180,7 @@ hg.layer("debug-panel", { exclude = true })
 |---|---|---|
 | `preset` | string | Preset override for this layer |
 | `mask_threshold` | float | Alpha threshold (pixels below this are not glassed). Default `0.001` |
+| `live_resample` | bool | Per-layer override of `layers:live_resample` |
 | `exclude` | bool | Blacklist this namespace instead of whitelisting it |
 
 #### Legacy .conf config
@@ -192,7 +193,8 @@ hg.layer("debug-panel", { exclude = true })
 | `layers:preset` | string | `""` | Preset override for all layers |
 | `layers:namespace_presets` | string | `""` | Per-namespace preset (`ns:preset` pairs, comma-separated) |
 | `layers:namespace_mask_thresholds` | string | `""` | Per-namespace alpha threshold (`ns=value` pairs, comma-separated) |
-| `layers:live_resample` | bool | `true` (`1` in .conf) | Re-render layer glass when content behind it changes (e.g. a playing video). GPU cost scales with background activity; static scenes stay free |
+| `layers:namespace_live_resample` | string | `""` | Per-namespace live resample override (`ns=0/1` pairs, comma-separated) |
+| `layers:live_resample` | bool | `true` (`1` in .conf) | Re-render layer glass when content behind it changes (e.g. a playing video). GPU cost scales with background activity; static scenes stay free. Overridable per layer |
 | `layers:live_resample_fps` | int | `30` | Max re-renders per second per layer for live resample. `0` = uncapped |
 | `layers:force_live_resample` | bool | `false` (`0` in .conf) | Experimental: re-render layer glass every frame regardless of changes. Heavy GPU/battery cost |
 

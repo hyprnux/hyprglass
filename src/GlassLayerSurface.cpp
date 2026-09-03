@@ -73,6 +73,17 @@ std::string CGlassLayerSurface::resolvePresetName() const {
     return "default";
 }
 
+bool CGlassLayerSurface::liveResampleEnabled() const {
+    if (const auto layerSurface = m_layerSurface.lock()) {
+        const auto& overrides = g_pGlobalState->layerNamespaceLiveResample;
+        if (auto it = overrides.find(layerSurface->m_namespace); it != overrides.end())
+            return it->second;
+    }
+
+    const auto& config = g_pGlobalState->config;
+    return config.layersLiveResample && **config.layersLiveResample;
+}
+
 PHLLS CGlassLayerSurface::getLayerSurface() const {
     return m_layerSurface.lock();
 }

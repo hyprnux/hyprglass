@@ -118,8 +118,12 @@ static void hkDamageSurface(Render::IHyprRenderer* thisptr, SP<CWLSurfaceResourc
 
     const auto& config = g_pGlobalState->config;
     if (!config.layersEnabled || !**config.layersEnabled ||
-        !config.layersLiveResample || !**config.layersLiveResample ||
         g_pGlobalState->layerSurfaces.empty())
+        return;
+
+    // cheap skip when nothing can want a live resample
+    const bool globalLive = config.layersLiveResample && **config.layersLiveResample;
+    if (!globalLive && std::ranges::none_of(g_pGlobalState->layerNamespaceLiveResample, [](const auto& kv) { return kv.second; }))
         return;
 
     const auto wlSurface = Desktop::View::CWLSurface::fromResource(surface);
@@ -138,6 +142,9 @@ static void hkDamageSurface(Render::IHyprRenderer* thisptr, SP<CWLSurfaceResourc
     for (const auto& [_, state] : g_pGlobalState->layerSurfaces) {
         const auto layer = state->getLayerSurface();
         if (!layer || !layer->m_mapped)
+            continue;
+
+        if (!state->liveResampleEnabled())
             continue;
 
         // a layer's own content is not its background
@@ -209,6 +216,14 @@ static void parseLayerNamespaceFilters() {
     g_pGlobalState->layerNamespaceMaskThresholds.clear();
     parseKeyValuePairs(config.layersNamespaceMaskThresholds, '=', [&](const std::string& ns, const std::string& val) {
         try { g_pGlobalState->layerNamespaceMaskThresholds.emplace(ns, std::stof(val)); } catch (...) {}
+    });
+
+    g_pGlobalState->layerNamespaceLiveResample.clear();
+    parseKeyValuePairs(config.layersNamespaceLiveResample, '=', [&](const std::string& ns, const std::string& val) {
+        if (val == "1" || val == "true" || val == "on" || val == "yes")
+            g_pGlobalState->layerNamespaceLiveResample[ns] = true;
+        else if (val == "0" || val == "false" || val == "off" || val == "no")
+            g_pGlobalState->layerNamespaceLiveResample[ns] = false;
     });
 }
 
