@@ -8,6 +8,7 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/desktop/view/WLSurface.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -94,6 +95,73 @@ static void drawGlassForFullscreenWindow() {
 
 // ── Layer surface support ────────────────────────────────────────────────────
 
+static bool surfaceInTree(const SP<CWLSurfaceResource>& surface, const SP<CWLSurfaceResource>& root) {
+    if (!root)
+        return false;
+    bool found = false;
+    root->breadthfirst([&](SP<CWLSurfaceResource> s, const Vector2D&, void*) {
+        if (s == surface)
+            found = true;
+    }, nullptr);
+    return found;
+}
+
+using damageSurfaceFn = void (*)(Render::IHyprRenderer*, SP<CWLSurfaceResource>, double, double, double);
+
+// Client commits are the only signal that content below a glassed layer changed
+// (e.g. a playing video) — the scene-generation cache only sees window events.
+static void hkDamageSurface(Render::IHyprRenderer* thisptr, SP<CWLSurfaceResource> surface, double x, double y, double scale) {
+    ((damageSurfaceFn)g_pGlobalState->damageSurfaceHook->m_original)(thisptr, surface, x, y, scale);
+
+    if (!g_pGlobalState || !surface)
+        return;
+
+    const auto& config = g_pGlobalState->config;
+    if (!config.layersEnabled || !**config.layersEnabled ||
+        g_pGlobalState->layerSurfaces.empty())
+        return;
+
+    // cheap skip when nothing can want a live resample
+    const bool globalLive = config.layersLiveResample && **config.layersLiveResample;
+    if (!globalLive && std::ranges::none_of(g_pGlobalState->layerNamespaceLiveResample, [](const auto& kv) { return kv.second; }))
+        return;
+
+    const auto wlSurface = Desktop::View::CWLSurface::fromResource(surface);
+    if (!wlSurface)
+        return;
+
+    // same region Hyprland damaged: commits without damage change nothing behind us
+    CRegion damage = wlSurface->computeDamage();
+    if (damage.empty())
+        return;
+    if (scale != 1.0)
+        damage.scale(scale);
+    damage.translate({x, y});
+    const CBox damagedBox = damage.getExtents();
+
+    for (const auto& [_, state] : g_pGlobalState->layerSurfaces) {
+        const auto layer = state->getLayerSurface();
+        if (!layer || !layer->m_mapped)
+            continue;
+
+        if (!state->liveResampleEnabled())
+            continue;
+
+        // a layer's own content is not its background
+        if (surfaceInTree(surface, layer->wlSurface() ? layer->wlSurface()->resource() : nullptr))
+            continue;
+
+        const auto monitor = layer->m_monitor.lock();
+        const float monScale = monitor ? monitor->m_scale : 1.0f;
+        CBox sampleBox = CBox{layer->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT),
+                              layer->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
+        sampleBox.expand(GlassRenderer::SAMPLE_PADDING_PX / monScale);
+
+        if (sampleBox.overlaps(damagedBox))
+            state->markBackgroundDirty();
+    }
+}
+
 // Parse comma-separated config string into a set of trimmed values.
 static void parseCommaSeparated(StringConfigPtr configPtr, std::unordered_set<std::string>& out) {
     out.clear();
@@ -148,6 +216,14 @@ static void parseLayerNamespaceFilters() {
     g_pGlobalState->layerNamespaceMaskThresholds.clear();
     parseKeyValuePairs(config.layersNamespaceMaskThresholds, '=', [&](const std::string& ns, const std::string& val) {
         try { g_pGlobalState->layerNamespaceMaskThresholds.emplace(ns, std::stof(val)); } catch (...) {}
+    });
+
+    g_pGlobalState->layerNamespaceLiveResample.clear();
+    parseKeyValuePairs(config.layersNamespaceLiveResample, '=', [&](const std::string& ns, const std::string& val) {
+        if (val == "1" || val == "true" || val == "on" || val == "yes")
+            g_pGlobalState->layerNamespaceLiveResample[ns] = true;
+        else if (val == "0" || val == "false" || val == "off" || val == "no")
+            g_pGlobalState->layerNamespaceLiveResample[ns] = false;
     });
 }
 
@@ -358,6 +434,25 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         });
     }
 
+    // Hook damageSurface for live layer re-render on background content change
+    auto damageSurfaceMatches = HyprlandAPI::findFunctionsByName(PHANDLE, "damageSurface");
+    for (const auto& match : damageSurfaceMatches) {
+        if (match.demangled.contains("IHyprRenderer") && match.demangled.contains("damageSurface")) {
+            g_pGlobalState->damageSurfaceHook = HyprlandAPI::createFunctionHook(PHANDLE, match.address, (void*)hkDamageSurface);
+            if (g_pGlobalState->damageSurfaceHook)
+                g_pGlobalState->damageSurfaceHook->hook();
+            break;
+        }
+    }
+
+    if (!g_pGlobalState->damageSurfaceHook) {
+        HyprlandAPI::addNotificationV2(PHANDLE, {
+            {"text", std::string("[hyprglass] Could not hook damageSurface — live layer re-render disabled")},
+            {"time", (uint64_t)5000},
+            {"color", CHyprColor{1.0, 0.8, 0.2, 1.0}},
+        });
+    }
+
     HyprlandAPI::reloadConfig();
     initConfigPointers(PHANDLE, g_pGlobalState->config);
     commitPendingPresets();
@@ -387,6 +482,11 @@ APICALL EXPORT void PLUGIN_EXIT() {
     if (g_pGlobalState->renderLayerHook) {
         HyprlandAPI::removeFunctionHook(PHANDLE, g_pGlobalState->renderLayerHook);
         g_pGlobalState->renderLayerHook = nullptr;
+    }
+
+    if (g_pGlobalState->damageSurfaceHook) {
+        HyprlandAPI::removeFunctionHook(PHANDLE, g_pGlobalState->damageSurfaceHook);
+        g_pGlobalState->damageSurfaceHook = nullptr;
     }
 
     g_pGlobalState->layerSurfaces.clear();
