@@ -1,4 +1,30 @@
 
+## [v0.8.0](https://github.com/Hyprnux/hyprglass/compare/v0.7.0...v0.8.0) - 2026-09-03
+
+### Bug Fixes
+
+* validate hg.config keys and report errors at the caller ([#71](https://github.com/Hyprnux/hyprglass/issues/71))
+* keep glass on internal-fullscreen windows, recover on fullscreen exit ([#54](https://github.com/Hyprnux/hyprglass/issues/54))
+* size layer FBOs from the framebuffer, not the monitor transform
+* own event listeners in plugin state so unload unregisters them
+
+### Build System
+
+* rebuild objects when headers change
+* update hyprland compatibility to v0.56.2
+* update hyprland compatibility to v0.56.1
+
+### Features
+
+* add support for ext-background-effect-v1 (wayland) with alpha fallback ([#61](https://github.com/Hyprnux/hyprglass/issues/61))
+* per-layer live_resample override for layer glass ([#59](https://github.com/Hyprnux/hyprglass/issues/59))
+* re-rendering layer background when window content behind it change ([#59](https://github.com/Hyprnux/hyprglass/issues/59))
+
+### Performance Improvements
+
+* mark layer glass dirty from actual commit damage only ([#59](https://github.com/Hyprnux/hyprglass/issues/59))
+
+
 ## [v0.7.0](https://github.com/Hyprnux/hyprglass/compare/v0.6.4...v0.7.0) - 2026-07-20
 
 ### Bug Fixes
@@ -15,6 +41,10 @@
 ### Build System
 
 * update hyprland compatibility to v0.56.0
+
+### Chores
+
+* **release:** v0.7.0 [skip ci]
 
 ### Documentation
 
