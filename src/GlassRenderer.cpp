@@ -226,9 +226,16 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
             static_cast<float>(mask->uvScale.x),
             static_cast<float>(mask->uvScale.y));
         glUniform1f(uniforms.maskAlphaThreshold, mask->alphaThreshold);
+        glUniform1i(uniforms.maskMode, mask->maskMode);
+        glUniform1i(uniforms.regionRectCount, mask->regionRectCount);
+        if (mask->regionRectCount > 0)
+            glUniform4fv(uniforms.regionRects, mask->regionRectCount,
+                         reinterpret_cast<const float*>(mask->regionRects.data()));
     } else {
         glUniform1i(uniforms.useMask, 0);
         glUniform1f(uniforms.maskAlphaThreshold, 0.001f);
+        glUniform1i(uniforms.maskMode, 0);
+        glUniform1i(uniforms.regionRectCount, 0);
     }
 
     shader->setUniformFloat(SHADER_RADIUS, cornerRadius);

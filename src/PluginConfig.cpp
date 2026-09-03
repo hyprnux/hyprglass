@@ -33,6 +33,13 @@ static int handleLuaPreset(lua_State* L);
 static int handleLuaLayer(lua_State* L);
 static int handleLuaConfig(lua_State* L);
 
+std::optional<ELayerMaskMode> parseLayerMaskMode(std::string_view value) {
+    if (value == "auto")   return ELayerMaskMode::AUTO;
+    if (value == "alpha")  return ELayerMaskMode::ALPHA;
+    if (value == "region") return ELayerMaskMode::REGION;
+    return std::nullopt;
+}
+
 void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::ENABLED, Config::INTEGER{1});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::MANAGE_WINDOW_BLUR, Config::INTEGER{1});
@@ -50,6 +57,9 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE, Config::INTEGER{1});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE_FPS, Config::INTEGER{30});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_FORCE_LIVE_RESAMPLE, Config::INTEGER{0});
+    addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_MASK_MODE, Config::STRING{"auto"});
+    addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_MODES, Config::STRING{});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_MANAGE_BLUR, Config::INTEGER{1});
 
     // Global level — real defaults for effect settings,
     // sentinel for theme-sensitive settings (fallback to hardcoded theme defaults)
@@ -173,6 +183,9 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.layersLiveResample      = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE);
     config.layersLiveResampleFps   = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE_FPS);
     config.layersForceLiveResample = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_FORCE_LIVE_RESAMPLE);
+    config.layersMaskMode           = getStringPtr(handle, ConfigKeys::LAYERS_MASK_MODE);
+    config.layersNamespaceMaskModes = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_MODES);
+    config.layersManageBlur         = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_MANAGE_BLUR);
 
     initOverridablePointers(handle, config.global,
         ConfigKeys::BLUR_STRENGTH, ConfigKeys::BLUR_ITERATIONS,
@@ -566,11 +579,12 @@ static int handleLuaPreset(lua_State* L) {
 // ── Lua layer handler ───────────────────────────────────────────────────────
 
 struct SPendingLayer {
-    std::string ns;
-    std::string preset;
-    float       maskThreshold = -1.0f;
-    bool        exclude       = false;
-    int         liveResample  = -1; // -1 = not set
+    std::string                   ns;
+    std::string                   preset;
+    float                         maskThreshold = -1.0f;
+    bool                          exclude       = false;
+    int                           liveResample  = -1; // -1 = not set
+    std::optional<ELayerMaskMode> maskMode;
 };
 
 static std::vector<SPendingLayer> s_pendingLayers;
@@ -602,6 +616,11 @@ static int handleLuaLayer(lua_State* L) {
         if (lua_isboolean(L, -1))
             entry.liveResample = lua_toboolean(L, -1) ? 1 : 0;
         lua_pop(L, 1);
+
+        lua_getfield(L, 2, "mask_mode");
+        if (lua_isstring(L, -1))
+            entry.maskMode = parseLayerMaskMode(lua_tostring(L, -1));
+        lua_pop(L, 1);
     }
 
     s_pendingLayers.push_back(std::move(entry));
@@ -625,6 +644,8 @@ void commitPendingLayers() {
                 g_pGlobalState->layerNamespaceMaskThresholds[entry.ns] = entry.maskThreshold;
             if (entry.liveResample >= 0)
                 g_pGlobalState->layerNamespaceLiveResample[entry.ns] = entry.liveResample != 0;
+            if (entry.maskMode)
+                g_pGlobalState->layerNamespaceMaskModes[entry.ns] = *entry.maskMode;
         }
     }
     s_pendingLayers.clear();
@@ -639,6 +660,15 @@ void validateConfig() {
     if (theme != "dark" && theme != "light") {
         HyprlandAPI::addNotificationV2(PHANDLE, {
             {"text", std::string("[hyprglass] Invalid default_theme '") + std::string(theme) + "', expected 'dark' or 'light'. Falling back to 'dark'."},
+            {"time", (uint64_t)5000},
+            {"color", CHyprColor{1.0, 0.8, 0.2, 1.0}},
+        });
+    }
+
+    const auto maskMode = readStringConfig(config.layersMaskMode);
+    if (!parseLayerMaskMode(maskMode)) {
+        HyprlandAPI::addNotificationV2(PHANDLE, {
+            {"text", std::string("[hyprglass] Invalid layers:mask_mode '") + std::string(maskMode) + "', expected 'auto', 'alpha', or 'region'. Falling back to 'auto'."},
             {"time", (uint64_t)5000},
             {"color", CHyprColor{1.0, 0.8, 0.2, 1.0}},
         });

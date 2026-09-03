@@ -165,9 +165,11 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 
 The glass effect can be applied to layer surfaces (bars, docks, widgets). **Disabled by default.**
 
-The effect uses the layer surface opacity as a mask:
-- Partially transparent content (down to ~0.004 opacity) **triggers** the glass effect
-- Fully transparent areas are ignored
+Where the glass goes on a layer:
+- Apps that request blur through the `ext-background-effect-v1` Wayland protocol get glass exactly where they ask for it
+- Other layers get glass wherever their content is visible (alpha above `mask_threshold`), so partially transparent content (down to ~0.004 opacity) **triggers** the glass effect
+
+`mask_mode` forces one behaviour: `auto` (default), `region` (only where the app requests blur; other layers get no glass) or `alpha` (visible content only).
 
 **Caveat:** Layer shadows count as visible content. Use `mask_threshold` to set an alpha cutoff higher than your shadow opacity.
 
@@ -180,6 +182,7 @@ hg.config({ layers = { enabled = true } })
 hg.layer("waybar", { preset = "subtle", mask_threshold = 0.05, live_resample = false })
 hg.layer("swaync")
 hg.layer("quickshell:bezel", { preset = "ui", mask_threshold = 0.3 })
+hg.layer("quickshell:bar", { mask_mode = "region" })
 hg.layer("debug-panel", { exclude = true })
 ```
 
@@ -188,6 +191,7 @@ hg.layer("debug-panel", { exclude = true })
 | `preset` | string | Preset override for this layer |
 | `mask_threshold` | float | Alpha threshold (pixels below this are not glassed). Default `0.001` |
 | `live_resample` | bool | Per-layer override of `layers:live_resample` |
+| `mask_mode` | string | `"auto"`, `"region"` or `"alpha"`. See `layers:mask_mode` |
 | `exclude` | bool | Blacklist this namespace instead of whitelisting it |
 
 #### Legacy .conf config
@@ -204,6 +208,9 @@ hg.layer("debug-panel", { exclude = true })
 | `layers:live_resample` | bool | `true` (`1` in .conf) | Re-render layer glass when content behind it changes (e.g. a playing video). GPU cost scales with background activity; static scenes stay free. Overridable per layer |
 | `layers:live_resample_fps` | int | `30` | Max re-renders per second per layer for live resample. `0` = uncapped |
 | `layers:force_live_resample` | bool | `false` (`0` in .conf) | Experimental: re-render layer glass every frame regardless of changes. Heavy GPU/battery cost |
+| `layers:mask_mode` | string | `auto` | Where the glass goes: `auto` = where the app requests blur, else where content is visible; `region` = only where the app requests blur; `alpha` = only where content is visible |
+| `layers:namespace_mask_modes` | string | `""` | Per-namespace `mask_mode` (`ns=mode` pairs, comma-separated) |
+| `layers:manage_blur` | bool | `true` (`1` in .conf) | Replace Hyprland's own blur with glass on glassed layers (`layerrule = ignorealpha` then has no effect, use `mask_threshold`). Set to `0` to keep Hyprland's blur |
 
 > Layer support hooks into Hyprland's internal render pipeline. This is version-sensitive and may break across Hyprland updates.
 
@@ -317,7 +324,7 @@ The window/layer is modeled as a **thick convex glass slab**. The rendering pipe
 9. **Fresnel edge glow** — Schlick-based fresnel approximation at the glass edge.
 10. **Specular highlight + inner shadow** — Top-biased highlight and bottom-rim shadow for depth.
 
-For windows, the plugin integrates with Hyprland's render pass system as a `DECORATION_LAYER_BOTTOM` decoration, drawing before the window surface so the glass shows through transparent windows. For layer surfaces, the plugin hooks `renderLayer` and uses a temp FBO redirect: the background is sampled and blurred, then Hyprland's surface rendering is redirected into a transparent temporary framebuffer to capture the surface's exact alpha. A post-surface pass then composites the glass effect (masked to visible content only) and the surface content back onto the main framebuffer in a single shader pass.
+For windows, the plugin integrates with Hyprland's render pass system as a `DECORATION_LAYER_BOTTOM` decoration, drawing before the window surface so the glass shows through transparent windows. For layer surfaces, the plugin hooks `renderLayer` and uses a temp FBO redirect: the background is sampled and blurred, then Hyprland's surface rendering is redirected into a transparent temporary framebuffer to capture the surface's exact alpha. A post-surface pass then composites the glass effect (masked to visible content or to the app's requested blur region) and the surface content back onto the main framebuffer in a single shader pass.
 
 ## Unloading
 

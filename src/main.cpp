@@ -19,6 +19,7 @@
 #include <hyprland/src/event/EventBus.hpp>
 
 #include <cstdlib>
+#include <optional>
 #include <sstream>
 
 static void clearLayerGlassOnClose(PHLLS layerSurface) {
@@ -225,6 +226,12 @@ static void parseLayerNamespaceFilters() {
         else if (val == "0" || val == "false" || val == "off" || val == "no")
             g_pGlobalState->layerNamespaceLiveResample[ns] = false;
     });
+
+    g_pGlobalState->layerNamespaceMaskModes.clear();
+    parseKeyValuePairs(config.layersNamespaceMaskModes, '=', [&](const std::string& ns, const std::string& val) {
+        if (auto mode = parseLayerMaskMode(val))
+            g_pGlobalState->layerNamespaceMaskModes[ns] = *mode;
+    });
 }
 
 static bool shouldGlassLayer(PHLLS layerSurface) {
@@ -243,6 +250,37 @@ static bool shouldGlassLayer(PHLLS layerSurface) {
 
     return include.contains(ns);
 }
+
+// Makes shouldBlur(PHLLS) return false for one renderLayer() call by mutating the
+// surface state it reads; restored before any deferred pass element runs.
+struct SLayerBlurSuppression {
+    SP<Desktop::View::CWLSurface> surface;
+    bool                          mutatedRegion    = false;
+    bool                          mutatedHasEffect = false;
+    CRegion                       savedRegion;
+
+    explicit SLayerBlurSuppression(SP<Desktop::View::CWLSurface> wlSurface) : surface(std::move(wlSurface)) {
+        if (!surface)
+            return;
+        if (surface->m_hasBackgroundEffect) {
+            savedRegion = surface->m_blurRegion;
+            surface->m_blurRegion.clear();
+            mutatedRegion = true;
+        } else {
+            surface->m_hasBackgroundEffect = true;
+            mutatedHasEffect               = true;
+        }
+    }
+
+    ~SLayerBlurSuppression() {
+        if (!surface)
+            return;
+        if (mutatedRegion)
+            surface->m_blurRegion = savedRegion;
+        if (mutatedHasEffect)
+            surface->m_hasBackgroundEffect = false;
+    }
+};
 
 using renderLayerFn = void (*)(Render::IHyprRenderer*, PHLLS, PHLMONITOR, const Time::steady_tp&, bool, bool);
 
@@ -289,15 +327,33 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PH
             return;
         }
 
+        // nothing to glass this frame (region mode without a bound region, or an
+        // explicit empty region): render as Hyprland normally would
+        const auto maskSource = it->second->resolveMaskSource();
+        if (maskSource == CGlassLayerSurface::EMaskSource::NONE) {
+            ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, layerSurface, monitor, now, popups, lockscreen);
+            return;
+        }
+
         // Pre-surface: sample+blur background, redirect currentFB → temp FBO
         CGlassLayerPassElement::SGlassLayerPassData preData{it->second, alpha};
         g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassLayerPassElement>(preData));
 
-        // Original renderLayer: surface renders into the redirected temp FBO
+        const bool manageBlur = config.layersManageBlur && **config.layersManageBlur;
+        std::optional<SLayerBlurSuppression> blurSuppression;
+        if (manageBlur) {
+            if (auto wlSurface = layerSurface->wlSurface())
+                blurSuppression.emplace(wlSurface);
+        }
+
+        // Original renderLayer: surface renders into the redirected temp FBO.
+        // The suppression must wrap only this call: shouldBlur() runs inside it,
+        // and the composite element must later see the real protocol state.
         ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, layerSurface, monitor, now, popups, lockscreen);
+        blurSuppression.reset();
 
         // Post-surface: restore currentFB, apply glass masked by temp FBO alpha, blit surface
-        CGlassLayerCompositeElement::SGlassLayerCompositeData postData{it->second, alpha};
+        CGlassLayerCompositeElement::SGlassLayerCompositeData postData{it->second, alpha, maskSource};
         g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassLayerCompositeElement>(postData));
 
         it->second->damageIfMoved();
