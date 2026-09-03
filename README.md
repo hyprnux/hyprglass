@@ -59,7 +59,7 @@ if hl.plugin.hyprglass then
         dark = { brightness = 0.82 },
         light = { adaptive_boost = 0.5 },
 
-        layers = { enabled = 1 },
+        layers = { enabled = true },
     })
 
     -- Layer surfaces: each call whitelists the namespace and configures it
@@ -83,6 +83,13 @@ if hl.plugin.hyprglass then
         dark = { tint_color = 0x02142aa9 },
     })
 end
+```
+
+**Checking the config**
+
+```sh
+hyprctl configerrors                                # unknown options, with the file and line of the hg.config call
+hyprctl getoption plugin:hyprglass:layers:enabled   # "set: true" once your value is applied
 ```
 
 ### Legacy .conf config
