@@ -9,6 +9,7 @@
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/SharedDefs.hpp>
+#include <hyprutils/signal/Listener.hpp>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -18,6 +19,10 @@
 class CGlassDecoration;
 
 struct SGlobalState {
+    // Event listeners are owned here so PLUGIN_EXIT unregisters them. Static
+    // listeners outlived the plugin and fired after unload -> SEGV on reload.
+    std::vector<Hyprutils::Signal::CHyprSignalListener> listeners;
+
     std::vector<WP<CGlassDecoration>> decorations;
     CShaderManager                    shaderManager;
     SPluginConfig                     config;
@@ -40,6 +45,10 @@ struct SGlobalState {
     std::unordered_map<std::string, std::string> layerNamespacePresets;
     // Per-namespace mask alpha threshold (namespace → threshold, default 0.001)
     std::unordered_map<std::string, float> layerNamespaceMaskThresholds;
+    // Per-namespace live resample override (namespace → enabled)
+    std::unordered_map<std::string, bool> layerNamespaceLiveResample;
+    // Per-namespace mask mode override (namespace → mode)
+    std::unordered_map<std::string, ELayerMaskMode> layerNamespaceMaskModes;
 
     // Per-monitor generation counter, incremented when the scene behind layers
     // changes on that monitor. Layer surfaces compare to their cached value to
@@ -63,6 +72,8 @@ struct SGlobalState {
 
     // renderLayer hook
     CFunctionHook* renderLayerHook = nullptr;
+    // damageSurface hook (live layer re-render)
+    CFunctionHook* damageSurfaceHook = nullptr;
 };
 
 using Render::GL::g_pHyprOpenGL;

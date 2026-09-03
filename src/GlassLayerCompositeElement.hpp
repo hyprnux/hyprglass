@@ -1,17 +1,18 @@
 #pragma once
 
+#include "GlassLayerSurface.hpp"
+
 #include <hyprland/src/render/pass/PassElement.hpp>
 #include <hyprutils/math/Box.hpp>
 #include <hyprutils/math/Region.hpp>
 #include <memory>
 
-class CGlassLayerSurface;
-
 class CGlassLayerCompositeElement : public IPassElement {
   public:
     struct SGlassLayerCompositeData {
         std::shared_ptr<CGlassLayerSurface> layerState;
-        float                               alpha = 1.0f;
+        float                               alpha      = 1.0f;
+        CGlassLayerSurface::EMaskSource      maskSource = CGlassLayerSurface::EMaskSource::ALPHA_THRESHOLD;
     };
 
     explicit CGlassLayerCompositeElement(const SGlassLayerCompositeData& data);

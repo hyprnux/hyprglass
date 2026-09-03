@@ -73,6 +73,48 @@ std::string CGlassLayerSurface::resolvePresetName() const {
     return "default";
 }
 
+ELayerMaskMode CGlassLayerSurface::resolveMaskMode() const {
+    if (const auto layerSurface = m_layerSurface.lock()) {
+        const auto& overrides = g_pGlobalState->layerNamespaceMaskModes;
+        if (auto it = overrides.find(layerSurface->m_namespace); it != overrides.end())
+            return it->second;
+    }
+
+    if (auto mode = parseLayerMaskMode(readStringConfig(g_pGlobalState->config.layersMaskMode)))
+        return *mode;
+    return ELayerMaskMode::AUTO;
+}
+
+CGlassLayerSurface::EMaskSource CGlassLayerSurface::resolveMaskSource() const {
+    const auto layerSurface = m_layerSurface.lock();
+    const auto wlSurface    = layerSurface ? layerSurface->wlSurface() : nullptr; // root surface only
+    const bool hasEffect    = wlSurface && wlSurface->m_hasBackgroundEffect;
+    const bool regionEmpty  = !wlSurface || wlSurface->m_blurRegion.empty();
+
+    switch (resolveMaskMode()) {
+        case ELayerMaskMode::ALPHA:
+            return EMaskSource::ALPHA_THRESHOLD;
+        case ELayerMaskMode::REGION:
+            return (hasEffect && !regionEmpty) ? EMaskSource::PROTOCOL_REGION : EMaskSource::NONE;
+        case ELayerMaskMode::AUTO:
+        default:
+            if (hasEffect)
+                return regionEmpty ? EMaskSource::NONE : EMaskSource::PROTOCOL_REGION;
+            return EMaskSource::ALPHA_THRESHOLD;
+    }
+}
+
+bool CGlassLayerSurface::liveResampleEnabled() const {
+    if (const auto layerSurface = m_layerSurface.lock()) {
+        const auto& overrides = g_pGlobalState->layerNamespaceLiveResample;
+        if (auto it = overrides.find(layerSurface->m_namespace); it != overrides.end())
+            return it->second;
+    }
+
+    const auto& config = g_pGlobalState->config;
+    return config.layersLiveResample && **config.layersLiveResample;
+}
+
 PHLLS CGlassLayerSurface::getLayerSurface() const {
     return m_layerSurface.lock();
 }
@@ -100,16 +142,47 @@ void CGlassLayerSurface::damageIfMoved() {
         m_lastPosition  = currentPosition;
         m_lastSize      = currentSize;
 
-        auto box = CBox{currentPosition, currentSize};
-        const auto monitor = layerSurface->m_monitor.lock();
-        const float scale = monitor ? monitor->m_scale : 1.0f;
-        box.expand(GlassRenderer::SAMPLE_PADDING_PX / scale).noNegativeSize();
-        if (box.w > 0.0 && box.h > 0.0)
-            g_pHyprRenderer->damageBox(box);
+        damageSampleRegion();
 
-        if (monitor)
+        if (const auto monitor = layerSurface->m_monitor.lock())
             g_pGlobalState->bumpSceneGeneration(monitor);
+    } else if (const auto& config = g_pGlobalState->config;
+               config.layersForceLiveResample && **config.layersForceLiveResample) {
+        // keep frames flowing so the forced per-frame resample actually runs
+        damageSampleRegion();
     }
+}
+
+void CGlassLayerSurface::damageSampleRegion() {
+    const auto layerSurface = m_layerSurface.lock();
+    if (!layerSurface)
+        return;
+
+    const auto monitor = layerSurface->m_monitor.lock();
+    const float scale = monitor ? monitor->m_scale : 1.0f;
+    auto box = CBox{layerSurface->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT),
+                    layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
+    box.expand(GlassRenderer::SAMPLE_PADDING_PX / scale).noNegativeSize();
+    if (box.w > 0.0 && box.h > 0.0 &&
+        std::isfinite(box.x) && std::isfinite(box.y) && std::isfinite(box.w) && std::isfinite(box.h))
+        g_pHyprRenderer->damageBox(box);
+}
+
+void CGlassLayerSurface::markBackgroundDirty() {
+    if (m_backgroundDirty)
+        return;
+
+    const auto& config = g_pGlobalState->config;
+    const int64_t fps = config.layersLiveResampleFps ? **config.layersLiveResampleFps : 0;
+    const auto now = std::chrono::steady_clock::now();
+    if (fps > 0 && now - m_lastDirtyMark < std::chrono::nanoseconds(1'000'000'000 / fps))
+        return;
+    m_lastDirtyMark = now;
+
+    m_backgroundDirty = true;
+    // damage the full sample region: outside the committed area the framebuffer
+    // still holds our previous glass output, which must not be re-sampled
+    damageSampleRegion();
 }
 
 void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
@@ -143,9 +216,11 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
                              layerSurface->sizeAnimation()->isBeingAnimated() ||
                              layerSurface->alpha()[Desktop::View::LS_ALPHA_FADE]->isBeingAnimated() ||
                              (activeWs && activeWs->m_renderOffset->isBeingAnimated());
+    const auto& config = g_pGlobalState->config;
+    const bool forceLive = config.layersForceLiveResample && **config.layersForceLiveResample;
     const bool backgroundChanged = !m_hasCachedSample ||
                                    currentGeneration != m_lastSceneGeneration ||
-                                   isAnimating;
+                                   isAnimating || m_backgroundDirty || forceLive;
 
     if (!layerSurface->m_mapped) {
         // During fade-out, re-sampling captures stale pixels. Reuse cached sample.
@@ -167,14 +242,17 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
 
         m_hasCachedSample      = true;
         m_lastSceneGeneration  = currentGeneration;
+        m_backgroundDirty      = false;
     }
     // else: background unchanged, reuse cached blur — skip 7 GPU operations
 
     // Redirect surface rendering to a temp FBO cleared to transparent.
     // The original renderLayer (called between pre/post elements) will render
     // the surface into this FBO. compositeAndRestore uses its alpha as a mask.
-    int monitorWidth  = static_cast<int>(monitor->m_transformedSize.x);
-    int monitorHeight = static_cast<int>(monitor->m_transformedSize.y);
+    // Size from the source FB, not the monitor: m_transformedSize is swapped
+    // relative to the framebuffer's native orientation on 90°/270° monitors (#41).
+    int monitorWidth  = static_cast<int>(source->m_size.x);
+    int monitorHeight = static_cast<int>(source->m_size.y);
 
     // In FP16/HDR mode, the source FB uses RGBA16F which has full alpha precision.
     // Use the source format to avoid clipping HDR color values.
@@ -207,7 +285,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     }
 }
 
-void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
+void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EMaskSource maskSource) {
     // Restore the original currentFB before compositing
     if (m_savedCurrentFB) {
         g_pHyprRenderer->m_renderData.currentFB = m_savedCurrentFB;
@@ -244,26 +322,71 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
     // Use the temp FBO's rendered alpha as a mask: glass only where the surface
     // has visible content (alpha > 0). The temp FBO is in monitor coordinates,
     // so we map from the glass quad UV to monitor UV.
-    int monitorWidth  = static_cast<int>(monitor->m_transformedSize.x);
-    int monitorHeight = static_cast<int>(monitor->m_transformedSize.y);
-
-    float maskThreshold = 0.001f;
-    auto threshIt = g_pGlobalState->layerNamespaceMaskThresholds.find(layerSurface->m_namespace);
-    if (threshIt != g_pGlobalState->layerNamespaceMaskThresholds.end())
-        maskThreshold = threshIt->second;
-
-    // The temp FBO stores the layer after Hyprland applies fade alpha. Keep
-    // mask_threshold relative to the layer's content alpha, otherwise fade-out
-    // makes the mask fall below threshold early and the glass blinks off.
-    maskThreshold *= std::clamp(alpha, 0.0f, 1.0f);
+    int monitorWidth  = static_cast<int>(m_surfaceTempFramebuffer->m_size.x);
+    int monitorHeight = static_cast<int>(m_surfaceTempFramebuffer->m_size.y);
 
     GlassRenderer::SMaskInfo maskInfo{
-        .textureId         = m_surfaceTempFramebuffer->getTexture()->m_texID,
-        .target            = GL_TEXTURE_2D,
-        .uvOffset          = {transformBox.x / monitorWidth, transformBox.y / monitorHeight},
-        .uvScale           = {transformBox.w / monitorWidth, transformBox.h / monitorHeight},
-        .alphaThreshold    = maskThreshold,
+        .textureId = m_surfaceTempFramebuffer->getTexture()->m_texID,
+        .target    = GL_TEXTURE_2D,
+        .uvOffset  = {transformBox.x / monitorWidth, transformBox.y / monitorHeight},
+        .uvScale   = {transformBox.w / monitorWidth, transformBox.h / monitorHeight},
     };
+
+    switch (maskSource) {
+        case EMaskSource::ALPHA_THRESHOLD: {
+            float maskThreshold = 0.001f;
+            auto threshIt = g_pGlobalState->layerNamespaceMaskThresholds.find(layerSurface->m_namespace);
+            if (threshIt != g_pGlobalState->layerNamespaceMaskThresholds.end())
+                maskThreshold = threshIt->second;
+
+            // The temp FBO stores the layer after Hyprland applies fade alpha. Keep
+            // mask_threshold relative to the layer's content alpha, otherwise fade-out
+            // makes the mask fall below threshold early and the glass blinks off.
+            maskInfo.maskMode       = 0;
+            maskInfo.alphaThreshold = maskThreshold * std::clamp(alpha, 0.0f, 1.0f);
+            break;
+        }
+        case EMaskSource::PROTOCOL_REGION: {
+            maskInfo.maskMode       = 1;
+            maskInfo.alphaThreshold = 0.0f; // unused in region mode
+
+            const auto wlSurface = layerSurface->wlSurface();
+            if (!wlSurface)
+                break;
+            const auto logicalSize = layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+
+            // surface-local logical region -> box-local pixels, same
+            // scale/translate/transform sequence as transformedLayerBox()
+            CRegion region = wlSurface->m_blurRegion.copy();
+            region.intersect(0, 0, logicalSize.x, logicalSize.y); // spec: clipped to surface size
+            region.scale(static_cast<float>(monitor->m_scale));
+            region.translate(rawBox.pos());
+            region.intersect(rawBox.x, rawBox.y, rawBox.w, rawBox.h); // defensive
+            region.transform(Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform)),
+                              monitor->m_transformedSize.x, monitor->m_transformedSize.y);
+
+            const auto rects = region.getRects();
+            if (rects.size() <= static_cast<size_t>(GlassRenderer::MAX_REGION_RECTS)) {
+                maskInfo.regionRectCount = static_cast<int>(rects.size());
+                for (size_t i = 0; i < rects.size(); i++) {
+                    const auto& r = rects[i];
+                    maskInfo.regionRects[i] = {static_cast<float>(r.x1 - transformBox.x), static_cast<float>(r.y1 - transformBox.y),
+                                                static_cast<float>(r.x2 - r.x1), static_cast<float>(r.y2 - r.y1)};
+                }
+            } else {
+                // Overflow: one bounding rect rather than dropping rects (a hole
+                // reads as more broken than a few extra glassed pixels at concave corners).
+                const auto extents = region.getExtents();
+                maskInfo.regionRectCount = 1;
+                maskInfo.regionRects[0]  = {static_cast<float>(extents.x - transformBox.x), static_cast<float>(extents.y - transformBox.y),
+                                             static_cast<float>(extents.w), static_cast<float>(extents.h)};
+            }
+            break;
+        }
+        case EMaskSource::NONE:
+            // hkRenderLayer takes the plain-renderLayer path for NONE; never reaches here.
+            break;
+    }
 
     // The glass shader composites both the glass effect and the surface content
     // in a single pass: glass behind, surface on top, using the temp FBO alpha.

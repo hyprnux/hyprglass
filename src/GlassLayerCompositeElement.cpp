@@ -11,7 +11,7 @@ CGlassLayerCompositeElement::CGlassLayerCompositeElement(const SGlassLayerCompos
 
 std::vector<UP<IPassElement>> CGlassLayerCompositeElement::draw() {
     if (m_data.layerState && m_data.layerState->getLayerSurface())
-        m_data.layerState->compositeAndRestore(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.alpha);
+        m_data.layerState->compositeAndRestore(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.alpha, m_data.maskSource);
 
     return {};
 }

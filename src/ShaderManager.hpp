@@ -26,6 +26,9 @@ struct SGlassUniforms {
     GLint maskUVOffset = -1;
     GLint maskUVScale = -1;
     GLint maskAlphaThreshold = -1;
+    GLint maskMode = -1;
+    GLint regionRectCount = -1;
+    GLint regionRects = -1;
 };
 
 struct SBlurUniforms {

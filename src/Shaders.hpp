@@ -1,4 +1,3 @@
-// Auto-generated shader header - Do not edit!
 #pragma once
 
 #include <unordered_map>
@@ -57,6 +56,9 @@ uniform int useMask;
 uniform vec2 maskUVOffset;
 uniform vec2 maskUVScale;
 uniform float maskAlphaThreshold;
+uniform int maskMode;          // 0 = alpha threshold, 1 = protocol region
+uniform int regionRectCount;   // 0..16
+uniform vec4 regionRects[16];  // box-local pixels: xy = offset from box top-left, zw = size
 
 in vec2 v_texcoord;
 layout(location = 0) out vec4 fragColor;
@@ -123,7 +125,22 @@ void main() {
     if (hasMask) {
         vec2 maskUV = uv * maskUVScale + maskUVOffset;
         surfacePixel = texture(maskTex, clamp(maskUV, 0.001, 0.999));
-        if (surfacePixel.a < maskAlphaThreshold) discard;
+
+        if (maskMode == 1) {
+            vec2 pixelPos = uv * fullSize;
+            bool insideRegion = false;
+            for (int i = 0; i < regionRectCount; i++) {
+                vec4 r = regionRects[i];
+                if (pixelPos.x >= r.x && pixelPos.y >= r.y &&
+                    pixelPos.x <= r.x + r.z && pixelPos.y <= r.y + r.w) {
+                    insideRegion = true;
+                    break;
+                }
+            }
+            if (!insideRegion) { fragColor = surfacePixel; return; } // premultiplied, output as-is
+        } else if (surfacePixel.a < maskAlphaThreshold) {
+            discard;
+        }
     }
 
     float cornerSdf = getCornerSDF(uv);

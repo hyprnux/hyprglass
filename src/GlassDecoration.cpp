@@ -9,6 +9,7 @@
 #include <GLES3/gl32.h>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
+#include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprutils/math/Misc.hpp>
@@ -59,6 +60,13 @@ void CGlassDecoration::withdrawNoBlur() {
             damageEntire();
         }
     } catch (...) {}
+}
+
+// Fullscreen toggles re-apply window rules, which can drop the noblur prop
+// while m_noBlurApplied still claims it's held.
+void CGlassDecoration::onFullscreenStateChanged() {
+    m_noBlurApplied = false;
+    damageEntire();
 }
 
 bool CGlassDecoration::resolveEnabled() const {
@@ -215,7 +223,11 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source);
 
     float monitorScale  = monitor->m_scale;
-    float cornerRadius  = window->rounding() * monitorScale;
+
+    // Hyprland renders internal-fullscreen windows unrounded (dontRound), we need to
+    // match, or the glass would show rounded gaps at the screen corners
+    const bool fsUnrounded = Fullscreen::controller()->getFullscreenModes(window).internal == Fullscreen::FSMODE_FULLSCREEN;
+    float cornerRadius  = fsUnrounded ? 0.0f : window->rounding() * monitorScale;
     float roundingPower = window->roundingPower();
 
     // The render alpha Hyprland hands decorations is activeInactive * fade.
