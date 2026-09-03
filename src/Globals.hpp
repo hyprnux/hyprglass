@@ -70,6 +70,31 @@ struct SGlobalState {
             sceneGeneration[mon->m_id]++;
     }
 
+    // X-ray: pre-window snapshot of each monitor's frame (wallpaper + bottom
+    // layers, no windows), refreshed by CGlassSnapshotElement in the damaged
+    // region. Keyed by MONITORID; entries go with the monitor.
+    struct SBackgroundSnapshot {
+        SP<Render::IFramebuffer> fb;
+        // Monitor frames, counted at RENDER_BEGIN of a monitor render, and
+        // the frame in which something last sampled the snapshot (a sampler's
+        // draw() runs while that frame's pass is built). The snapshot is kept
+        // fresh — every frame's damage copied — while anything has sampled it
+        // within the last IDLE_FRAMES, whether or not a sampler is drawn in a
+        // given frame: solitary fullscreen clients, exports and mirrors skip
+        // the decorations, and treating such a frame as a lapse meant a
+        // stale snapshot and a full redraw every time one went by.
+        uint64_t frame          = 0;
+        uint64_t requestedFrame = 0;
+        uint64_t addedFrame     = 0; // the element is added once per frame
+        // A whole-monitor damage frame has been copied since the snapshot was
+        // (re)allocated; until then samplers use the live frame.
+        bool complete = false;
+    };
+    std::unordered_map<MONITORID, SBackgroundSnapshot> backgroundSnapshots;
+
+    // Per-namespace x-ray for layer surfaces (hg.layer xray / layers:namespace_xray)
+    std::unordered_map<std::string, bool> layerNamespaceXray;
+
     // renderLayer hook
     CFunctionHook* renderLayerHook = nullptr;
     // damageSurface hook (live layer re-render)

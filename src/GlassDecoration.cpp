@@ -110,6 +110,23 @@ bool CGlassDecoration::resolveThemeIsDark() const {
     return true;
 }
 
+bool CGlassDecoration::resolveXray() const {
+    try {
+        const auto window = m_window.lock();
+        if (window && window->m_ruleApplicator) {
+            const auto& tags = window->m_ruleApplicator->m_tagKeeper;
+            // As with Hyprland's `xray off` window rule, off wins over the global.
+            if (tags.isTagged(std::string(TAG_NOXRAY)))
+                return false;
+            if (tags.isTagged(std::string(TAG_XRAY)))
+                return true;
+        }
+    } catch (...) {}
+
+    const auto& config = g_pGlobalState->config;
+    return config.xray && **config.xray;
+}
+
 std::string CGlassDecoration::resolvePresetName() const {
     try {
         const auto window = m_window.lock();
@@ -147,6 +164,12 @@ void CGlassDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     updateNoBlurProp(enabled);
     if (!enabled)
         return;
+
+    // X-ray: ask for next frame's pre-window snapshot while we still sample it.
+    if (monitor && resolveXray()) {
+        auto& snapshot          = g_pGlobalState->backgroundSnapshots[monitor->m_id];
+        snapshot.requestedFrame = snapshot.frame;
+    }
 
     CGlassPassElement::SGlassPassData data{m_self, alpha};
     g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassPassElement>(data));
@@ -196,6 +219,18 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     if (!source)
         return;
 
+    // What the glass is made from: the live frame (wallpaper plus whatever
+    // windows were already drawn beneath this one) or, with x-ray, the
+    // pre-window snapshot — wallpaper only. Until the snapshot is complete
+    // (the first frames after it was asked for, or after a mode change) fall
+    // back to the frame.
+    auto sampleSource = source;
+    if (monitor && resolveXray()) {
+        const auto it = g_pGlobalState->backgroundSnapshots.find(monitor->m_id);
+        if (it != g_pGlobalState->backgroundSnapshots.end() && it->second.complete && it->second.fb && it->second.fb->m_size == source->m_size)
+            sampleSource = it->second.fb;
+    }
+
     auto optBox = WindowGeometry::computeWindowBox(window, monitor);
     if (!optBox)
         return;
@@ -216,7 +251,7 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     float blurStrength   = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
     int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-    GlassRenderer::sampleBackground(m_sampleFramebuffer, source, transformBox, m_samplePaddingRatio, downscale);
+    GlassRenderer::sampleBackground(m_sampleFramebuffer, sampleSource, transformBox, m_samplePaddingRatio, downscale);
 
     float blurRadius     = blurStrength * 12.0f / downscale;
     int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);

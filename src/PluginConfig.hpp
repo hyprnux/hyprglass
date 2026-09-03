@@ -19,6 +19,13 @@ inline constexpr std::string_view TAG_PRESET_PREFIX = "hyprglass_preset_";
 inline constexpr std::string_view TAG_ENABLED  = "hyprglass_enabled";
 inline constexpr std::string_view TAG_DISABLED = "hyprglass_disabled";
 
+// Window tags for per-window x-ray (see `xray`): sample the glass from the
+// pre-window snapshot of the frame (wallpaper and bottom layers only) instead
+// of the live frame, so windows underneath never show through the glass. Both
+// override the global setting; like Hyprland's `xray off` rule, `noxray` wins.
+inline constexpr std::string_view TAG_XRAY   = "hyprglass_xray";
+inline constexpr std::string_view TAG_NOXRAY = "hyprglass_noxray";
+
 // Hyprland stores dynamic tags (`tagwindow` dispatcher, dynamic window rules)
 // with a trailing '*'. CTagKeeper::isTagged() normalizes this for exact lookups,
 // but code iterating getTags() or registering preset names must strip it itself
@@ -49,6 +56,7 @@ inline constexpr auto ENABLED            = "plugin:hyprglass:enabled";
 inline constexpr auto DEFAULT_THEME      = "plugin:hyprglass:default_theme";
 inline constexpr auto DEFAULT_PRESET     = "plugin:hyprglass:default_preset";
 inline constexpr auto MANAGE_WINDOW_BLUR = "plugin:hyprglass:manage_window_blur";
+inline constexpr auto XRAY               = "plugin:hyprglass:xray";
 
 // Preset keyword, registered as unscoped because Hyprlang does not dispatch
 // scoped keyword handlers inside the plugin special category.
@@ -87,6 +95,7 @@ inline constexpr auto LAYERS_FORCE_LIVE_RESAMPLE        = "plugin:hyprglass:laye
 inline constexpr auto LAYERS_MASK_MODE                  = "plugin:hyprglass:layers:mask_mode";
 inline constexpr auto LAYERS_NAMESPACE_MASK_MODES       = "plugin:hyprglass:layers:namespace_mask_modes";
 inline constexpr auto LAYERS_MANAGE_BLUR                = "plugin:hyprglass:layers:manage_blur";
+inline constexpr auto LAYERS_NAMESPACE_XRAY             = "plugin:hyprglass:layers:namespace_xray";
 
 // Overridable — dark theme overrides
 inline constexpr auto DARK_BLUR_STRENGTH        = "plugin:hyprglass:dark:blur_strength";
@@ -207,6 +216,10 @@ struct SPluginConfig {
     // against the live framebuffer (which contains the glass) instead of its
     // pre-frame cached blur.
     Hyprlang::INT* const* manageWindowBlur = nullptr;
+    // X-ray, as in Hyprland's blur:xray: glass samples the pre-window snapshot
+    // of the frame (wallpaper and bottom layers only), so windows underneath
+    // never show through it. Per-window tags and per-layer settings override.
+    Hyprlang::INT* const* xray             = nullptr;
     StringConfigPtr      defaultTheme;
     StringConfigPtr      defaultPreset;
 
@@ -223,6 +236,7 @@ struct SPluginConfig {
     StringConfigPtr       layersMaskMode;
     StringConfigPtr       layersNamespaceMaskModes;
     Hyprlang::INT* const* layersManageBlur               = nullptr;
+    StringConfigPtr       layersNamespaceXray;
 
     SOverridableConfig global;
     SOverridableConfig dark;
