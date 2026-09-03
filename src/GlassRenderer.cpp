@@ -44,7 +44,9 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
     if (!sampleFramebuffer)
         sampleFramebuffer = g_pHyprRenderer->createFB("hyprglass-sample");
 
-    if (sampleFramebuffer->m_size.x != sampleWidth || sampleFramebuffer->m_size.y != sampleHeight)
+    // the format follows the monitor framebuffer, which changes with cm/bitdepth
+    if (sampleFramebuffer->m_size.x != sampleWidth || sampleFramebuffer->m_size.y != sampleHeight ||
+        sampleFramebuffer->m_drmFormat != sourceFramebuffer->m_drmFormat)
         sampleFramebuffer->alloc(sampleWidth, sampleHeight, sourceFramebuffer->m_drmFormat);
 
     int srcX0 = static_cast<int>(box.x) - pad;
@@ -105,7 +107,8 @@ void blurBackground(SP<Render::IFramebuffer> sampleFramebuffer, float radius, in
     if (!blurTempFramebuffer)
         blurTempFramebuffer = g_pHyprRenderer->createFB("hyprglass-blur-temp");
 
-    if (blurTempFramebuffer->m_size.x != width || blurTempFramebuffer->m_size.y != height)
+    if (blurTempFramebuffer->m_size.x != width || blurTempFramebuffer->m_size.y != height ||
+        blurTempFramebuffer->m_drmFormat != sampleFramebuffer->m_drmFormat)
         blurTempFramebuffer->alloc(width, height, sampleFramebuffer->m_drmFormat);
 
     // Fullscreen quad projection: maps VAO positions [0,1] to clip space [-1,1]
