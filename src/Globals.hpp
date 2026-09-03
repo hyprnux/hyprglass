@@ -47,6 +47,8 @@ struct SGlobalState {
     std::unordered_map<std::string, float> layerNamespaceMaskThresholds;
     // Per-namespace live resample override (namespace → enabled)
     std::unordered_map<std::string, bool> layerNamespaceLiveResample;
+    // Per-namespace mask mode override (namespace → mode)
+    std::unordered_map<std::string, ELayerMaskMode> layerNamespaceMaskModes;
 
     // Per-monitor generation counter, incremented when the scene behind layers
     // changes on that monitor. Layer surfaces compare to their cached value to

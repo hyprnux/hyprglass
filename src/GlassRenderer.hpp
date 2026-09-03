@@ -2,6 +2,7 @@
 
 #include "PluginConfig.hpp"
 
+#include <array>
 #include <GLES3/gl32.h>
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprutils/math/Box.hpp>
@@ -19,6 +20,15 @@ inline constexpr int SAMPLE_PADDING_PX = 60;
 inline constexpr int   BLUR_DOWNSCALE_MAX       = 2;
 inline constexpr float BLUR_DOWNSCALE_THRESHOLD = 0.35f; // min blur_strength for downscale
 
+// Must match the `regionRects[16]` array size declared in Shaders.hpp.
+inline constexpr int MAX_REGION_RECTS = 16;
+
+// Box-local pixel rect uploaded to the shader's regionRects uniform array.
+struct SRegionRect {
+    float x = 0, y = 0, w = 0, h = 0;
+};
+static_assert(sizeof(SRegionRect) == 4 * sizeof(float));
+
 // Layers only: alpha mask from the temp FBO that captured the rendered surface.
 // Constrains the glass effect to regions where the layer has visible content.
 // Windows do not use masking, they pass mask=nullptr to applyGlassEffect.
@@ -28,6 +38,11 @@ struct SMaskInfo {
     Vector2D uvOffset; // mapping from glass box UV → full surface UV
     Vector2D uvScale;
     float    alphaThreshold = 0.001f;
+
+    // 0 = alpha-threshold mask, 1 = ext-background-effect-v1 protocol region
+    int                                        maskMode        = 0;
+    std::array<SRegionRect, MAX_REGION_RECTS>  regionRects{};
+    int                                        regionRectCount = 0;
 };
 
 void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IFramebuffer> sourceFramebuffer,

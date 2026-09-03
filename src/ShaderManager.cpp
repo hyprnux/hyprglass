@@ -49,6 +49,11 @@ bool CShaderManager::compileGlassShader() {
     glassUniforms.maskUVOffset        = glGetUniformLocation(program, "maskUVOffset");
     glassUniforms.maskUVScale         = glGetUniformLocation(program, "maskUVScale");
     glassUniforms.maskAlphaThreshold  = glGetUniformLocation(program, "maskAlphaThreshold");
+    glassUniforms.maskMode            = glGetUniformLocation(program, "maskMode");
+    glassUniforms.regionRectCount     = glGetUniformLocation(program, "regionRectCount");
+    glassUniforms.regionRects         = glGetUniformLocation(program, "regionRects[0]");
+    if (glassUniforms.regionRects == -1)
+        glassUniforms.regionRects = glGetUniformLocation(program, "regionRects");
 
     return true;
 }

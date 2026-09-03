@@ -73,6 +73,37 @@ std::string CGlassLayerSurface::resolvePresetName() const {
     return "default";
 }
 
+ELayerMaskMode CGlassLayerSurface::resolveMaskMode() const {
+    if (const auto layerSurface = m_layerSurface.lock()) {
+        const auto& overrides = g_pGlobalState->layerNamespaceMaskModes;
+        if (auto it = overrides.find(layerSurface->m_namespace); it != overrides.end())
+            return it->second;
+    }
+
+    if (auto mode = parseLayerMaskMode(readStringConfig(g_pGlobalState->config.layersMaskMode)))
+        return *mode;
+    return ELayerMaskMode::AUTO;
+}
+
+CGlassLayerSurface::EMaskSource CGlassLayerSurface::resolveMaskSource() const {
+    const auto layerSurface = m_layerSurface.lock();
+    const auto wlSurface    = layerSurface ? layerSurface->wlSurface() : nullptr; // root surface only
+    const bool hasEffect    = wlSurface && wlSurface->m_hasBackgroundEffect;
+    const bool regionEmpty  = !wlSurface || wlSurface->m_blurRegion.empty();
+
+    switch (resolveMaskMode()) {
+        case ELayerMaskMode::ALPHA:
+            return EMaskSource::ALPHA_THRESHOLD;
+        case ELayerMaskMode::REGION:
+            return (hasEffect && !regionEmpty) ? EMaskSource::PROTOCOL_REGION : EMaskSource::NONE;
+        case ELayerMaskMode::AUTO:
+        default:
+            if (hasEffect)
+                return regionEmpty ? EMaskSource::NONE : EMaskSource::PROTOCOL_REGION;
+            return EMaskSource::ALPHA_THRESHOLD;
+    }
+}
+
 bool CGlassLayerSurface::liveResampleEnabled() const {
     if (const auto layerSurface = m_layerSurface.lock()) {
         const auto& overrides = g_pGlobalState->layerNamespaceLiveResample;
@@ -254,7 +285,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     }
 }
 
-void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
+void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EMaskSource maskSource) {
     // Restore the original currentFB before compositing
     if (m_savedCurrentFB) {
         g_pHyprRenderer->m_renderData.currentFB = m_savedCurrentFB;
@@ -294,23 +325,68 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha) {
     int monitorWidth  = static_cast<int>(m_surfaceTempFramebuffer->m_size.x);
     int monitorHeight = static_cast<int>(m_surfaceTempFramebuffer->m_size.y);
 
-    float maskThreshold = 0.001f;
-    auto threshIt = g_pGlobalState->layerNamespaceMaskThresholds.find(layerSurface->m_namespace);
-    if (threshIt != g_pGlobalState->layerNamespaceMaskThresholds.end())
-        maskThreshold = threshIt->second;
-
-    // The temp FBO stores the layer after Hyprland applies fade alpha. Keep
-    // mask_threshold relative to the layer's content alpha, otherwise fade-out
-    // makes the mask fall below threshold early and the glass blinks off.
-    maskThreshold *= std::clamp(alpha, 0.0f, 1.0f);
-
     GlassRenderer::SMaskInfo maskInfo{
-        .textureId         = m_surfaceTempFramebuffer->getTexture()->m_texID,
-        .target            = GL_TEXTURE_2D,
-        .uvOffset          = {transformBox.x / monitorWidth, transformBox.y / monitorHeight},
-        .uvScale           = {transformBox.w / monitorWidth, transformBox.h / monitorHeight},
-        .alphaThreshold    = maskThreshold,
+        .textureId = m_surfaceTempFramebuffer->getTexture()->m_texID,
+        .target    = GL_TEXTURE_2D,
+        .uvOffset  = {transformBox.x / monitorWidth, transformBox.y / monitorHeight},
+        .uvScale   = {transformBox.w / monitorWidth, transformBox.h / monitorHeight},
     };
+
+    switch (maskSource) {
+        case EMaskSource::ALPHA_THRESHOLD: {
+            float maskThreshold = 0.001f;
+            auto threshIt = g_pGlobalState->layerNamespaceMaskThresholds.find(layerSurface->m_namespace);
+            if (threshIt != g_pGlobalState->layerNamespaceMaskThresholds.end())
+                maskThreshold = threshIt->second;
+
+            // The temp FBO stores the layer after Hyprland applies fade alpha. Keep
+            // mask_threshold relative to the layer's content alpha, otherwise fade-out
+            // makes the mask fall below threshold early and the glass blinks off.
+            maskInfo.maskMode       = 0;
+            maskInfo.alphaThreshold = maskThreshold * std::clamp(alpha, 0.0f, 1.0f);
+            break;
+        }
+        case EMaskSource::PROTOCOL_REGION: {
+            maskInfo.maskMode       = 1;
+            maskInfo.alphaThreshold = 0.0f; // unused in region mode
+
+            const auto wlSurface = layerSurface->wlSurface();
+            if (!wlSurface)
+                break;
+            const auto logicalSize = layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+
+            // surface-local logical region -> box-local pixels, same
+            // scale/translate/transform sequence as transformedLayerBox()
+            CRegion region = wlSurface->m_blurRegion.copy();
+            region.intersect(0, 0, logicalSize.x, logicalSize.y); // spec: clipped to surface size
+            region.scale(static_cast<float>(monitor->m_scale));
+            region.translate(rawBox.pos());
+            region.intersect(rawBox.x, rawBox.y, rawBox.w, rawBox.h); // defensive
+            region.transform(Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform)),
+                              monitor->m_transformedSize.x, monitor->m_transformedSize.y);
+
+            const auto rects = region.getRects();
+            if (rects.size() <= static_cast<size_t>(GlassRenderer::MAX_REGION_RECTS)) {
+                maskInfo.regionRectCount = static_cast<int>(rects.size());
+                for (size_t i = 0; i < rects.size(); i++) {
+                    const auto& r = rects[i];
+                    maskInfo.regionRects[i] = {static_cast<float>(r.x1 - transformBox.x), static_cast<float>(r.y1 - transformBox.y),
+                                                static_cast<float>(r.x2 - r.x1), static_cast<float>(r.y2 - r.y1)};
+                }
+            } else {
+                // Overflow: one bounding rect rather than dropping rects (a hole
+                // reads as more broken than a few extra glassed pixels at concave corners).
+                const auto extents = region.getExtents();
+                maskInfo.regionRectCount = 1;
+                maskInfo.regionRects[0]  = {static_cast<float>(extents.x - transformBox.x), static_cast<float>(extents.y - transformBox.y),
+                                             static_cast<float>(extents.w), static_cast<float>(extents.h)};
+            }
+            break;
+        }
+        case EMaskSource::NONE:
+            // hkRenderLayer takes the plain-renderLayer path for NONE; never reaches here.
+            break;
+    }
 
     // The glass shader composites both the glass effect and the surface content
     // in a single pass: glass behind, surface on top, using the temp FBO alpha.

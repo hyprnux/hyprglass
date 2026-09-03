@@ -2,6 +2,7 @@
 
 #include <hyprland/src/config/shared/Types.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <typeinfo>
@@ -33,6 +34,13 @@ inline constexpr Hyprlang::FLOAT SENTINEL_FLOAT = -1.0;
 inline constexpr Hyprlang::INT   SENTINEL_INT   = -1;
 
 inline constexpr int MAX_PRESET_INHERITANCE_DEPTH = 8;
+
+// Layer glass masking strategy: how hyprglass decides which pixels of a layer
+// surface get the glass effect.
+enum class ELayerMaskMode { AUTO, ALPHA, REGION };
+
+// Parses "auto"/"alpha"/"region"; nullopt for anything else.
+[[nodiscard]] std::optional<ELayerMaskMode> parseLayerMaskMode(std::string_view value);
 
 namespace ConfigKeys {
 
@@ -76,6 +84,9 @@ inline constexpr auto LAYERS_NAMESPACE_LIVE_RESAMPLE    = "plugin:hyprglass:laye
 inline constexpr auto LAYERS_LIVE_RESAMPLE              = "plugin:hyprglass:layers:live_resample";
 inline constexpr auto LAYERS_LIVE_RESAMPLE_FPS          = "plugin:hyprglass:layers:live_resample_fps";
 inline constexpr auto LAYERS_FORCE_LIVE_RESAMPLE        = "plugin:hyprglass:layers:force_live_resample";
+inline constexpr auto LAYERS_MASK_MODE                  = "plugin:hyprglass:layers:mask_mode";
+inline constexpr auto LAYERS_NAMESPACE_MASK_MODES       = "plugin:hyprglass:layers:namespace_mask_modes";
+inline constexpr auto LAYERS_MANAGE_BLUR                = "plugin:hyprglass:layers:manage_blur";
 
 // Overridable — dark theme overrides
 inline constexpr auto DARK_BLUR_STRENGTH        = "plugin:hyprglass:dark:blur_strength";
@@ -209,6 +220,9 @@ struct SPluginConfig {
     Hyprlang::INT* const* layersLiveResample             = nullptr;
     Hyprlang::INT* const* layersLiveResampleFps          = nullptr;
     Hyprlang::INT* const* layersForceLiveResample        = nullptr;
+    StringConfigPtr       layersMaskMode;
+    StringConfigPtr       layersNamespaceMaskModes;
+    Hyprlang::INT* const* layersManageBlur               = nullptr;
 
     SOverridableConfig global;
     SOverridableConfig dark;
