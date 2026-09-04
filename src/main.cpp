@@ -9,6 +9,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
+#include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -38,11 +39,11 @@ static void clearLayerGlassOnClose(PHLLS layerSurface) {
 }
 
 static void onNewWindow(PHLWINDOW window) {
-    if (std::ranges::any_of(window->m_windowDecorations,
+    if (std::ranges::any_of(window->presentation().decorations(),
                             [](const auto& decoration) { return decoration->getDisplayName() == "HyprGlass"; }))
         return;
 
-    auto decoration = makeUnique<CGlassDecoration>(window);
+    auto decoration = makeShared<CGlassDecoration>(window);
     g_pGlobalState->decorations.emplace_back(decoration);
     decoration->m_self = decoration;
     HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(decoration));
@@ -316,7 +317,7 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PH
             it = layerStates.emplace(rawPtr, std::make_shared<CGlassLayerSurface>(layerSurface)).first;
         }
 
-        if (!layerSurface->m_mapped) {
+        if (!layerSurface->mapped()) {
             ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, layerSurface, monitor, now, popups, lockscreen);
             return;
         }
@@ -465,7 +466,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     for (auto& window : Desktop::viewState()->windows()) {
-        if (window->isHidden() || !window->m_isMapped)
+        if (window->isHidden() || !window->mapped())
             continue;
         onNewWindow(window);
     }
