@@ -3,6 +3,7 @@
 #include "GlassLayerPassElement.hpp"
 #include "GlassLayerSurface.hpp"
 #include "GlassRenderer.hpp"
+#include "GlassSnapshotElement.hpp"
 #include "Globals.hpp"
 #include "PluginConfig.hpp"
 
@@ -232,6 +233,14 @@ static void parseLayerNamespaceFilters() {
         if (auto mode = parseLayerMaskMode(val))
             g_pGlobalState->layerNamespaceMaskModes[ns] = *mode;
     });
+
+    g_pGlobalState->layerNamespaceXray.clear();
+    parseKeyValuePairs(config.layersNamespaceXray, '=', [&](const std::string& ns, const std::string& val) {
+        if (val == "1" || val == "true" || val == "on" || val == "yes")
+            g_pGlobalState->layerNamespaceXray.emplace(ns, true);
+        else if (val == "0" || val == "false" || val == "off" || val == "no")
+            g_pGlobalState->layerNamespaceXray.emplace(ns, false);
+    });
 }
 
 static bool shouldGlassLayer(PHLLS layerSurface) {
@@ -436,6 +445,47 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             if (ws) if (auto mon = ws->m_monitor.lock()) g_pGlobalState->bumpSceneGeneration(mon);
         }));
 
+    // X-ray: right after the background and bottom layers and before any
+    // window, copy the frame's damaged region into the monitor's snapshot.
+    // Nothing is allocated until a window or layer asks; the copy then runs
+    // every monitor frame for as long as something has asked within the last
+    // IDLE_FRAMES, and the snapshot is dropped after that. Only real monitor
+    // renders count: exports, mirrors and closing-window snapshots have their
+    // own passes with their own pre-window stage.
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen([&](eRenderStage stage) {
+        if ((stage != RENDER_BEGIN && stage != RENDER_PRE_WINDOWS) || !g_pGlobalState || g_pHyprRenderer->m_bRenderingSnapshot ||
+            g_pHyprRenderer->m_renderData.projectionType != Render::RPT_MONITOR)
+            return;
+        const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
+        if (!monitor)
+            return;
+        const auto it = g_pGlobalState->backgroundSnapshots.find(monitor->m_id);
+        if (it == g_pGlobalState->backgroundSnapshots.end())
+            return;
+        auto& snapshot = it->second;
+        if (stage == RENDER_BEGIN) {
+            snapshot.frame++;
+            return;
+        }
+        if (snapshot.addedFrame == snapshot.frame) // this frame's pass already has the element
+            return;
+        constexpr uint64_t IDLE_FRAMES = 600; // ~10 s at 60 Hz without a sampler: let it go
+        if (snapshot.frame > snapshot.requestedFrame + IDLE_FRAMES) {
+            g_pGlobalState->backgroundSnapshots.erase(it);
+            return;
+        }
+        snapshot.addedFrame = snapshot.frame;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassSnapshotElement>());
+    }));
+
+    auto dropMonitorSnapshot = [](PHLMONITOR m) {
+        if (!g_pGlobalState || !m)
+            return;
+        g_pGlobalState->backgroundSnapshots.erase(m->m_id);
+    };
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.removed.listen([=](PHLMONITOR m) { dropMonitorSnapshot(m); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.destroyMon.listen([=](PHLMONITOR m) { dropMonitorSnapshot(m); }));
+
     // Clear pending presets/layers before config re-parse, commit after
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.preReload.listen([&]() {
         clearPendingPresets();
@@ -528,6 +578,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassPassElement");
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassLayerPassElement");
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassLayerCompositeElement");
+    g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassSnapshotElement");
+    g_pGlobalState->backgroundSnapshots.clear();
 
     for (auto& decoration : g_pGlobalState->decorations) {
         if (auto* deco = decoration.get())

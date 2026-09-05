@@ -44,6 +44,7 @@ class CGlassLayerSurface {
     std::chrono::steady_clock::time_point m_lastDirtyMark{};
 
     void damageSampleRegion();
+    bool         m_cachedFromSnapshot = false; // the cached sample came from the x-ray snapshot
 
     // Track last position/size to detect movement and expand damage
     Vector2D     m_lastPosition;
@@ -59,4 +60,5 @@ class CGlassLayerSurface {
     [[nodiscard]] bool           resolveThemeIsDark() const;
     [[nodiscard]] std::string    resolvePresetName() const;
     [[nodiscard]] ELayerMaskMode resolveMaskMode() const;
+    [[nodiscard]] bool           resolveXray() const;
 };

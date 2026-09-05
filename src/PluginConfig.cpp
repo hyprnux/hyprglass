@@ -43,6 +43,7 @@ std::optional<ELayerMaskMode> parseLayerMaskMode(std::string_view value) {
 void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::ENABLED, Config::INTEGER{1});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::MANAGE_WINDOW_BLUR, Config::INTEGER{1});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::XRAY, Config::INTEGER{0});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::DEFAULT_THEME, Config::STRING{"dark"});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::DEFAULT_PRESET, Config::STRING{"default"});
 
@@ -60,6 +61,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_MASK_MODE, Config::STRING{"auto"});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_MODES, Config::STRING{});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_MANAGE_BLUR, Config::INTEGER{1});
+    addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_XRAY, Config::STRING{});
 
     // Global level — real defaults for effect settings,
     // sentinel for theme-sensitive settings (fallback to hardcoded theme defaults)
@@ -170,6 +172,7 @@ static void initOverridablePointers(HANDLE handle, SOverridableConfig& layer,
 void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.enabled          = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::ENABLED);
     config.manageWindowBlur = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::MANAGE_WINDOW_BLUR);
+    config.xray             = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::XRAY);
     config.defaultTheme  = getStringPtr(handle, ConfigKeys::DEFAULT_THEME);
     config.defaultPreset = getStringPtr(handle, ConfigKeys::DEFAULT_PRESET);
 
@@ -186,6 +189,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.layersMaskMode           = getStringPtr(handle, ConfigKeys::LAYERS_MASK_MODE);
     config.layersNamespaceMaskModes = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_MODES);
     config.layersManageBlur         = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_MANAGE_BLUR);
+    config.layersNamespaceXray           = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_XRAY);
 
     initOverridablePointers(handle, config.global,
         ConfigKeys::BLUR_STRENGTH, ConfigKeys::BLUR_ITERATIONS,
@@ -585,6 +589,7 @@ struct SPendingLayer {
     bool                          exclude       = false;
     int                           liveResample  = -1; // -1 = not set
     std::optional<ELayerMaskMode> maskMode;
+    int                           xray          = -1; // -1 = not set, 0 = off, 1 = on
 };
 
 static std::vector<SPendingLayer> s_pendingLayers;
@@ -621,6 +626,11 @@ static int handleLuaLayer(lua_State* L) {
         if (lua_isstring(L, -1))
             entry.maskMode = parseLayerMaskMode(lua_tostring(L, -1));
         lua_pop(L, 1);
+
+        lua_getfield(L, 2, "xray");
+        if (lua_isboolean(L, -1))
+            entry.xray = lua_toboolean(L, -1) ? 1 : 0;
+        lua_pop(L, 1);
     }
 
     s_pendingLayers.push_back(std::move(entry));
@@ -646,6 +656,8 @@ void commitPendingLayers() {
                 g_pGlobalState->layerNamespaceLiveResample[entry.ns] = entry.liveResample != 0;
             if (entry.maskMode)
                 g_pGlobalState->layerNamespaceMaskModes[entry.ns] = *entry.maskMode;
+            if (entry.xray != -1)
+                g_pGlobalState->layerNamespaceXray[entry.ns] = entry.xray == 1;
         }
     }
     s_pendingLayers.clear();

@@ -48,6 +48,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
     void withdrawNoBlur();
 
     [[nodiscard]] bool        resolveEnabled() const;
+    [[nodiscard]] bool        resolveXray() const;
     [[nodiscard]] bool        resolveThemeIsDark() const;
     [[nodiscard]] std::string resolvePresetName() const;
 
