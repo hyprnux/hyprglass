@@ -1,12 +1,13 @@
 #include "GlassLayerSurface.hpp"
 #include "BuiltInPresets.hpp"
+#include "Diagnostics.hpp"
 #include "GlassRenderer.hpp"
 #include "Globals.hpp"
 #include "LayerGeometry.hpp"
+#include "WorkspaceAnimation.hpp"
 
 #include <algorithm>
 #include <cmath>
-#include <hyprland/src/desktop/Workspace.hpp>
 #include <GLES3/gl32.h>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
@@ -119,6 +120,58 @@ PHLLS CGlassLayerSurface::getLayerSurface() const {
     return m_layerSurface.lock();
 }
 
+CRegion CGlassLayerSurface::transformedBlurRegion(PHLMONITOR monitor, const CBox& rawBox) const {
+    const auto layerSurface = m_layerSurface.lock();
+    const auto wlSurface    = layerSurface ? layerSurface->wlSurface() : nullptr;
+    if (!layerSurface || !wlSurface || !monitor)
+        return {};
+
+    const auto logicalSize = layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+
+    // surface-local logical region -> box-local pixels, same
+    // scale/translate/transform sequence as transformedLayerBox()
+    CRegion region = wlSurface->m_blurRegion.copy();
+    region.intersect(0, 0, logicalSize.x, logicalSize.y); // spec: clipped to surface size
+    region.scale(static_cast<float>(monitor->m_scale));
+    region.translate(rawBox.pos());
+    region.intersect(rawBox.x, rawBox.y, rawBox.w, rawBox.h); // defensive
+    region.transform(Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform)),
+                      monitor->m_transformedSize.x, monitor->m_transformedSize.y);
+    return region;
+}
+
+std::optional<CBox> CGlassLayerSurface::regionBoundingBoxAbsolute(PHLMONITOR monitor, const CBox& layerBox) const {
+    if (!monitor)
+        return std::nullopt;
+
+    auto region = transformedBlurRegion(monitor, layerBox);
+    if (region.empty())
+        return std::nullopt;
+
+    return region.getExtents();
+}
+
+std::optional<CBox> CGlassLayerSurface::regionBoundingBoxGlobal() const {
+    const auto layerSurface = m_layerSurface.lock();
+    const auto wlSurface    = layerSurface ? layerSurface->wlSurface() : nullptr;
+    if (!layerSurface || !wlSurface)
+        return std::nullopt;
+
+    const auto position    = layerSurface->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    const auto logicalSize = layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+
+    // Stays in the layer's own global-logical family (no monitor scale/transform
+    // applied): BackgroundDamageObserver's damagedBox is global-logical too.
+    CRegion region = wlSurface->m_blurRegion.copy();
+    region.intersect(0, 0, logicalSize.x, logicalSize.y);
+    region.translate(position);
+
+    if (region.empty())
+        return std::nullopt;
+
+    return region.getExtents();
+}
+
 void CGlassLayerSurface::damageIfMoved() {
     const auto layerSurface = m_layerSurface.lock();
     if (!layerSurface)
@@ -206,27 +259,56 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
 
     CBox transformBox = transformedLayerBox(*layerBox, monitor);
 
+    // PROTOCOL_REGION: glass only ever shows inside the blur region, so blurred
+    // data outside it is provably never sampled. m_cachedTransformedRegion is
+    // computed once here and reused by compositeAndRestore()'s regionRects
+    // upload later this same frame — never widens boundingBox() or the
+    // composite draw, which stay full-layer (see their own resolveMaskSource()
+    // call sites elsewhere in this file). m_cachedRegionSampleBox is likewise
+    // reused by compositeAndRestore() to build the sampleUVOffset/uvScale
+    // uniforms that reconcile the (region-shrunk) sample box against the
+    // full-layer quad UV — see toSampleBoxUV() in Shaders.hpp.
+    const bool isRegionMode = resolveMaskSource() == EMaskSource::PROTOCOL_REGION;
+    m_cachedTransformedRegion = isRegionMode ? transformedBlurRegion(monitor, *layerBox) : CRegion{};
+    const std::optional<CBox> regionSampleBox = isRegionMode ? regionBoundingBoxAbsolute(monitor, *layerBox) : std::nullopt;
+    // A region resize/move is otherwise invisible to backgroundChanged below (a
+    // layer's own commit doesn't mark itself dirty) — without this the mask
+    // shape would update immediately while the sample stays from the old box.
+    const bool regionBoxChanged = isRegionMode && regionSampleBox != m_cachedRegionSampleBox;
+    m_cachedRegionSampleBox = regionSampleBox;
+
+    // Brackets everything below, including the conditional resample and the
+    // temp-FBO redirect/clear that always runs: GL forbids a concurrent
+    // GL_TIME_ELAPSED query, so on a cache miss the SampleBackground/
+    // BlurBackground brackets those calls open underneath this one just no-op.
+    Diagnostics::CScopedStageTimer stageTimer(Diagnostics::EStage::LayerSample);
+    const MONITORID monitorId = monitor ? monitor->m_id : -1; // -1 mirrors Hyprland's own MONITOR_INVALID
+
     // Decide whether we need to re-sample and re-blur the background.
     // When only the layer surface content changed (e.g. waybar clock tick)
     // but no window moved behind us, we reuse the cached blurred background.
     // This skips the most expensive GPU work (blit + 6 blur passes).
     const uint64_t currentGeneration = g_pGlobalState->getSceneGeneration(monitor);
-    const auto activeWs = monitor->m_activeWorkspace;
+    // A workspace slide or fade moves the whole scene behind us without changing
+    // any window's own geometry, so no window decoration update reports it.
     const bool isAnimating = layerSurface->positionAnimation()->isBeingAnimated() ||
                              layerSurface->sizeAnimation()->isBeingAnimated() ||
                              layerSurface->alpha()[Desktop::View::LS_ALPHA_FADE]->isBeingAnimated() ||
-                             (activeWs && activeWs->m_renderOffset->isBeingAnimated());
+                             WorkspaceAnimation::anyWorkspaceAnimating(monitor);
     const auto& config = g_pGlobalState->config;
     const bool forceLive = config.layersForceLiveResample && **config.layersForceLiveResample;
     const bool backgroundChanged = !m_hasCachedSample ||
                                    currentGeneration != m_lastSceneGeneration ||
-                                   isAnimating || m_backgroundDirty || forceLive;
+                                   isAnimating || m_backgroundDirty || forceLive || regionBoxChanged;
 
     if (!layerSurface->m_mapped) {
         // During fade-out, re-sampling captures stale pixels. Reuse cached sample.
         if (!m_hasCachedSample)
             return;
+        Diagnostics::recordLayerCacheHit(monitorId);
     } else if (backgroundChanged) {
+        Diagnostics::recordLayerCacheMiss(monitorId);
+
         const bool isDark          = resolveThemeIsDark();
         const std::string preset   = resolvePresetName();
         const SResolveContext ctx  = {preset, isDark, g_pGlobalState->config, g_pGlobalState->customPresets};
@@ -234,17 +316,26 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
         float blurStrength   = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
         int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-        GlassRenderer::sampleBackground(m_sampleFramebuffer, source, transformBox, m_samplePaddingRatio, downscale);
+        GlassRenderer::sampleBackground(m_sampleFramebuffer, source, regionSampleBox.value_or(transformBox), m_samplePaddingRatio, downscale);
 
         float blurRadius     = blurStrength * 12.0f / downscale;
         int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
+
+        if (ctx.config.blurFold && **ctx.config.blurFold) {
+            const GlassRenderer::SFoldedBlur folded = GlassRenderer::foldBlurPasses(blurRadius, blurIterations);
+            blurRadius     = folded.radius;
+            blurIterations = folded.iterations;
+        }
+
         GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source);
 
         m_hasCachedSample      = true;
         m_lastSceneGeneration  = currentGeneration;
         m_backgroundDirty      = false;
+    } else {
+        // background unchanged, reuse cached blur — skip 7 GPU operations
+        Diagnostics::recordLayerCacheHit(monitorId);
     }
-    // else: background unchanged, reuse cached blur — skip 7 GPU operations
 
     // Redirect surface rendering to a temp FBO cleared to transparent.
     // The original renderLayer (called between pre/post elements) will render
@@ -272,9 +363,12 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     g_pHyprRenderer->m_renderData.currentFB = m_surfaceTempFramebuffer;
     glBindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_surfaceTempFramebuffer.get())->getFBID());
 
-    CBox clearBox = transformBox;
-    clearBox.expand(GlassRenderer::SAMPLE_PADDING_PX);
-    clearBox = clearBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
+    // Unpadded: the composite quad only ever reads transformBox (rawBox, never
+    // padded), so the SAMPLE_PADDING_PX-expanded part of a padded clear is never
+    // sampled — true regardless of mask mode, not the region-sized clear a
+    // literal reading of "region-aware" would suggest (that would under-clear
+    // real surface area outside the region that the composite quad does read).
+    CBox clearBox = transformBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
 
     if (std::isfinite(clearBox.x) && std::isfinite(clearBox.y) && std::isfinite(clearBox.w) && std::isfinite(clearBox.h) &&
         clearBox.w > 0.0 && clearBox.h > 0.0) {
@@ -283,6 +377,8 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
         glClear(GL_COLOR_BUFFER_BIT);
         g_pHyprOpenGL->scissor(nullptr);
     }
+
+    m_redirectedThisFrame = true;
 }
 
 void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EMaskSource maskSource) {
@@ -292,6 +388,15 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
         glBindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_savedCurrentFB.get())->getFBID());
         m_savedCurrentFB.reset();
     }
+
+    // The render pass can discard the pre-surface element without discarding
+    // this one (its bounding box is evaluated first, against a superset of the
+    // damage the pre-surface element sees — see disableSimplification() in
+    // GlassLayerPassElement.cpp). Without this flag we'd mask/composite against
+    // whatever m_surfaceTempFramebuffer held from an earlier frame.
+    if (!m_redirectedThisFrame)
+        return;
+    m_redirectedThisFrame = false;
 
     auto& shaderManager = g_pGlobalState->shaderManager;
     if (!shaderManager.isInitialized() || !m_hasCachedSample)
@@ -308,6 +413,13 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
     auto layerBox = LayerGeometry::computeLayerBox(layerSurface, monitor);
     if (!layerBox)
         return;
+
+    // Brackets mask setup + the applyGlassEffect call below; that call's own
+    // ApplyGlassEffect bracket sees this one already open and no-ops instead
+    // of nesting (GL forbids concurrent GL_TIME_ELAPSED queries).
+    Diagnostics::CScopedStageTimer stageTimer(Diagnostics::EStage::LayerComposite);
+    if (monitor)
+        Diagnostics::recordLayerGlassDraw(monitor->m_id);
 
     CBox rawBox       = *layerBox;
     CBox transformBox = transformedLayerBox(rawBox, monitor);
@@ -350,20 +462,12 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
             maskInfo.maskMode       = 1;
             maskInfo.alphaThreshold = 0.0f; // unused in region mode
 
-            const auto wlSurface = layerSurface->wlSurface();
-            if (!wlSurface)
-                break;
-            const auto logicalSize = layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-
-            // surface-local logical region -> box-local pixels, same
-            // scale/translate/transform sequence as transformedLayerBox()
-            CRegion region = wlSurface->m_blurRegion.copy();
-            region.intersect(0, 0, logicalSize.x, logicalSize.y); // spec: clipped to surface size
-            region.scale(static_cast<float>(monitor->m_scale));
-            region.translate(rawBox.pos());
-            region.intersect(rawBox.x, rawBox.y, rawBox.w, rawBox.h); // defensive
-            region.transform(Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform)),
-                              monitor->m_transformedSize.x, monitor->m_transformedSize.y);
+            // Reuses sampleAndRedirect()'s computation from this same frame
+            // (guarded by m_redirectedThisFrame above, so it did run); recomputes
+            // as a defensive fallback only if that's somehow empty here.
+            if (m_cachedTransformedRegion.empty())
+                m_cachedTransformedRegion = transformedBlurRegion(monitor, rawBox);
+            CRegion& region = m_cachedTransformedRegion;
 
             const auto rects = region.getRects();
             if (rects.size() <= static_cast<size_t>(GlassRenderer::MAX_REGION_RECTS)) {
@@ -380,6 +484,21 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
                 maskInfo.regionRectCount = 1;
                 maskInfo.regionRects[0]  = {static_cast<float>(extents.x - transformBox.x), static_cast<float>(extents.y - transformBox.y),
                                              static_cast<float>(extents.w), static_cast<float>(extents.h)};
+            }
+
+            // sampleAndRedirect() gave sampleBackground() the region's bounding
+            // box, smaller than the full-layer transformBox this quad draws —
+            // reconcile the quad's own UV into that smaller sample texture's
+            // normalized space before uvPadding applies (toSampleBoxUV() in
+            // Shaders.hpp). Same defensive-recompute fallback as
+            // m_cachedTransformedRegion above, guarded against a degenerate
+            // (zero-size) transformBox since it is the UV remap's denominator.
+            if (transformBox.w > 0.0 && transformBox.h > 0.0) {
+                const CBox sampleBox = m_cachedRegionSampleBox.value_or(regionBoundingBoxAbsolute(monitor, rawBox).value_or(transformBox));
+                maskInfo.sampleUVOffset = Vector2D((sampleBox.x - transformBox.x) / transformBox.w,
+                                                    (sampleBox.y - transformBox.y) / transformBox.h);
+                maskInfo.sampleUVScale  = Vector2D(sampleBox.w / transformBox.w,
+                                                    sampleBox.h / transformBox.h);
             }
             break;
         }

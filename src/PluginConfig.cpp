@@ -40,11 +40,30 @@ std::optional<ELayerMaskMode> parseLayerMaskMode(std::string_view value) {
     return std::nullopt;
 }
 
+std::optional<EDebugMode> parseDebugMode(std::string_view value) {
+    if (value == "off")          return EDebugMode::OFF;
+    if (value == "hints_only")   return EDebugMode::HINTS_ONLY;
+    if (value == "gl_work_only") return EDebugMode::GL_WORK_ONLY;
+    return std::nullopt;
+}
+
+EDebugMode currentDebugMode() {
+    if (!g_pGlobalState)
+        return EDebugMode::OFF;
+    return parseDebugMode(readStringConfig(g_pGlobalState->config.debugMode)).value_or(EDebugMode::OFF);
+}
+
 void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::ENABLED, Config::INTEGER{1});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::MANAGE_WINDOW_BLUR, Config::INTEGER{1});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::SKIP_OPAQUE_WINDOWS, Config::INTEGER{1});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::BLUR_FOLD, Config::INTEGER{1});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::DEFAULT_THEME, Config::STRING{"dark"});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::DEFAULT_PRESET, Config::STRING{"default"});
+
+    // Performance diagnostics
+    addConfigValue<Config::Values::String>(handle, ConfigKeys::DEBUG_MODE, Config::STRING{"off"});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::DEBUG_TIMERS, Config::INTEGER{0});
 
     // Layer surface support
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_ENABLED, Config::INTEGER{0});
@@ -61,6 +80,11 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_MODES, Config::STRING{});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_MANAGE_BLUR, Config::INTEGER{1});
 
+    // Window background cache
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::WINDOWS_BACKGROUND_CACHE, Config::INTEGER{1});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE, Config::INTEGER{1});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE_FPS, Config::INTEGER{30});
+
     // Global level — real defaults for effect settings,
     // sentinel for theme-sensitive settings (fallback to hardcoded theme defaults)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::BLUR_STRENGTH, Config::FLOAT{GlobalDefaults::BLUR_STRENGTH});
@@ -69,6 +93,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::CHROMATIC_ABERRATION, Config::FLOAT{GlobalDefaults::CHROMATIC_ABERRATION});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::FRESNEL_STRENGTH, Config::FLOAT{GlobalDefaults::FRESNEL_STRENGTH});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::SPECULAR_STRENGTH, Config::FLOAT{GlobalDefaults::SPECULAR_STRENGTH});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::SPECULAR_ANGLE, Config::FLOAT{GlobalDefaults::SPECULAR_ANGLE});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::GLASS_OPACITY, Config::FLOAT{GlobalDefaults::GLASS_OPACITY});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::EDGE_THICKNESS, Config::FLOAT{GlobalDefaults::EDGE_THICKNESS});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::TINT_COLOR, Config::INTEGER{GlobalDefaults::TINT_COLOR});
@@ -80,6 +105,17 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::VIBRANCY_DARKNESS, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::ADAPTIVE_DIM, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::ADAPTIVE_BOOST, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::REFRACTION_FLOW, Config::FLOAT{GlobalDefaults::REFRACTION_FLOW});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::REFRACTION_SPREAD, Config::FLOAT{GlobalDefaults::REFRACTION_SPREAD});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::FRESNEL_TINT, Config::FLOAT{GlobalDefaults::FRESNEL_TINT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::BEVEL_STRENGTH, Config::FLOAT{GlobalDefaults::BEVEL_STRENGTH});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::BEVEL_SIZE, Config::FLOAT{GlobalDefaults::BEVEL_SIZE});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::FRESNEL_COLOR, Config::INTEGER{GlobalDefaults::FRESNEL_COLOR});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::BEVEL_COLOR, Config::INTEGER{GlobalDefaults::BEVEL_COLOR});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::BEVEL_TINT, Config::FLOAT{GlobalDefaults::BEVEL_TINT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::BEVEL_ANGLE, Config::FLOAT{GlobalDefaults::BEVEL_ANGLE});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::BEVEL_SHADOW, Config::FLOAT{GlobalDefaults::BEVEL_SHADOW});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::SELF_SAMPLE, Config::FLOAT{GlobalDefaults::SELF_SAMPLE});
 
     // Dark theme overrides — all sentinel (inherit from global)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BLUR_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
@@ -88,6 +124,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_CHROMATIC_ABERRATION, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_FRESNEL_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_SPECULAR_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_SPECULAR_ANGLE, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_GLASS_OPACITY, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_EDGE_THICKNESS, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::DARK_TINT_COLOR, Config::INTEGER{SENTINEL_INT});
@@ -99,6 +136,17 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_VIBRANCY_DARKNESS, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_ADAPTIVE_DIM, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_ADAPTIVE_BOOST, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_REFRACTION_FLOW, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_REFRACTION_SPREAD, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_FRESNEL_TINT, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BEVEL_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BEVEL_SIZE, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::DARK_FRESNEL_COLOR, Config::INTEGER{SENTINEL_INT});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::DARK_BEVEL_COLOR, Config::INTEGER{SENTINEL_INT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BEVEL_TINT, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BEVEL_ANGLE, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BEVEL_SHADOW, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_SELF_SAMPLE, Config::FLOAT{SENTINEL_FLOAT});
 
     // Light theme overrides — all sentinel (inherit from global)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BLUR_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
@@ -107,6 +155,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_CHROMATIC_ABERRATION, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_FRESNEL_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_SPECULAR_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_SPECULAR_ANGLE, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_GLASS_OPACITY, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_EDGE_THICKNESS, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LIGHT_TINT_COLOR, Config::INTEGER{SENTINEL_INT});
@@ -118,6 +167,17 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_VIBRANCY_DARKNESS, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_ADAPTIVE_DIM, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_ADAPTIVE_BOOST, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_REFRACTION_FLOW, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_REFRACTION_SPREAD, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_FRESNEL_TINT, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BEVEL_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BEVEL_SIZE, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::LIGHT_FRESNEL_COLOR, Config::INTEGER{SENTINEL_INT});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::LIGHT_BEVEL_COLOR, Config::INTEGER{SENTINEL_INT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BEVEL_TINT, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BEVEL_ANGLE, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BEVEL_SHADOW, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_SELF_SAMPLE, Config::FLOAT{SENTINEL_FLOAT});
 
     // Legacy config keyword plus Lua-config callbacks for custom presets and layers.
     HyprlandAPI::addConfigKeyword(handle, ConfigKeys::PRESET_KEYWORD, handlePresetKeyword, Hyprlang::SHandlerOptions{});
@@ -142,18 +202,26 @@ static void initOverridablePointers(HANDLE handle, SOverridableConfig& layer,
                                     const char* blurStrength, const char* blurIterations,
                                     const char* refractionStrength, const char* chromaticAberration,
                                     const char* fresnelStrength, const char* specularStrength,
+                                    const char* specularAngle,
                                     const char* glassOpacity, const char* edgeThickness,
                                     const char* tintColor, const char* lensDistortion,
                                     const char* brightness, const char* contrast,
                                     const char* saturation, const char* vibrancy,
                                     const char* vibrancyDarkness, const char* adaptiveDim,
-                                    const char* adaptiveBoost) {
+                                    const char* adaptiveBoost,
+                                    const char* refractionFlow, const char* refractionSpread,
+                                    const char* fresnelTint, const char* bevelStrength,
+                                    const char* bevelSize, const char* fresnelColor,
+                                    const char* bevelColor, const char* bevelTint,
+                                    const char* bevelAngle, const char* bevelShadow,
+                                    const char* selfSample) {
     layer.blurStrength        = getStaticPtr<Hyprlang::FLOAT>(handle, blurStrength);
     layer.blurIterations      = getStaticPtr<Hyprlang::INT>(handle, blurIterations);
     layer.refractionStrength  = getStaticPtr<Hyprlang::FLOAT>(handle, refractionStrength);
     layer.chromaticAberration = getStaticPtr<Hyprlang::FLOAT>(handle, chromaticAberration);
     layer.fresnelStrength     = getStaticPtr<Hyprlang::FLOAT>(handle, fresnelStrength);
     layer.specularStrength    = getStaticPtr<Hyprlang::FLOAT>(handle, specularStrength);
+    layer.specularAngle       = getStaticPtr<Hyprlang::FLOAT>(handle, specularAngle);
     layer.glassOpacity        = getStaticPtr<Hyprlang::FLOAT>(handle, glassOpacity);
     layer.edgeThickness       = getStaticPtr<Hyprlang::FLOAT>(handle, edgeThickness);
     layer.tintColor           = getStaticPtr<Hyprlang::INT>(handle, tintColor);
@@ -165,13 +233,29 @@ static void initOverridablePointers(HANDLE handle, SOverridableConfig& layer,
     layer.vibrancyDarkness    = getStaticPtr<Hyprlang::FLOAT>(handle, vibrancyDarkness);
     layer.adaptiveDim         = getStaticPtr<Hyprlang::FLOAT>(handle, adaptiveDim);
     layer.adaptiveBoost       = getStaticPtr<Hyprlang::FLOAT>(handle, adaptiveBoost);
+    layer.refractionFlow      = getStaticPtr<Hyprlang::FLOAT>(handle, refractionFlow);
+    layer.refractionSpread    = getStaticPtr<Hyprlang::FLOAT>(handle, refractionSpread);
+    layer.fresnelTint         = getStaticPtr<Hyprlang::FLOAT>(handle, fresnelTint);
+    layer.bevelStrength       = getStaticPtr<Hyprlang::FLOAT>(handle, bevelStrength);
+    layer.bevelSize           = getStaticPtr<Hyprlang::FLOAT>(handle, bevelSize);
+    layer.fresnelColor        = getStaticPtr<Hyprlang::INT>(handle, fresnelColor);
+    layer.bevelColor          = getStaticPtr<Hyprlang::INT>(handle, bevelColor);
+    layer.bevelTint           = getStaticPtr<Hyprlang::FLOAT>(handle, bevelTint);
+    layer.bevelAngle          = getStaticPtr<Hyprlang::FLOAT>(handle, bevelAngle);
+    layer.bevelShadow         = getStaticPtr<Hyprlang::FLOAT>(handle, bevelShadow);
+    layer.selfSample          = getStaticPtr<Hyprlang::FLOAT>(handle, selfSample);
 }
 
 void initConfigPointers(HANDLE handle, SPluginConfig& config) {
-    config.enabled          = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::ENABLED);
-    config.manageWindowBlur = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::MANAGE_WINDOW_BLUR);
+    config.enabled           = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::ENABLED);
+    config.manageWindowBlur  = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::MANAGE_WINDOW_BLUR);
+    config.skipOpaqueWindows = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::SKIP_OPAQUE_WINDOWS);
+    config.blurFold          = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::BLUR_FOLD);
     config.defaultTheme  = getStringPtr(handle, ConfigKeys::DEFAULT_THEME);
     config.defaultPreset = getStringPtr(handle, ConfigKeys::DEFAULT_PRESET);
+
+    config.debugMode   = getStringPtr(handle, ConfigKeys::DEBUG_MODE);
+    config.debugTimers = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::DEBUG_TIMERS);
 
     config.layersEnabled           = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_ENABLED);
     config.layersNamespaces        = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACES);
@@ -187,38 +271,63 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.layersNamespaceMaskModes = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_MODES);
     config.layersManageBlur         = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_MANAGE_BLUR);
 
+    config.windowsBackgroundCache = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::WINDOWS_BACKGROUND_CACHE);
+    config.windowsLiveResample    = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE);
+    config.windowsLiveResampleFps = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE_FPS);
+
     initOverridablePointers(handle, config.global,
         ConfigKeys::BLUR_STRENGTH, ConfigKeys::BLUR_ITERATIONS,
         ConfigKeys::REFRACTION_STRENGTH, ConfigKeys::CHROMATIC_ABERRATION,
         ConfigKeys::FRESNEL_STRENGTH, ConfigKeys::SPECULAR_STRENGTH,
+        ConfigKeys::SPECULAR_ANGLE,
         ConfigKeys::GLASS_OPACITY, ConfigKeys::EDGE_THICKNESS,
         ConfigKeys::TINT_COLOR, ConfigKeys::LENS_DISTORTION,
         ConfigKeys::BRIGHTNESS, ConfigKeys::CONTRAST,
         ConfigKeys::SATURATION, ConfigKeys::VIBRANCY,
         ConfigKeys::VIBRANCY_DARKNESS, ConfigKeys::ADAPTIVE_DIM,
-        ConfigKeys::ADAPTIVE_BOOST);
+        ConfigKeys::ADAPTIVE_BOOST,
+        ConfigKeys::REFRACTION_FLOW, ConfigKeys::REFRACTION_SPREAD,
+        ConfigKeys::FRESNEL_TINT, ConfigKeys::BEVEL_STRENGTH,
+        ConfigKeys::BEVEL_SIZE, ConfigKeys::FRESNEL_COLOR,
+        ConfigKeys::BEVEL_COLOR, ConfigKeys::BEVEL_TINT,
+        ConfigKeys::BEVEL_ANGLE, ConfigKeys::BEVEL_SHADOW,
+        ConfigKeys::SELF_SAMPLE);
 
     initOverridablePointers(handle, config.dark,
         ConfigKeys::DARK_BLUR_STRENGTH, ConfigKeys::DARK_BLUR_ITERATIONS,
         ConfigKeys::DARK_REFRACTION_STRENGTH, ConfigKeys::DARK_CHROMATIC_ABERRATION,
         ConfigKeys::DARK_FRESNEL_STRENGTH, ConfigKeys::DARK_SPECULAR_STRENGTH,
+        ConfigKeys::DARK_SPECULAR_ANGLE,
         ConfigKeys::DARK_GLASS_OPACITY, ConfigKeys::DARK_EDGE_THICKNESS,
         ConfigKeys::DARK_TINT_COLOR, ConfigKeys::DARK_LENS_DISTORTION,
         ConfigKeys::DARK_BRIGHTNESS, ConfigKeys::DARK_CONTRAST,
         ConfigKeys::DARK_SATURATION, ConfigKeys::DARK_VIBRANCY,
         ConfigKeys::DARK_VIBRANCY_DARKNESS, ConfigKeys::DARK_ADAPTIVE_DIM,
-        ConfigKeys::DARK_ADAPTIVE_BOOST);
+        ConfigKeys::DARK_ADAPTIVE_BOOST,
+        ConfigKeys::DARK_REFRACTION_FLOW, ConfigKeys::DARK_REFRACTION_SPREAD,
+        ConfigKeys::DARK_FRESNEL_TINT, ConfigKeys::DARK_BEVEL_STRENGTH,
+        ConfigKeys::DARK_BEVEL_SIZE, ConfigKeys::DARK_FRESNEL_COLOR,
+        ConfigKeys::DARK_BEVEL_COLOR, ConfigKeys::DARK_BEVEL_TINT,
+        ConfigKeys::DARK_BEVEL_ANGLE, ConfigKeys::DARK_BEVEL_SHADOW,
+        ConfigKeys::DARK_SELF_SAMPLE);
 
     initOverridablePointers(handle, config.light,
         ConfigKeys::LIGHT_BLUR_STRENGTH, ConfigKeys::LIGHT_BLUR_ITERATIONS,
         ConfigKeys::LIGHT_REFRACTION_STRENGTH, ConfigKeys::LIGHT_CHROMATIC_ABERRATION,
         ConfigKeys::LIGHT_FRESNEL_STRENGTH, ConfigKeys::LIGHT_SPECULAR_STRENGTH,
+        ConfigKeys::LIGHT_SPECULAR_ANGLE,
         ConfigKeys::LIGHT_GLASS_OPACITY, ConfigKeys::LIGHT_EDGE_THICKNESS,
         ConfigKeys::LIGHT_TINT_COLOR, ConfigKeys::LIGHT_LENS_DISTORTION,
         ConfigKeys::LIGHT_BRIGHTNESS, ConfigKeys::LIGHT_CONTRAST,
         ConfigKeys::LIGHT_SATURATION, ConfigKeys::LIGHT_VIBRANCY,
         ConfigKeys::LIGHT_VIBRANCY_DARKNESS, ConfigKeys::LIGHT_ADAPTIVE_DIM,
-        ConfigKeys::LIGHT_ADAPTIVE_BOOST);
+        ConfigKeys::LIGHT_ADAPTIVE_BOOST,
+        ConfigKeys::LIGHT_REFRACTION_FLOW, ConfigKeys::LIGHT_REFRACTION_SPREAD,
+        ConfigKeys::LIGHT_FRESNEL_TINT, ConfigKeys::LIGHT_BEVEL_STRENGTH,
+        ConfigKeys::LIGHT_BEVEL_SIZE, ConfigKeys::LIGHT_FRESNEL_COLOR,
+        ConfigKeys::LIGHT_BEVEL_COLOR, ConfigKeys::LIGHT_BEVEL_TINT,
+        ConfigKeys::LIGHT_BEVEL_ANGLE, ConfigKeys::LIGHT_BEVEL_SHADOW,
+        ConfigKeys::LIGHT_SELF_SAMPLE);
 }
 
 // ── Preset keyword parsing ───────────────────────────────────────────────────
@@ -242,6 +351,7 @@ static bool setPresetFloatField(SPresetValues& values, std::string_view key, std
     if (key == "chromatic_aberration") { values.chromaticAberration = parsed; return true; }
     if (key == "fresnel_strength")     { values.fresnelStrength = parsed; return true; }
     if (key == "specular_strength")    { values.specularStrength = parsed; return true; }
+    if (key == "specular_angle")       { values.specularAngle = parsed; return true; }
     if (key == "glass_opacity")        { values.glassOpacity = parsed; return true; }
     if (key == "edge_thickness")       { values.edgeThickness = parsed; return true; }
     if (key == "lens_distortion")      { values.lensDistortion = parsed; return true; }
@@ -252,6 +362,15 @@ static bool setPresetFloatField(SPresetValues& values, std::string_view key, std
     if (key == "vibrancy_darkness")    { values.vibrancyDarkness = parsed; return true; }
     if (key == "adaptive_dim")         { values.adaptiveDim = parsed; return true; }
     if (key == "adaptive_boost")       { values.adaptiveBoost = parsed; return true; }
+    if (key == "refraction_flow")      { values.refractionFlow = parsed; return true; }
+    if (key == "refraction_spread")    { values.refractionSpread = parsed; return true; }
+    if (key == "fresnel_tint")         { values.fresnelTint = parsed; return true; }
+    if (key == "bevel_strength")       { values.bevelStrength = parsed; return true; }
+    if (key == "bevel_size")           { values.bevelSize = parsed; return true; }
+    if (key == "bevel_tint")           { values.bevelTint = parsed; return true; }
+    if (key == "bevel_angle")          { values.bevelAngle = parsed; return true; }
+    if (key == "bevel_shadow")         { values.bevelShadow = parsed; return true; }
+    if (key == "self_sample")          { values.selfSample = parsed; return true; }
     return false;
 }
 
@@ -271,6 +390,8 @@ static bool setPresetIntField(SPresetValues& values, std::string_view key, std::
 
     if (key == "blur_iterations") { values.blurIterations = parsed; return true; }
     if (key == "tint_color")      { values.tintColor = parsed; return true; }
+    if (key == "fresnel_color")   { values.fresnelColor = parsed; return true; }
+    if (key == "bevel_color")     { values.bevelColor = parsed; return true; }
     return false;
 }
 
@@ -288,6 +409,7 @@ static void mergePresetValues(SPresetValues& target, const SPresetValues& overri
     mergeFloat(target.chromaticAberration, overrides.chromaticAberration);
     mergeFloat(target.fresnelStrength, overrides.fresnelStrength);
     mergeFloat(target.specularStrength, overrides.specularStrength);
+    mergeFloat(target.specularAngle, overrides.specularAngle);
     mergeFloat(target.glassOpacity, overrides.glassOpacity);
     mergeFloat(target.edgeThickness, overrides.edgeThickness);
     mergeInt(target.tintColor, overrides.tintColor);
@@ -299,6 +421,17 @@ static void mergePresetValues(SPresetValues& target, const SPresetValues& overri
     mergeFloat(target.vibrancyDarkness, overrides.vibrancyDarkness);
     mergeFloat(target.adaptiveDim, overrides.adaptiveDim);
     mergeFloat(target.adaptiveBoost, overrides.adaptiveBoost);
+    mergeFloat(target.refractionFlow, overrides.refractionFlow);
+    mergeFloat(target.refractionSpread, overrides.refractionSpread);
+    mergeFloat(target.fresnelTint, overrides.fresnelTint);
+    mergeFloat(target.bevelStrength, overrides.bevelStrength);
+    mergeFloat(target.bevelSize, overrides.bevelSize);
+    mergeInt(target.fresnelColor, overrides.fresnelColor);
+    mergeInt(target.bevelColor, overrides.bevelColor);
+    mergeFloat(target.bevelTint, overrides.bevelTint);
+    mergeFloat(target.bevelAngle, overrides.bevelAngle);
+    mergeFloat(target.bevelShadow, overrides.bevelShadow);
+    mergeFloat(target.selfSample, overrides.selfSample);
 }
 
 Hyprlang::CParseResult handlePresetKeyword(const char* /*command*/, const char* value) {
@@ -674,6 +807,15 @@ void validateConfig() {
         });
     }
 
+    const auto debugMode = readStringConfig(config.debugMode);
+    if (!parseDebugMode(debugMode)) {
+        HyprlandAPI::addNotificationV2(PHANDLE, {
+            {"text", std::string("[hyprglass] Invalid debug:mode '") + std::string(debugMode) + "', expected 'off', 'hints_only', or 'gl_work_only'. Falling back to 'off'."},
+            {"time", (uint64_t)5000},
+            {"color", CHyprColor{1.0, 0.8, 0.2, 1.0}},
+        });
+    }
+
     const auto preset = readStringConfig(config.defaultPreset);
     if (!preset.empty() && preset != "default") {
         const auto& presets = g_pGlobalState->customPresets;
@@ -685,6 +827,20 @@ void validateConfig() {
             });
         }
     }
+}
+
+bool anySelfSampleConfigured(const SPluginConfig& config, const std::unordered_map<std::string, SCustomPreset>& customPresets) {
+    for (const auto* layer : {&config.global, &config.dark, &config.light}) {
+        if (auto ptr = layer->selfSample; ptr && *ptr && **ptr > 0.0)
+            return true;
+    }
+
+    for (const auto& [_, preset] : customPresets) {
+        if (preset.shared.selfSample > 0.0f || preset.dark.selfSample > 0.0f || preset.light.selfSample > 0.0f)
+            return true;
+    }
+
+    return false;
 }
 
 // ── Preset-aware resolution ──────────────────────────────────────────────────

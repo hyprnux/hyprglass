@@ -4,8 +4,6 @@
 #include "Globals.hpp"
 #include "LayerGeometry.hpp"
 
-#include <cmath>
-
 CGlassLayerCompositeElement::CGlassLayerCompositeElement(const SGlassLayerCompositeData& data)
     : m_data(data) {}
 
@@ -24,20 +22,17 @@ std::optional<CBox> CGlassLayerCompositeElement::boundingBox() {
     if (!layerSurface)
         return std::nullopt;
 
+    // Same helper as CGlassLayerPassElement::boundingBox(), so the pre- and
+    // post-surface elements never disagree about the layer's box.
     const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
-    auto box = LayerGeometry::computeLayerBox(layerSurface, monitor);
-    if (!box)
-        return std::nullopt;
-
-    const float scale = monitor->m_scale > 0.0f ? monitor->m_scale : 1.0f;
-    box->scale(1.0 / scale).expand(GlassRenderer::SAMPLE_PADDING_PX / scale).noNegativeSize().round();
-    if (!std::isfinite(box->x) || !std::isfinite(box->y) || !std::isfinite(box->w) || !std::isfinite(box->h) || box->w <= 0.0 || box->h <= 0.0)
-        return std::nullopt;
-
-    return box;
+    return LayerGeometry::computePaddedLogicalLayerBox(layerSurface, monitor, GlassRenderer::SAMPLE_PADDING_PX);
 }
 
 bool CGlassLayerCompositeElement::needsLiveBlur() {
+    // Always false: Hyprland's CRenderPass::render() asserts a bounding box
+    // for any element reporting live blur ("No bounding box for an element
+    // with live blur is illegal", Pass.cpp), and this element's boundingBox()
+    // can be nullopt (e.g. layer torn down mid-frame).
     return false;
 }
 

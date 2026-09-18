@@ -36,14 +36,32 @@ bool CShaderManager::compileGlassShader() {
     glassUniforms.specularStrength    = glGetUniformLocation(program, "specularStrength");
     glassUniforms.glassOpacity        = glGetUniformLocation(program, "glassOpacity");
     glassUniforms.edgeThickness       = glGetUniformLocation(program, "edgeThickness");
+    glassUniforms.invBezelWidthPx     = glGetUniformLocation(program, "invBezelWidthPx");
     glassUniforms.uvPadding           = glGetUniformLocation(program, "uvPadding");
     glassUniforms.tintColor           = glGetUniformLocation(program, "tintColor");
     glassUniforms.tintAlpha           = glGetUniformLocation(program, "tintAlpha");
     glassUniforms.lensDistortion      = glGetUniformLocation(program, "lensDistortion");
+    glassUniforms.lensMaxPx           = glGetUniformLocation(program, "lensMaxPx");
     glassUniforms.saturation          = glGetUniformLocation(program, "saturation");
     glassUniforms.vibrancyDarkness    = glGetUniformLocation(program, "vibrancyDarkness");
     glassUniforms.adaptiveDim         = glGetUniformLocation(program, "adaptiveDim");
     glassUniforms.adaptiveBoost       = glGetUniformLocation(program, "adaptiveBoost");
+    glassUniforms.refractionFlow      = glGetUniformLocation(program, "refractionFlow");
+    glassUniforms.refractionSpread    = glGetUniformLocation(program, "refractionSpread");
+    glassUniforms.fresnelTint         = glGetUniformLocation(program, "fresnelTint");
+    glassUniforms.bevelStrength       = glGetUniformLocation(program, "bevelStrength");
+    glassUniforms.bevelSize           = glGetUniformLocation(program, "bevelSize");
+    glassUniforms.monitorScale        = glGetUniformLocation(program, "monitorScale");
+    glassUniforms.fresnelColor        = glGetUniformLocation(program, "fresnelColor");
+    glassUniforms.fresnelColorAlpha   = glGetUniformLocation(program, "fresnelColorAlpha");
+    glassUniforms.bevelColor          = glGetUniformLocation(program, "bevelColor");
+    glassUniforms.bevelColorAlpha     = glGetUniformLocation(program, "bevelColorAlpha");
+    glassUniforms.bevelTint           = glGetUniformLocation(program, "bevelTint");
+    glassUniforms.bevelAngle          = glGetUniformLocation(program, "bevelAngle");
+    glassUniforms.bevelShadow         = glGetUniformLocation(program, "bevelShadow");
+    glassUniforms.specularAngle       = glGetUniformLocation(program, "specularAngle");
+    glassUniforms.invFullSize         = glGetUniformLocation(program, "invFullSize");
+    glassUniforms.invRoundingPower    = glGetUniformLocation(program, "invRoundingPower");
     glassUniforms.maskTex             = glGetUniformLocation(program, "maskTex");
     glassUniforms.useMask             = glGetUniformLocation(program, "useMask");
     glassUniforms.maskUVOffset        = glGetUniformLocation(program, "maskUVOffset");
@@ -54,6 +72,8 @@ bool CShaderManager::compileGlassShader() {
     glassUniforms.regionRects         = glGetUniformLocation(program, "regionRects[0]");
     if (glassUniforms.regionRects == -1)
         glassUniforms.regionRects = glGetUniformLocation(program, "regionRects");
+    glassUniforms.sampleUVOffset      = glGetUniformLocation(program, "sampleUVOffset");
+    glassUniforms.sampleUVScale       = glGetUniformLocation(program, "sampleUVScale");
 
     return true;
 }
