@@ -19,6 +19,11 @@ inline constexpr std::string_view TAG_PRESET_PREFIX = "hyprglass_preset_";
 inline constexpr std::string_view TAG_ENABLED  = "hyprglass_enabled";
 inline constexpr std::string_view TAG_DISABLED = "hyprglass_disabled";
 
+// Per-window x-ray, overriding the global `xray`. Like Hyprland's `xray off`
+// window rule, off wins when both are present.
+inline constexpr std::string_view TAG_XRAY   = "hyprglass_xray";
+inline constexpr std::string_view TAG_NOXRAY = "hyprglass_noxray";
+
 // Hyprland stores dynamic tags (`tagwindow` dispatcher, dynamic window rules)
 // with a trailing '*'. CTagKeeper::isTagged() normalizes this for exact lookups,
 // but code iterating getTags() or registering preset names must strip it itself
@@ -65,6 +70,7 @@ inline constexpr auto DEFAULT_PRESET      = "plugin:hyprglass:default_preset";
 inline constexpr auto MANAGE_WINDOW_BLUR  = "plugin:hyprglass:manage_window_blur";
 inline constexpr auto SKIP_OPAQUE_WINDOWS = "plugin:hyprglass:skip_opaque_windows";
 inline constexpr auto BLUR_FOLD           = "plugin:hyprglass:blur_fold";
+inline constexpr auto XRAY                = "plugin:hyprglass:xray";
 
 // Performance diagnostics
 inline constexpr auto DEBUG_MODE   = "plugin:hyprglass:debug:mode";
@@ -119,6 +125,7 @@ inline constexpr auto LAYERS_FORCE_LIVE_RESAMPLE        = "plugin:hyprglass:laye
 inline constexpr auto LAYERS_MASK_MODE                  = "plugin:hyprglass:layers:mask_mode";
 inline constexpr auto LAYERS_NAMESPACE_MASK_MODES       = "plugin:hyprglass:layers:namespace_mask_modes";
 inline constexpr auto LAYERS_MANAGE_BLUR                = "plugin:hyprglass:layers:manage_blur";
+inline constexpr auto LAYERS_NAMESPACE_XRAY             = "plugin:hyprglass:layers:namespace_xray";
 
 // Subsurface item glass support (see GlassSubsurfaceState).
 // Preset resolution: subsurfaces:preset -> layers:preset (if set) -> window default preset.
@@ -309,6 +316,9 @@ struct SPluginConfig {
     // Derives a smaller blur pass count from the requested radius (GlassRenderer::
     // foldBlurPasses) instead of always running blur_iterations passes at full radius.
     Hyprlang::INT* const* blurFold = nullptr;
+    // Hide the windows under the glass: it is sampled from the frame as it was
+    // before any window was drawn. Tags and per-layer settings override it.
+    Hyprlang::INT* const* xray              = nullptr;
     StringConfigPtr      defaultTheme;
     StringConfigPtr      defaultPreset;
 
@@ -329,6 +339,7 @@ struct SPluginConfig {
     StringConfigPtr       layersMaskMode;
     StringConfigPtr       layersNamespaceMaskModes;
     Hyprlang::INT* const* layersManageBlur               = nullptr;
+    StringConfigPtr       layersNamespaceXray;
 
     Hyprlang::INT* const*   subsurfacesEnabled = nullptr;
     StringConfigPtr         subsurfacesPreset;

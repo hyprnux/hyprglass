@@ -52,7 +52,12 @@ bool CGlassLayerPassElement::needsLiveBlur() {
     // CRenderPass::render() asserts a bounding box for any element reporting
     // live blur ("No bounding box for an element with live blur is illegal",
     // Pass.cpp) and aborts the compositor if it's absent.
-    return paddedLogicalBox().has_value();
+    if (!paddedLogicalBox().has_value())
+        return false;
+
+    // X-ray samples the snapshot, never the live frame, so there is nothing
+    // under this layer that has to be re-rendered for us this frame.
+    return !m_data.layerState || !m_data.layerState->xraySnapshot(g_pHyprRenderer->m_renderData.pMonitor.lock());
 }
 
 bool CGlassLayerPassElement::needsPrecomputeBlur() {

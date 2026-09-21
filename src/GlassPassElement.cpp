@@ -84,6 +84,11 @@ bool CGlassPassElement::needsLiveBlur() {
     if (!box)
         return false;
 
+    // X-ray samples the snapshot, never the live frame, so there is nothing
+    // under this window that has to be re-rendered for us this frame.
+    if (m_data.decoration->xraySnapshot(monitor))
+        return false;
+
     // Only expand damage/exempt occlusion when the cached background actually
     // needs a fresh sample this frame — a cache hit needs neither (see the
     // "Cache hit" case in renderPass()). Transformed like renderPass()'s own

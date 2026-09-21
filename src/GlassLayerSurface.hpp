@@ -69,6 +69,10 @@ class CGlassLayerSurface {
 
     void damageSampleRegion();
 
+    // The cached sample came from the x-ray snapshot: switching x-ray on or
+    // off, or filling the snapshot in, must not reuse a sample of the other.
+    bool m_cachedFromSnapshot = false;
+
     // Track last position/size to detect movement and expand damage
     Vector2D     m_lastPosition;
     Vector2D     m_lastSize;
@@ -110,4 +114,11 @@ class CGlassLayerSurface {
     [[nodiscard]] bool           resolveThemeIsDark() const;
     [[nodiscard]] std::string    resolvePresetName() const;
     [[nodiscard]] ELayerMaskMode resolveMaskMode() const;
+    [[nodiscard]] bool           resolveXray() const;
+
+  public:
+    // The x-ray snapshot to sample this frame, or nullptr when x-ray is off for
+    // this layer or the snapshot is not filled in yet. Public: sampling it
+    // instead of the frame is also what lets the pass element skip live blur.
+    [[nodiscard]] SP<Render::IFramebuffer> xraySnapshot(PHLMONITOR monitor) const;
 };

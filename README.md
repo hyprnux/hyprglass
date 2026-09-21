@@ -77,7 +77,7 @@ if hl.plugin.hyprglass then
     })
 
     -- Layer surfaces: each call whitelists the namespace and configures it
-    hg.layer("waybar", { preset = "subtle", mask_threshold = 0.05 })
+    hg.layer("waybar", { preset = "subtle", mask_threshold = 0.05, xray = true })
     hg.layer("swaync")
     hg.layer("quickshell:bezel", { preset = "ui", mask_threshold = 0.3 })
     hg.layer("debug-panel", { exclude = true })
@@ -146,6 +146,7 @@ plugin:hyprglass {
 | `manage_window_blur` | bool | `true` (`1` in .conf) | Automatically set the `noblur` property on glassed windows. Glass replaces Hyprland's blur; without `noblur`, Hyprland's cached-blur optimization (`blur:new_optimizations`) hides the glass on static windows. Set to `0` to manage `windowrule = noblur` yourself. |
 | `skip_opaque_windows` | bool | `true` (`1` in .conf) | Skip glass under an opaque window — it would be invisible anyway, so skipping it saves GPU. Set to `0` to force glass everywhere. Windows using `self_sample` are never skipped, since their glass shows their own content. |
 | `blur_fold` | bool | `true` (`1` in .conf) | Fewer blur passes with an identical look. Set to `0` to always run `blur_iterations` passes at the configured radius. |
+| `xray` | bool | `false` (`0` in .conf) | Hide the windows under the glass: only the wallpaper shows through, however light the blur. Like Hyprland's `blur:xray`. Per-window tags and per-layer `xray` override it. |
 | `default_theme` | string | `dark` | Default theme: `dark` or `light` |
 | `default_preset` | string | `default` | Default preset name |
 
@@ -252,6 +253,7 @@ hg.layer("debug-panel", { exclude = true })
 | `live_resample` | bool | Per-layer override of `layers:live_resample` |
 | `mask_mode` | string | `"auto"`, `"region"` or `"alpha"`. See `layers:mask_mode` |
 | `exclude` | bool | Blacklist this namespace instead of whitelisting it |
+| `xray` | bool | X-ray for this layer, overriding the global `xray`. See [X-ray](#x-ray) |
 
 #### Legacy .conf config
 
@@ -270,6 +272,7 @@ hg.layer("debug-panel", { exclude = true })
 | `layers:mask_mode` | string | `auto` | Where the glass goes: `auto` = where the app requests blur, else where content is visible; `region` = only where the app requests blur; `alpha` = only where content is visible |
 | `layers:namespace_mask_modes` | string | `""` | Per-namespace `mask_mode` (`ns=mode` pairs, comma-separated) |
 | `layers:manage_blur` | bool | `true` (`1` in .conf) | Replace Hyprland's own blur with glass on glassed layers (`layerrule = ignorealpha` then has no effect, use `mask_threshold`). Set to `0` to keep Hyprland's blur |
+| `layers:namespace_xray` | string | `""` | Per-namespace x-ray (`ns=0` / `ns=1` pairs, comma-separated) |
 
 > Layer support hooks into Hyprland's internal render pipeline. This is version-sensitive and may break across Hyprland updates.
 
@@ -332,6 +335,19 @@ Override the global `enabled` setting per window via tags:
 
 - `hyprglass_disabled` — force the effect off on this window (wins over `hyprglass_enabled` if both present).
 - `hyprglass_enabled` — force the effect on this window. Useful with global `enabled = false` for a whitelist.
+- `hyprglass_xray` / `hyprglass_noxray` — x-ray on or off for this window, overriding the global `xray` (`noxray` wins if both are present). See [X-ray](#x-ray).
+
+#### X-ray
+
+Only the wallpaper shows through the glass, never the windows under it, however
+light the blur. Same idea and name as Hyprland's `decoration:blur:xray`.
+
+```lua
+hg.config({ xray = true })                                               -- everywhere
+hl.window_rule({ match = { class = "foot" }, tag = "+hyprglass_xray" })   -- one window
+hl.window_rule({ match = { class = "mpv" },  tag = "+hyprglass_noxray" }) -- opt one out
+hg.layer("waybar", { xray = true })                                      -- one layer
+```
 
 #### Theme
 

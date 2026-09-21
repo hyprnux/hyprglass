@@ -40,6 +40,11 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // calls. transformBox is monitor-local physical pixels (see callers).
     [[nodiscard]] bool wantsBackgroundResample(PHLMONITOR monitor, const CBox& transformBox) const;
 
+    // The x-ray snapshot to sample this frame, or nullptr when x-ray is off for
+    // this window or the snapshot is not filled in yet. Public: sampling it
+    // instead of the frame is also what lets the pass element skip live blur.
+    [[nodiscard]] SP<Render::IFramebuffer> xraySnapshot(PHLMONITOR monitor) const;
+
     // Owner test without the shared_ptr copy getOwner() hands out.
     [[nodiscard]] bool  ownsWindow(const PHLWINDOW& window) const { return m_window == window; }
     // self_sample as of the last rendered frame, 0 when the glass is off. Read on
@@ -69,6 +74,9 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // Window background cache state.
     bool m_hasCachedSample = false;
     bool m_backgroundDirty = false;
+    // The cached sample came from the x-ray snapshot: switching x-ray on or
+    // off, or filling the snapshot in, must not reuse a sample of the other.
+    bool m_cachedFromSnapshot = false;
     std::chrono::steady_clock::time_point m_lastDirtyMark{};
 
     // Scene generation at the last real sample, plus the monitor it was
@@ -123,6 +131,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
     };
 
     [[nodiscard]] EEnabledResolution resolveEnabled() const;
+    [[nodiscard]] bool               resolveXray() const;
     [[nodiscard]] bool               resolveThemeIsDark() const;
     [[nodiscard]] std::string        resolvePresetName() const;
 

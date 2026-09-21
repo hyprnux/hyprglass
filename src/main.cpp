@@ -8,6 +8,7 @@
 #include "GlassSubsurfaceCompositeElement.hpp"
 #include "GlassSubsurfacePassElement.hpp"
 #include "GlassSubsurfaceState.hpp"
+#include "GlassSnapshotElement.hpp"
 #include "Globals.hpp"
 #include "ItemHints.hpp"
 #include "PluginConfig.hpp"
@@ -224,6 +225,43 @@ static void endWindowRender() {
     dedupe.sink.clear();
 }
 
+// X-ray: between the bottom layers and the first window, queue the copy of
+// this frame's damage into the monitor's snapshot. Nothing exists until a
+// window or layer asks for it, and the snapshot is dropped once nothing has
+// asked for IDLE_FRAMES.
+static void queueXraySnapshot() {
+    // Not the monitor's own frame: an overview plugin emits this stage while
+    // rendering its own framebuffer, which has the windows in it already.
+    if (RenderGuards::isForeignRender() || g_pHyprRenderer->m_bRenderingSnapshot || g_pHyprRenderer->m_renderData.projectionType != Render::RPT_MONITOR)
+        return;
+
+    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
+    if (!monitor)
+        return;
+
+    const auto it = g_pGlobalState->backgroundSnapshots.find(monitor->m_id);
+    if (it == g_pGlobalState->backgroundSnapshots.end())
+        return;
+    auto& snapshot = it->second;
+
+    const uint64_t serial = g_pGlobalState->frameSerial;
+
+    constexpr uint64_t IDLE_FRAMES = 600; // ~10 s at 60 Hz without a sampler: let it go
+    if (serial > snapshot.requestedFrame + IDLE_FRAMES) {
+        g_pGlobalState->backgroundSnapshots.erase(it);
+        return;
+    }
+
+    if (snapshot.addedFrame == serial) // this frame's pass already has the element
+        return;
+    snapshot.addedFrame = serial;
+
+    if (!prepareXraySnapshot(monitor))
+        return;
+
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassSnapshotElement>());
+}
+
 static void onRenderStage(eRenderStage stage) {
     if (!g_pGlobalState)
         return;
@@ -242,7 +280,10 @@ static void onRenderStage(eRenderStage stage) {
             // the CRenderPass::add hook this state is populated from.
             std::erase_if(g_pGlobalState->subsurfaceGlass, [](const auto& pair) { return pair.first.expired(); });
             break;
-        case RENDER_PRE_WINDOWS: g_pGlobalState->dedupe.resetEpoch(); break;
+        case RENDER_PRE_WINDOWS:
+            g_pGlobalState->dedupe.resetEpoch();
+            queueXraySnapshot();
+            break;
         case RENDER_PRE_WINDOW: beginWindowRender(); break;
         case RENDER_POST_WINDOW: endWindowRender(); break;
         // defensive: both stages are past the last renderWindow of the frame, so
@@ -323,6 +364,14 @@ static void parseLayerNamespaceFilters() {
     parseKeyValuePairs(config.layersNamespaceMaskModes, '=', [&](const std::string& ns, const std::string& val) {
         if (auto mode = parseLayerMaskMode(val))
             g_pGlobalState->layerNamespaceMaskModes[ns] = *mode;
+    });
+
+    g_pGlobalState->layerNamespaceXray.clear();
+    parseKeyValuePairs(config.layersNamespaceXray, '=', [&](const std::string& ns, const std::string& val) {
+        if (val == "1" || val == "true" || val == "on" || val == "yes")
+            g_pGlobalState->layerNamespaceXray.emplace(ns, true);
+        else if (val == "0" || val == "false" || val == "off" || val == "no")
+            g_pGlobalState->layerNamespaceXray.emplace(ns, false);
     });
 }
 
@@ -736,6 +785,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             if (ws) if (auto mon = ws->m_monitor.lock()) g_pGlobalState->bumpSceneGeneration(mon);
         }));
 
+    auto dropMonitorSnapshot = [](PHLMONITOR m) {
+        if (!g_pGlobalState || !m)
+            return;
+        g_pGlobalState->backgroundSnapshots.erase(m->m_id);
+    };
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.removed.listen([=](PHLMONITOR m) { dropMonitorSnapshot(m); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.destroyMon.listen([=](PHLMONITOR m) { dropMonitorSnapshot(m); }));
+
     // Clear pending presets/layers before config re-parse, commit after
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.preReload.listen([&]() {
         clearPendingPresets();
@@ -863,6 +920,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassLayerCompositeElement");
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassSubsurfacePassElement");
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassSubsurfaceCompositeElement");
+    g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassSnapshotElement");
+    g_pGlobalState->backgroundSnapshots.clear();
 
     Diagnostics::shutdown();
 

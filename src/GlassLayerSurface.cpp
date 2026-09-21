@@ -2,6 +2,7 @@
 #include "BuiltInPresets.hpp"
 #include "Diagnostics.hpp"
 #include "GlassRenderer.hpp"
+#include "GlassSnapshotElement.hpp"
 #include "Globals.hpp"
 #include "LayerGeometry.hpp"
 #include "WorkspaceAnimation.hpp"
@@ -45,6 +46,29 @@ bool CGlassLayerSurface::resolveThemeIsDark() const {
     } catch (...) {}
 
     return true;
+}
+
+bool CGlassLayerSurface::resolveXray() const {
+    try {
+        // Per-namespace setting wins over the global, either way
+        const auto layerSurface = m_layerSurface.lock();
+        if (layerSurface) {
+            const auto& nsXray = g_pGlobalState->layerNamespaceXray;
+            const auto  it     = nsXray.find(layerSurface->m_namespace);
+            if (it != nsXray.end())
+                return it->second;
+        }
+    } catch (...) {}
+
+    const auto& config = g_pGlobalState->config;
+    return config.xray && **config.xray;
+}
+
+SP<Render::IFramebuffer> CGlassLayerSurface::xraySnapshot(PHLMONITOR monitor) const {
+    if (!resolveXray())
+        return nullptr;
+
+    return xraySnapshotFor(monitor, g_pHyprRenderer->m_renderData.currentFB);
 }
 
 std::string CGlassLayerSurface::resolvePresetName() const {
@@ -253,6 +277,15 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     if (!source)
         return;
 
+    // X-ray: keep asking for the snapshot so it stays fresh, and sample it
+    // once it is filled in. A sample taken from the live frame before that is
+    // cached like any other and replaced once, when the snapshot is there.
+    const auto snapshot     = xraySnapshot(monitor);
+    const auto sampleSource = snapshot ? snapshot : source;
+    const bool fromSnapshot = static_cast<bool>(snapshot);
+    if (resolveXray())
+        requestXraySnapshot(monitor);
+
     auto layerBox = LayerGeometry::computeLayerBox(layerSurface, monitor);
     if (!layerBox)
         return;
@@ -299,7 +332,8 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     const bool forceLive = config.layersForceLiveResample && **config.layersForceLiveResample;
     const bool backgroundChanged = !m_hasCachedSample ||
                                    currentGeneration != m_lastSceneGeneration ||
-                                   isAnimating || m_backgroundDirty || forceLive || regionBoxChanged;
+                                   isAnimating || m_backgroundDirty || forceLive || regionBoxChanged ||
+                                   fromSnapshot != m_cachedFromSnapshot;
 
     const CBox sampleBox     = regionSampleBox.value_or(transformBox);
     const bool sampleCovered = !backgroundChanged ||
@@ -328,7 +362,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
         float blurStrength   = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
         int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-        GlassRenderer::sampleBackground(m_sampleFramebuffer, source, regionSampleBox.value_or(transformBox), m_samplePaddingRatio, downscale);
+        GlassRenderer::sampleBackground(m_sampleFramebuffer, sampleSource, regionSampleBox.value_or(transformBox), m_samplePaddingRatio, downscale);
 
         float blurRadius     = blurStrength * 12.0f / downscale;
         int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
@@ -342,6 +376,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
         GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source);
 
         m_hasCachedSample      = true;
+        m_cachedFromSnapshot   = fromSnapshot;
         m_lastSceneGeneration  = currentGeneration;
         m_backgroundDirty      = false;
     } else {
