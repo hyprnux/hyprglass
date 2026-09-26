@@ -159,6 +159,7 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 |---|---|---|---|---|---|
 | `blur_strength` | float | `2.0` | — | — | Blur radius scale (`value * 12.0` px) |
 | `blur_iterations` | int | `3` | — | — | Gaussian blur passes (1-5) |
+| `noise` | float | `0.0` | — | — | Fine frosted-glass grain; `0` disables noise |
 | `refraction_strength` | float | `0.6` | — | — | Edge refraction intensity (0.0-1.0) |
 | `refraction_flow` | float | `0.0` | — | — | Where the edge distortion pulls: 0 toward the window center, 1 along the edges (0.0-1.0) |
 | `refraction_spread` | float | `1.0` | — | — | How deep the distortion reaches: 1 across the whole window, 0 only a rim with a flat center (0.0-1.0) |
