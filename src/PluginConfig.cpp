@@ -65,6 +65,7 @@ void registerConfig(HANDLE handle) {
     // sentinel for theme-sensitive settings (fallback to hardcoded theme defaults)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::BLUR_STRENGTH, Config::FLOAT{GlobalDefaults::BLUR_STRENGTH});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::BLUR_ITERATIONS, Config::INTEGER{GlobalDefaults::BLUR_ITERATIONS});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::NOISE, Config::FLOAT{GlobalDefaults::NOISE});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::REFRACTION_STRENGTH, Config::FLOAT{GlobalDefaults::REFRACTION_STRENGTH});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::CHROMATIC_ABERRATION, Config::FLOAT{GlobalDefaults::CHROMATIC_ABERRATION});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::FRESNEL_STRENGTH, Config::FLOAT{GlobalDefaults::FRESNEL_STRENGTH});
@@ -84,6 +85,7 @@ void registerConfig(HANDLE handle) {
     // Dark theme overrides — all sentinel (inherit from global)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BLUR_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::DARK_BLUR_ITERATIONS, Config::INTEGER{SENTINEL_INT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_NOISE, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_REFRACTION_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_CHROMATIC_ABERRATION, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_FRESNEL_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
@@ -103,6 +105,7 @@ void registerConfig(HANDLE handle) {
     // Light theme overrides — all sentinel (inherit from global)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BLUR_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LIGHT_BLUR_ITERATIONS, Config::INTEGER{SENTINEL_INT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_NOISE, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_REFRACTION_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_CHROMATIC_ABERRATION, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_FRESNEL_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
@@ -140,16 +143,17 @@ static StringConfigPtr getStringPtr(HANDLE /*handle*/, const char* key) {
 
 static void initOverridablePointers(HANDLE handle, SOverridableConfig& layer,
                                     const char* blurStrength, const char* blurIterations,
-                                    const char* refractionStrength, const char* chromaticAberration,
-                                    const char* fresnelStrength, const char* specularStrength,
-                                    const char* glassOpacity, const char* edgeThickness,
-                                    const char* tintColor, const char* lensDistortion,
-                                    const char* brightness, const char* contrast,
-                                    const char* saturation, const char* vibrancy,
-                                    const char* vibrancyDarkness, const char* adaptiveDim,
-                                    const char* adaptiveBoost) {
+                                    const char* noise, const char* refractionStrength,
+                                    const char* chromaticAberration, const char* fresnelStrength,
+                                    const char* specularStrength, const char* glassOpacity,
+                                    const char* edgeThickness, const char* tintColor,
+                                    const char* lensDistortion, const char* brightness,
+                                    const char* contrast, const char* saturation,
+                                    const char* vibrancy, const char* vibrancyDarkness,
+                                    const char* adaptiveDim, const char* adaptiveBoost) {
     layer.blurStrength        = getStaticPtr<Hyprlang::FLOAT>(handle, blurStrength);
     layer.blurIterations      = getStaticPtr<Hyprlang::INT>(handle, blurIterations);
+    layer.noise               = getStaticPtr<Hyprlang::FLOAT>(handle, noise);
     layer.refractionStrength  = getStaticPtr<Hyprlang::FLOAT>(handle, refractionStrength);
     layer.chromaticAberration = getStaticPtr<Hyprlang::FLOAT>(handle, chromaticAberration);
     layer.fresnelStrength     = getStaticPtr<Hyprlang::FLOAT>(handle, fresnelStrength);
@@ -188,7 +192,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.layersManageBlur         = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_MANAGE_BLUR);
 
     initOverridablePointers(handle, config.global,
-        ConfigKeys::BLUR_STRENGTH, ConfigKeys::BLUR_ITERATIONS,
+        ConfigKeys::BLUR_STRENGTH, ConfigKeys::BLUR_ITERATIONS, ConfigKeys::NOISE,
         ConfigKeys::REFRACTION_STRENGTH, ConfigKeys::CHROMATIC_ABERRATION,
         ConfigKeys::FRESNEL_STRENGTH, ConfigKeys::SPECULAR_STRENGTH,
         ConfigKeys::GLASS_OPACITY, ConfigKeys::EDGE_THICKNESS,
@@ -199,7 +203,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
         ConfigKeys::ADAPTIVE_BOOST);
 
     initOverridablePointers(handle, config.dark,
-        ConfigKeys::DARK_BLUR_STRENGTH, ConfigKeys::DARK_BLUR_ITERATIONS,
+        ConfigKeys::DARK_BLUR_STRENGTH, ConfigKeys::DARK_BLUR_ITERATIONS, ConfigKeys::DARK_NOISE,
         ConfigKeys::DARK_REFRACTION_STRENGTH, ConfigKeys::DARK_CHROMATIC_ABERRATION,
         ConfigKeys::DARK_FRESNEL_STRENGTH, ConfigKeys::DARK_SPECULAR_STRENGTH,
         ConfigKeys::DARK_GLASS_OPACITY, ConfigKeys::DARK_EDGE_THICKNESS,
@@ -210,7 +214,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
         ConfigKeys::DARK_ADAPTIVE_BOOST);
 
     initOverridablePointers(handle, config.light,
-        ConfigKeys::LIGHT_BLUR_STRENGTH, ConfigKeys::LIGHT_BLUR_ITERATIONS,
+        ConfigKeys::LIGHT_BLUR_STRENGTH, ConfigKeys::LIGHT_BLUR_ITERATIONS, ConfigKeys::LIGHT_NOISE,
         ConfigKeys::LIGHT_REFRACTION_STRENGTH, ConfigKeys::LIGHT_CHROMATIC_ABERRATION,
         ConfigKeys::LIGHT_FRESNEL_STRENGTH, ConfigKeys::LIGHT_SPECULAR_STRENGTH,
         ConfigKeys::LIGHT_GLASS_OPACITY, ConfigKeys::LIGHT_EDGE_THICKNESS,
@@ -238,6 +242,7 @@ static bool setPresetFloatField(SPresetValues& values, std::string_view key, std
     if (ec != std::errc{}) return false;
 
     if (key == "blur_strength")        { values.blurStrength = parsed; return true; }
+    if (key == "noise")                { values.noise = parsed; return true; }
     if (key == "refraction_strength")  { values.refractionStrength = parsed; return true; }
     if (key == "chromatic_aberration") { values.chromaticAberration = parsed; return true; }
     if (key == "fresnel_strength")     { values.fresnelStrength = parsed; return true; }
@@ -284,6 +289,7 @@ static void mergePresetValues(SPresetValues& target, const SPresetValues& overri
 
     mergeFloat(target.blurStrength, overrides.blurStrength);
     mergeInt(target.blurIterations, overrides.blurIterations);
+    mergeFloat(target.noise, overrides.noise);
     mergeFloat(target.refractionStrength, overrides.refractionStrength);
     mergeFloat(target.chromaticAberration, overrides.chromaticAberration);
     mergeFloat(target.fresnelStrength, overrides.fresnelStrength);

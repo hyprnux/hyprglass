@@ -6,6 +6,7 @@
 
 struct SGlassUniforms {
     GLint refractionStrength = -1;
+    GLint noise = -1;
     GLint chromaticAberration = -1;
     GLint fresnelStrength = -1;
     GLint specularStrength = -1;

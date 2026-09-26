@@ -34,6 +34,7 @@ uniform float radius;
 uniform vec2 uvPadding;
 
 uniform float refractionStrength;
+uniform float noise;
 uniform float chromaticAberration;
 uniform float fresnelStrength;
 uniform float specularStrength;
@@ -74,6 +75,12 @@ vec2 toTexUV(vec2 wuv) {
 vec4 sampleBlurred(vec2 wuv) {
     vec2 tuv = toTexUV(wuv);
     return texture(tex, clamp(tuv, 0.001, 0.999));
+}
+
+float hash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 1689.1984);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
 }
 
 // ============================================================================
@@ -215,6 +222,18 @@ void main() {
         color.b = sampleBlurred(uvB).b;
     } else {
         color = sampleBlurred(uvG).rgb;
+    }
+
+    // ========================================
+    // FROSTED NOISE FINISH
+    // Fine, stable grain helps a blurred background read as frosted rather
+    // than as a perfectly smooth color wash. Use the same hash and noise
+    // amplitude as Hyprland's blur finish pass.
+    // ========================================
+    if (noise > 0.001) {
+        float noiseHash = hash(v_texcoord);
+        float noiseAmount = noiseHash - 0.5;
+        color += noiseAmount * noise;
     }
 
     // ========================================
