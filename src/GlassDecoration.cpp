@@ -196,7 +196,7 @@ void CGlassDecoration::queueGlassPass(float alpha) {
     g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassPassElement>(data));
 }
 
-void CGlassDecoration::draw(PHLMONITOR monitor, float const& alpha) {
+void CGlassDecoration::draw(PHLMONITOR monitor, float const& alpha, const SP<Workspace::CWorkspacePresentable>&) {
     if (!g_pGlobalState)
         return;
 

@@ -100,7 +100,7 @@ static void drawGlassForFullscreenWindow(const PHLWINDOW& window, const PHLMONIT
         return;
 
     if (auto* deco = glassDecorationFor(window))
-        deco->draw(monitor, 1.f); // alpha unused, recomputed in renderPass
+        deco->draw(monitor, 1.f, dynamicPointerCast<Workspace::CWorkspacePresentable>(window->m_workspace)); // alpha unused, recomputed in renderPass
 }
 
 // ── Duplicate window copies ──────────────────────────────────────────────────

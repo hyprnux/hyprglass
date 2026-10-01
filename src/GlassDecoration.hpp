@@ -16,7 +16,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
 
     [[nodiscard]] SDecorationPositioningInfo getPositioningInfo() override;
     void                                     onPositioningReply(const SDecorationPositioningReply& reply) override;
-    void                                     draw(PHLMONITOR monitor, float const& alpha) override;
+    void                                     draw(PHLMONITOR monitor, float const& alpha, const SP<Workspace::CWorkspacePresentable>& presentation) override;
     [[nodiscard]] eDecorationType            getDecorationType() override;
     void                                     updateWindow(PHLWINDOW window) override;
     void                                     damageEntire() override;
