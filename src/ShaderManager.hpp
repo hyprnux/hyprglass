@@ -11,15 +11,33 @@ struct SGlassUniforms {
     GLint specularStrength = -1;
     GLint glassOpacity = -1;
     GLint edgeThickness = -1;
+    GLint invBezelWidthPx = -1;
     GLint uvPadding = -1;
     GLint tintColor = -1;
     GLint tintAlpha = -1;
     GLint lensDistortion = -1;
+    GLint lensMaxPx = -1;
     GLint saturation = -1;
     GLint vibrancyDarkness = -1;
     GLint adaptiveDim = -1;
     GLint adaptiveBoost = -1;
-    
+    GLint refractionFlow = -1;
+    GLint refractionSpread = -1;
+    GLint fresnelTint = -1;
+    GLint bevelStrength = -1;
+    GLint bevelSize = -1;
+    GLint monitorScale = -1;
+    GLint fresnelColor = -1;
+    GLint fresnelColorAlpha = -1;
+    GLint bevelColor = -1;
+    GLint bevelColorAlpha = -1;
+    GLint bevelTint = -1;
+    GLint bevelAngle = -1;
+    GLint bevelShadow = -1;
+    GLint specularAngle = -1;
+    GLint invFullSize = -1;
+    GLint invRoundingPower = -1;
+
     // Layers only: temp FBO surface mask for content-aware glass
     GLint maskTex = -1;
     GLint useMask = -1;
@@ -29,6 +47,8 @@ struct SGlassUniforms {
     GLint maskMode = -1;
     GLint regionRectCount = -1;
     GLint regionRects = -1;
+    GLint sampleUVOffset = -1;
+    GLint sampleUVScale = -1;
 };
 
 struct SBlurUniforms {
