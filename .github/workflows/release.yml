@@ -1,12 +1,17 @@
 name: Release
 
+# Releases are cut from the stable branch of each Hyprland release line
+# (hyprland-0.56, ...). main follows hyprland-git and is never released: every
+# push to the newest stable line is merged into it, and every release pins
+# itself there, since hyprpm reads its manifest from main.
 on:
   push:
     branches:
-      - main
+      - "hyprland-*"
 
 concurrency:
-  group: release-${{ github.ref }}
+  # One group for every line: each run pushes to main.
+  group: release
   cancel-in-progress: false
 
 permissions:
@@ -19,6 +24,11 @@ jobs:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     container:
       image: archlinux:latest
+    outputs:
+      skip: ${{ steps.version-bump.outputs.skip }}
+      new_version: ${{ steps.version-bump.outputs.new_version }}
+      hyprland_version: ${{ steps.hyprland-version.outputs.version }}
+      release_commit: ${{ steps.commit.outputs.sha }}
     steps:
       - name: Install system dependencies
         run: |
@@ -30,9 +40,7 @@ jobs:
             pixman \
             libdrm \
             pkgconf \
-            wget \
-            jq \
-            curl
+            wget
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,14 +48,15 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # actions/checkout in a container marks the repo as safe
       - name: Fix git ownership
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Determine version bump from conventional commits
         id: version-bump
         run: |
-          LAST_TAG=$(git tag --list "v*" --sort=-version:refname | head -n1 || echo "")
+          # Last release of this line: a tag reachable from the branch, not the
+          # newest tag of the repository.
+          LAST_TAG=$(git describe --tags --abbrev=0 --match 'v*' HEAD 2>/dev/null || true)
 
           if [[ -z "$LAST_TAG" ]]; then
             echo "No previous release found"
@@ -104,25 +113,45 @@ jobs:
           echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Build plugin
-        if: steps.version-bump.outputs.skip != 'true'
-        run: make
-
       - name: Capture Hyprland version
         if: steps.version-bump.outputs.skip != 'true'
         id: hyprland-version
         run: |
           HYPRLAND_VERSION=$(pacman -Q hyprland | awk '{print $2}' | cut -d'-' -f1)
+          LINE="${GITHUB_REF_NAME#hyprland-}"
+
+          # The binary and the pin must match the line this branch targets. Once
+          # Arch ships the next Hyprland release, this line can no longer be
+          # released by CI.
+          if [[ "$HYPRLAND_VERSION" != "$LINE".* ]]; then
+            echo "::error::Arch ships Hyprland ${HYPRLAND_VERSION}, but ${GITHUB_REF_NAME} targets Hyprland ${LINE}.x."
+            exit 1
+          fi
+
+          # The pin goes to the Hyprland the binary was built against: it must
+          # be the one this commit declares.
+          DECLARED=$(tr -d '[:space:]' < .hyprland-version)
+          if [[ "$HYPRLAND_VERSION" != "$DECLARED" ]]; then
+            echo "::error::Arch ships Hyprland ${HYPRLAND_VERSION}, but .hyprland-version says ${DECLARED}: push again once they match."
+            exit 1
+          fi
+
           echo "version=${HYPRLAND_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Built against Hyprland ${HYPRLAND_VERSION}"
+
+      - name: Build plugin
+        if: steps.version-bump.outputs.skip != 'true'
+        run: make
 
       - name: Install git-chglog
         if: steps.version-bump.outputs.skip != 'true'
         run: |
           CHGLOG_VERSION="0.15.4"
-          wget -qO git-chglog.tar.gz "https://github.com/git-chglog/git-chglog/releases/download/v${CHGLOG_VERSION}/git-chglog_${CHGLOG_VERSION}_linux_amd64.tar.gz"
-          tar xzf git-chglog.tar.gz
-          mv git-chglog /usr/local/bin/
+          # Unpack outside the repository: the archive ships its own README and LICENSE.
+          mkdir -p "$RUNNER_TEMP/git-chglog"
+          wget -qO "$RUNNER_TEMP/git-chglog.tar.gz" "https://github.com/git-chglog/git-chglog/releases/download/v${CHGLOG_VERSION}/git-chglog_${CHGLOG_VERSION}_linux_amd64.tar.gz"
+          tar xzf "$RUNNER_TEMP/git-chglog.tar.gz" -C "$RUNNER_TEMP/git-chglog"
+          mv "$RUNNER_TEMP/git-chglog/git-chglog" /usr/local/bin/
 
       - name: Generate changelog
         if: steps.version-bump.outputs.skip != 'true'
@@ -146,55 +175,14 @@ jobs:
           echo "$CHANGELOG_CONTENT" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - name: Update hyprpm commit pin
-        if: steps.version-bump.outputs.skip != 'true'
-        run: |
-          VERSION="${{ steps.hyprland-version.outputs.version }}"
-          NEW_VERSION="${{ steps.version-bump.outputs.new_version }}"
-
-          # Guard against the historical "vnull" bug and any empty value.
-          if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
-            echo "No usable Hyprland version ('$VERSION'); skipping pin update."
-            exit 0
-          fi
-
-          # The commit being released (code-identical to the upcoming changelog commit).
-          PLUGIN_COMMIT=$(git rev-parse HEAD)
-
-          # Resolve the Hyprland release tag to its commit hash.
-          HYPRLAND_COMMIT=$(curl -fsSL \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/hyprwm/Hyprland/commits/v${VERSION}" \
-            | jq -r '.sha // empty')
-
-          if [[ -z "$HYPRLAND_COMMIT" ]]; then
-            echo "Could not resolve Hyprland v${VERSION} to a commit; skipping pin update."
-            exit 0
-          fi
-
-          # Idempotent: do nothing if this Hyprland commit is already pinned.
-          if grep -q "\"${HYPRLAND_COMMIT}\"" hyprpm.toml; then
-            echo "Pin for Hyprland ${VERSION} (${HYPRLAND_COMMIT}) already present; nothing to do."
-            exit 0
-          fi
-
-          PIN_LINE="  [\"${HYPRLAND_COMMIT}\", \"${PLUGIN_COMMIT}\"], # hyprland ${VERSION} -> hyprglass v${NEW_VERSION}"
-          echo "Adding pin: ${PIN_LINE}"
-
-          # Insert the new pin just before the line that closes the commit_pins array.
-          awk -v pin="$PIN_LINE" '
-            /^commit_pins = \[/ { inblock = 1 }
-            inblock && /^\]/    { print pin; inblock = 0 }
-            { print }
-          ' hyprpm.toml > hyprpm.toml.tmp && mv hyprpm.toml.tmp hyprpm.toml
-
       - name: Commit changelog
         if: steps.version-bump.outputs.skip != 'true'
+        id: commit
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
 
-          git add CHANGELOG.md hyprpm.toml
+          git add CHANGELOG.md
 
           if git diff --staged --quiet; then
             echo "No changelog changes to commit"
@@ -203,9 +191,12 @@ jobs:
               -m "Bump version from ${{ steps.version-bump.outputs.current_version }} to ${{ steps.version-bump.outputs.new_version }}" \
               -m "Update CHANGELOG.md"
 
-            git push https://github-actions:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
+            git push https://github-actions:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git "HEAD:${GITHUB_REF_NAME}"
             echo "Changelog committed and pushed"
           fi
+
+          # The commit the release tag and the hyprpm pin point to.
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Prepare release artifact
         if: steps.version-bump.outputs.skip != 'true'
@@ -218,6 +209,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version-bump.outputs.tag }}
+          # Without it the tag lands on the default branch (main), i.e. on hyprland-git code.
+          target_commitish: ${{ steps.commit.outputs.sha }}
           name: "HyprGlass ${{ steps.version-bump.outputs.tag }}"
           body: |
             ## HyprGlass ${{ steps.version-bump.outputs.tag }}
@@ -241,7 +234,7 @@ jobs:
             Or build from source with [hyprpm](https://wiki.hyprland.org/Plugins/Using-Plugins/#hyprpm):
             ```bash
             hyprpm add https://github.com/${{ github.repository }}
-            hyprpm enable HyprGlass
+            hyprpm enable hyprglass
             ```
 
             ---
@@ -265,6 +258,194 @@ jobs:
           | Version | \`${{ steps.version-bump.outputs.tag }}\` |
           | Previous | \`v${{ steps.version-bump.outputs.current_version }}\` |
           | Bump Type | \`${{ steps.version-bump.outputs.bump_type }}\` |
+          | Branch | \`${{ github.ref_name }}\` |
           | Hyprland | \`${{ steps.hyprland-version.outputs.version }}\` |
           | Release | [${{ steps.version-bump.outputs.tag }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.version-bump.outputs.tag }}) |
           EOF
+
+  forward-merge:
+    # After the release, so its changelog commit goes along; before the pin, so
+    # the pin lands on top of the merge. The pin still runs when the merge is
+    # left to a pull request: users get the release meanwhile.
+    needs: release
+    if: "!cancelled() && !contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    container:
+      image: archlinux:latest
+    steps:
+      # hyprland-git and its -git dependencies come prebuilt from Chaotic-AUR.
+      - name: Enable Chaotic-AUR
+        run: |
+          pacman-key --init
+          pacman-key --recv-key 3056513887B78AEB --keyserver keyserver.ubuntu.com
+          pacman-key --lsign-key 3056513887B78AEB
+          pacman -U --noconfirm \
+            'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst' \
+            'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst'
+          printf '\n[chaotic-aur]\nInclude = /etc/pacman.d/chaotic-mirrorlist\n' >> /etc/pacman.conf
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed \
+            git \
+            base-devel \
+            hyprland-git \
+            pixman \
+            libdrm \
+            pkgconf \
+            github-cli
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.FORWARD_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Fix git ownership
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # GITHUB_TOKEN can't push a change to .github/workflows, and its pull
+      # requests start no CI run: FORWARD_MERGE_TOKEN (contents, workflows and
+      # pull-requests write) lifts both.
+      - name: Merge into main
+        env:
+          GH_TOKEN: ${{ secrets.FORWARD_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+
+          # Frozen lines stay out of main: only the newest stable line flows into it.
+          NEWEST=$(git ls-remote --heads origin | awk '{print $2}' \
+            | sed -n 's|^refs/heads/\(hyprland-[0-9]*\.[0-9]*\)$|\1|p' | sort -V | tail -n 1)
+          if [[ -z "$NEWEST" ]]; then
+            echo "::error::Could not list the stable branches."
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_NAME" != "$NEWEST" ]]; then
+            echo "::notice::${GITHUB_REF_NAME} is not the newest stable line (${NEWEST}): not merged into main."
+            exit 0
+          fi
+
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+          git fetch origin main "$GITHUB_REF_NAME"
+          STABLE="origin/${GITHUB_REF_NAME}"
+          if git merge-base --is-ancestor "$STABLE" origin/main; then
+            echo "main already has ${GITHUB_REF_NAME}"
+            exit 0
+          fi
+
+          git checkout -B forward-merge origin/main
+
+          # Held back only when the merge breaks a main that built: main can
+          # trail hyprland-git, and that isn't this merge's fault.
+          MAIN_BUILDS=false
+          if make; then MAIN_BUILDS=true; fi
+          make clean
+
+          PROBLEM=""
+          if ! git merge --no-ff --no-edit -m "Merge branch '${GITHUB_REF_NAME}' into main" "$STABLE"; then
+            # A merge refused before it started leaves no MERGE_HEAD to abort.
+            git merge --abort || true
+            git checkout -f -B forward-merge "$STABLE"
+            git clean -fdq
+            PROBLEM="it conflicts with main"
+          elif [[ "$MAIN_BUILDS" == true ]] && ! make; then
+            PROBLEM="main no longer builds against hyprland-git after it"
+          fi
+
+          if [[ -z "$PROBLEM" ]]; then
+            if git push "$REMOTE" HEAD:main; then
+              echo "Merged ${GITHUB_REF_NAME} into main"
+              exit 0
+            fi
+            PROBLEM="the push to main was rejected (main moved, or a workflow file changed and FORWARD_MERGE_TOKEN isn't set)"
+          fi
+
+          # A person finishes the merge on its own branch: never on the stable one.
+          BRANCH="forward-merge/${GITHUB_REF_NAME}"
+          OPEN_PR=$(gh pr list --repo "${{ github.repository }}" --base main --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [[ -n "$OPEN_PR" ]]; then
+            gh pr comment "$OPEN_PR" --repo "${{ github.repository }}" \
+              --body "${GITHUB_REF_NAME} moved on to ${GITHUB_SHA:0:12}: merge it into this branch as well."
+          else
+            if ! git push --force "$REMOTE" "HEAD:refs/heads/${BRANCH}"; then
+              echo "::error::${GITHUB_REF_NAME} was not merged into main (${PROBLEM}), and ${BRANCH} could not be pushed. Merge it by hand: git fetch origin && git checkout main && git merge --no-ff origin/${GITHUB_REF_NAME} && git push origin main"
+              exit 1
+            fi
+            gh pr create --repo "${{ github.repository }}" --base main --head "$BRANCH" \
+              --title "Merge ${GITHUB_REF_NAME} into main" \
+              --body "${GITHUB_REF_NAME} could not be merged into main automatically: ${PROBLEM}. Finish the merge on this branch (merge main into it, adapt to hyprland-git), then merge this pull request."
+          fi
+          echo "::warning::${GITHUB_REF_NAME} was not merged into main: ${PROBLEM}. See the forward-merge pull request."
+
+  pin:
+    needs: [release, forward-merge]
+    if: "!cancelled() && needs.release.result == 'success' && needs.release.outputs.skip == 'false'"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pin the release for hyprpm on main
+        run: |
+          VERSION="${{ needs.release.outputs.hyprland_version }}"
+          NEW_VERSION="${{ needs.release.outputs.new_version }}"
+          RELEASE_COMMIT="${{ needs.release.outputs.release_commit }}"
+
+          # Resolve the Hyprland release tag to its commit hash.
+          HYPRLAND_COMMIT=$(curl -fsSL \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/hyprwm/Hyprland/commits/v${VERSION}" \
+            | jq -r '.sha // empty')
+
+          if [[ -z "$HYPRLAND_COMMIT" ]]; then
+            echo "::error::Could not resolve Hyprland v${VERSION} to a commit: add its pin to main's hyprpm.toml by hand."
+            exit 1
+          fi
+
+          PIN_LINE="  [\"${HYPRLAND_COMMIT}\", \"${RELEASE_COMMIT}\"], # hyprland ${VERSION} -> hyprglass v${NEW_VERSION}"
+          echo "Pin: ${PIN_LINE}"
+
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Replace this Hyprland commit's pin, or add it before the closing bracket.
+            awk -v pin="$PIN_LINE" -v key="\"${HYPRLAND_COMMIT}\"" '
+              /^commit_pins = \[/          { inblock = 1 }
+              inblock && index($0, key)    { print pin; pinned = 1; next }
+              inblock && /^\]/             { if (!pinned) print pin; inblock = 0 }
+              { print }
+            ' hyprpm.toml > hyprpm.toml.tmp && mv hyprpm.toml.tmp hyprpm.toml
+
+            if git diff --quiet hyprpm.toml; then
+              echo "Pin already up to date"
+              exit 0
+            fi
+
+            git add hyprpm.toml
+            git commit -m "chore(release): pin hyprland ${VERSION} to v${NEW_VERSION} [skip ci]"
+
+            if git push https://github-actions:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main; then
+              echo "Pin pushed to main"
+              exit 0
+            fi
+
+            echo "Push to main rejected (attempt ${attempt}), retrying"
+            sleep 5
+          done
+
+          echo "::error::Could not push the pin to main: add it by hand: ${PIN_LINE}"
+          exit 1

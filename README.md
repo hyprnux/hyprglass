@@ -19,6 +19,18 @@ hyprpm add https://github.com/hyprnux/hyprglass
 hyprpm enable hyprglass
 ```
 
+On a Hyprland release, hyprpm installs the hyprglass release made for it. On hyprland-git, it builds `main`, which follows Hyprland's development branch.
+
+If your distribution's Hyprland isn't recognized as a release and the build fails, use the stable branch of your Hyprland version:
+
+```bash
+hyprpm remove https://github.com/hyprnux/hyprglass
+hyprpm add https://github.com/hyprnux/hyprglass origin/hyprland-0.56
+hyprpm enable hyprglass
+```
+
+hyprpm then stays on that branch through `hyprpm update`. Repeat this with the new branch when you upgrade Hyprland to its next minor version.
+
 ### Pre-built release
 
 Grab `hyprglass.so` from [Releases](https://github.com/hyprnux/hyprglass/releases/latest). Each release targets a specific Hyprland API version — check the release notes to confirm it matches yours.
@@ -36,6 +48,8 @@ plugin = /path/to/hyprglass.so
 ### Manual build
 
 ```bash
+git clone https://github.com/hyprnux/hyprglass && cd hyprglass
+git checkout hyprland-0.56   # branch of your Hyprland version; stay on main for hyprland-git
 make
 hyprctl plugin load $(pwd)/hyprglass.so
 ```
@@ -130,6 +144,8 @@ plugin:hyprglass {
 |---|---|---|---|
 | `enabled` | bool | `true` (`1` in .conf) | Enable/disable the effect globally. Per-window tags override this. |
 | `manage_window_blur` | bool | `true` (`1` in .conf) | Automatically set the `noblur` property on glassed windows. Glass replaces Hyprland's blur; without `noblur`, Hyprland's cached-blur optimization (`blur:new_optimizations`) hides the glass on static windows. Set to `0` to manage `windowrule = noblur` yourself. |
+| `skip_opaque_windows` | bool | `true` (`1` in .conf) | Skip glass under an opaque window — it would be invisible anyway, so skipping it saves GPU. Set to `0` to force glass everywhere. Windows using `self_sample` are never skipped, since their glass shows their own content. |
+| `blur_fold` | bool | `true` (`1` in .conf) | Fewer blur passes with an identical look. Set to `0` to always run `blur_iterations` passes at the configured radius. |
 | `default_theme` | string | `dark` | Default theme: `dark` or `light` |
 | `default_preset` | string | `default` | Default preset name |
 
@@ -144,13 +160,25 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 | `blur_strength` | float | `2.0` | — | — | Blur radius scale (`value * 12.0` px) |
 | `blur_iterations` | int | `3` | — | — | Gaussian blur passes (1-5) |
 | `refraction_strength` | float | `0.6` | — | — | Edge refraction intensity (0.0-1.0) |
+| `refraction_flow` | float | `0.0` | — | — | Where the edge distortion pulls: 0 toward the window center, 1 along the edges (0.0-1.0) |
+| `refraction_spread` | float | `1.0` | — | — | How deep the distortion reaches: 1 across the whole window, 0 only a rim with a flat center (0.0-1.0) |
 | `chromatic_aberration` | float | `0.5` | — | — | Spectral dispersion at edges (0.0-1.0) |
 | `fresnel_strength` | float | `0.6` | — | — | Edge glow intensity (0.0-1.0) |
+| `fresnel_tint` | float | `0.0` | — | — | Color of the fresnel rim light: 0 white, 1 the colors behind the glass (0.0-1.0) |
+| `fresnel_color` | color | `0xffffff00` | — | — | Color of the fresnel rim light; alpha sets how much it replaces white (0xRRGGBBAA) |
 | `specular_strength` | float | `0.8` | — | — | Specular highlight brightness (0.0-1.0) |
+| `specular_angle` | float | `0.0` | — | — | Where the specular highlight comes from, in degrees: 0 from the top, 90 from the right, clockwise |
+| `bevel_strength` | float | `0.0` | — | — | Thin lit line along the glass edge, a nicer border (0.0-1.0) |
+| `bevel_size` | float | `6.0` | — | — | Width of the bevel line in logical pixels, uniform across monitor scales |
+| `bevel_color` | color | `0xffffff00` | — | — | Color of the bevel line; alpha sets how much it replaces white, dark colors give a dark line (0xRRGGBBAA) |
+| `bevel_tint` | float | `0.0` | — | — | Tint of the bevel line: 0 its own color, 1 the colors behind the glass (0.0-1.0) |
+| `bevel_angle` | float | `315.0` | — | — | Where the bevel light comes from, in degrees: 0 from the top, 90 from the right, clockwise |
+| `bevel_shadow` | float | `0.0` | — | — | Darkening of the bevel line on the side away from the light (0.0-1.0) |
 | `glass_opacity` | float | `1.0` | — | — | Overall glass opacity (0.0-1.0) |
 | `edge_thickness` | float | `0.06` | — | — | Bezel width, fraction of smallest dimension (0.0-0.15) |
 | `tint_color` | color | `0x8899aa22` | — | — | Glass tint RRGGBBAA hex. Alpha = tint strength |
 | `lens_distortion` | float | `0.5` | — | — | Center dome magnification (0.0-1.0) |
+| `self_sample` | float | `0.0` | — | — | Mixes the window's own content into the glass behind it (0.0-1.0). Windows only |
 | `brightness` | float | — | `0.82` | `1.12` | Brightness multiplier |
 | `contrast` | float | — | `0.90` | `0.92` | Contrast around midpoint |
 | `saturation` | float | — | `0.80` | `0.85` | Desaturation (0 = grayscale, 1 = full) |
@@ -160,6 +188,35 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 | `adaptive_boost` | float | — | `0.0` | `0.4` | Boosts dark areas behind the glass (black is black 0 -to- 1 black becomes white) |
 
 `—` in Global Default = falls through to per-theme default. `—` in Dark/Light = inherits global value.
+
+#### Self sampling
+
+`self_sample` needs a translucent window: its content is composited over the sampled desktop.
+
+- At `1.0` the pane shows the window's own pixels. Where the client draws translucent ones (terminal transparency), the desktop still shows through
+- A window made see-through by `windowrule = opacity` draws opaque pixels, so its pane is entirely its own content
+- Raise `blur_strength` with it, or the window's own text stays readable in its glass
+- A window showing the screen (screen-share preview, OBS) sees a one-frame-old copy of itself
+- Transformed monitors (rotated or flipped) and layer surfaces ignore it
+
+**Cost:** a self-sampling window re-blurs its whole pane whenever its content changes, so busy windows cost more than static ones.
+
+**On the fly:**
+```bash
+hyprctl keyword plugin:hyprglass:self_sample 1.0
+```
+
+**Lua:**
+```lua
+hg.config({ self_sample = 0.6 })
+hg.preset("aura", { inherits = "glass", self_sample = 1.0, blur_strength = 2.5 })
+```
+
+**Legacy .conf:**
+```ini
+self_sample = 0.6
+preset = name:aura, inherits:glass, self_sample:1.0, blur_strength:2.5
+```
 
 ### Layer surfaces
 
@@ -207,12 +264,61 @@ hg.layer("debug-panel", { exclude = true })
 | `layers:namespace_live_resample` | string | `""` | Per-namespace live resample override (`ns=0/1` pairs, comma-separated) |
 | `layers:live_resample` | bool | `true` (`1` in .conf) | Re-render layer glass when content behind it changes (e.g. a playing video). GPU cost scales with background activity; static scenes stay free. Overridable per layer |
 | `layers:live_resample_fps` | int | `30` | Max re-renders per second per layer for live resample. `0` = uncapped |
-| `layers:force_live_resample` | bool | `false` (`0` in .conf) | Experimental: re-render layer glass every frame regardless of changes. Heavy GPU/battery cost |
+| `layers:force_live_resample` | bool | `false` (`0` in .conf) | Experimental: re-render layer glass every frame regardless of changes, ignoring `live_resample_fps`. Heavy GPU/battery cost |
 | `layers:mask_mode` | string | `auto` | Where the glass goes: `auto` = where the app requests blur, else where content is visible; `region` = only where the app requests blur; `alpha` = only where content is visible |
 | `layers:namespace_mask_modes` | string | `""` | Per-namespace `mask_mode` (`ns=mode` pairs, comma-separated) |
 | `layers:manage_blur` | bool | `true` (`1` in .conf) | Replace Hyprland's own blur with glass on glassed layers (`layerrule = ignorealpha` then has no effect, use `mask_threshold`). Set to `0` to keep Hyprland's blur |
 
 > Layer support hooks into Hyprland's internal render pipeline. This is version-sensitive and may break across Hyprland updates.
+
+### Subsurface item glass
+
+Glass a `wl_subsurface` of a window (a toolbar capsule, a round button) instead of the whole window: the client attaches `ext-background-effect-v1` to that subsurface, and glass is drawn exactly in its requested region.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `subsurfaces:enabled` | bool | `false` (`0` in .conf) | Enable glass on subsurfaces that request it |
+| `subsurfaces:preset` | string | `""` | Preset override for all items. Falls back to `layers:preset`, then `default_preset` |
+| `subsurfaces:radius` | float | `-1` | Corner radius in logical px. `-1` (default) = capsule (fully rounded) |
+
+**Lua:**
+```lua
+hg.config({ subsurfaces = { enabled = true, preset = "subtle", radius = 12 } })
+```
+
+**Legacy .conf:**
+```ini
+plugin {
+    hyprglass {
+        subsurfaces {
+            enabled = 1
+            preset = subtle
+            radius = 12
+        }
+    }
+}
+```
+
+A client app can hint its own preset and shape per item via the `hyprglass_item_v1` Wayland protocol (`protocols/hyprglass-item-v1.xml`), overriding the config above for that one item:
+
+- `set_preset` / `unset_preset` — request a named preset for this item, or clear the hint
+- `set_shape` — clip the effect to an explicit rect with up to four independent corner radii, in the item's own local coordinates
+- `set_inherit_shape` — shape the item like its parent window instead: same corners, same rounding curve
+- `unset_shape` — clear the shape hint
+
+An item that sends no hints, or a preset name the compositor doesn't recognize, gets `subsurfaces:radius`'s capsule/rounded-rect shape over its blur region and the preset chain above.
+
+### Window background cache
+
+Windows cache their sampled, blurred background and only re-sample it when something actually changed behind the window (it moved/resized, the window behind it changed, or the cache was just allocated) — the same idea as the layer `live_resample` cache above, always on.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `windows:background_cache` | bool | `true` (`1` in .conf) | Reuse a window's last sampled+blurred background instead of re-sampling it every frame. Set to `0` to always re-sample (pre-cache behavior). |
+| `windows:live_resample` | bool | `true` (`1` in .conf) | Re-render window glass when content behind it changes (e.g. a playing video, another window). GPU cost scales with background activity; static scenes stay free |
+| `windows:live_resample_fps` | int | `30` | Max background-dirty marks per second for windows. `0` = uncapped |
+
+> `hyprctl hyprglass stats` reports `win_hit`/`win_miss`/`win_defer`/`win_disc` (and `layer_hit`/`layer_miss`/`layer_defer` for layers, `sub_hit`/`sub_miss`/`sub_defer` for subsurface items) per monitor to watch the cache in action.
 
 ### Per-window overrides
 
@@ -267,7 +373,7 @@ Presets are named config overrides. They can be **built-in** or **user-defined**
 
 Each preset can have shared values (theme-agnostic), a dark variant, a light variant, and can inherit from another preset.
 
-#### Built-in presets
+#### Built-in presets (Open to PR)
 
 Always available. Activate via `default_preset` or per-window tags.
 
@@ -277,6 +383,7 @@ Always available. Activate via `default_preset` or per-window tags.
 | `subtle` | Minimal glass effect. Light blur, reduced refraction and highlights. |
 | `clear` | Minimal transparent effect. Like a transparent rounded border glass plate. |
 | `glass` | Solid glass block effect with a lot of chromatic aberration. |
+| `pomme` | Apple look-alike liquid glass, keep in mind it's an approximation, and apple does not apply it on big window with square corners on purpose (open to PR). |
 
 **Note:** These presets are starting points. Submit improvements or your own presets through issues or PRs (with screenshots).
 
@@ -313,7 +420,7 @@ preset = name:contrasted, inherits:high_contrast, contrast:1.2
 
 The window/layer is modeled as a **thick convex glass slab**. The rendering pipeline per window:
 
-1. **Background sampling** — The framebuffer behind the window is captured with padding (content beyond the window boundary is included).
+1. **Background sampling** — The framebuffer behind the window is captured with padding (content beyond the window boundary is included). `self_sample` mixes the window's own content into this capture.
 2. **Gaussian blur** — Multi-pass two-pass (horizontal + vertical) Gaussian blur for the frosted look.
 3. **Glass height field** — An SDF-based height profile: 1.0 deep inside the window, smooth S-curve to 0.0 at the edge. The transition width is `edge_thickness`.
 4. **Edge refraction** — The height field gradient drives UV displacement. At the center the gradient is near-zero (no distortion). At the edges the gradient is steep, pushing sample UVs outward — pulling in content from beyond the window boundary. This creates natural color bleeding.
@@ -332,9 +439,49 @@ For windows, the plugin integrates with Hyprland's render pass system as a `DECO
 hyprctl plugin unload /path/to/hyprglass.so
 ```
 
+## Performance diagnostics
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `debug:mode` | string | `off` | `off`, `hints_only` (render pass hints only, no GL work — isolates render-pass cost), or `gl_work_only` (runs the GL pipeline but drops the live-blur hint — isolates pipeline cost from render-pass damage-expansion cost). For A/B GPU measurement; leave `off` for normal use. |
+| `debug:timers` | bool | `false` (`0` in .conf) | Time each pipeline stage on the GPU (`GL_EXT_disjoint_timer_query`) and report per-stage averages in `hyprctl hyprglass stats`. No effect if the driver doesn't support the extension. |
+
+```bash
+hyprctl hyprglass stats          # per-monitor counters and (if enabled) stage timers
+hyprctl hyprglass stats reset    # zero every counter and accumulated timer
+hyprctl -j hyprglass stats       # same, as JSON
+```
+
+```
+hyprglass stats
+  stage timers: off (plugin:hyprglass:debug:timers = 0)
+
+  monitor        frames  win_draws  opaque_skip  win_hit  win_miss  win_defer  win_disc  layer_draws  layer_hit  layer_miss  layer_defer  sub_draws  sub_hit  sub_miss  sub_defer  blur_pass  sampled_mpx  glass_mpx
+  eDP-1            7212       3401         5122     3120       240         41         0         1560       1420          92            3        410      380        22          8       5520        41.30      18.77
+  eDP-1          per frame: 0.47 win draws, 0.22 layer draws, 0.06 sub draws, 0.77 blur passes, 0.006 sampled mpx, 0.003 glass mpx
+```
+
+`hyprctl hyprglass items` lists every live subsurface glass item (`hyprglass_item_v1` protocol), its resolved preset and the box/radii it last drew with:
+
+```bash
+hyprctl hyprglass items
+hyprctl -j hyprglass items       # same, as JSON
+```
+
+```
+hyprglass items
+  subsurfaces:enabled: on   hyprglass_item_v1 protocol: active
+
+  window                         monitor    shape     preset (requested -> resolved)
+  0x55f2a1b2c3d4 (kitty)         eDP-1      explicit  hx-frosted-menu (unknown) -> default
+      hint rect: 12.0,8.0 240.0x32.0px  radii 8.0,8.0,8.0,8.0 (logical px)
+      last drawn: box 620.0,140.0 480.0x64.0px  radii 16.0,16.0,16.0,16.0  roundingPower 2.00 (physical px)
+```
+
 ## Notes
 
 - The plugin requires Hyprland shadows to be present in the render pipeline. It **auto-enables them** at load time if disabled — shadow visual values (range, color…) can be zero, only the decoration's presence matters.
+- If glass edges look stale while a window is dragged, raise `decoration:blur:size` or `decoration:blur:passes`. They matter even with Hyprland's blur disabled.
 - Glass **replaces Hyprland's blur** on glassed windows: the plugin sets the `noblur` window property on them so their translucency composites against the glass instead of Hyprland's blur (whose `new_optimizations` cache is captured before plugin decorations render, hiding the glass on static windows — the "effect only shows while dragging" symptom). Disable with `manage_window_blur = 0`. The property is withdrawn when glass is disabled for a window or the plugin unloads.
 - Layer surface glass uses a function hook on `renderLayer`, which is a private Hyprland internal. The hook may break on Hyprland updates that change this function's signature.
 
@@ -349,6 +496,13 @@ As a last resort, setting `HYPRGLASS_SKIP_VERSION_CHECK=1` downgrades the failur
 ### Build fails inside Hyprland's own headers ("cannot convert 'PHLLS' … to 'bool' … explicit conversion function was not considered")
 
 This happens when building against Hyprland **0.55.4 headers** with a hyprutils **newer than 0.13.1**: hyprutils made its smart-pointer `operator bool` explicit after 0.55.4 was released, and 0.55.4's headers still rely on the old implicit behavior. Every Hyprland plugin fails identically on such a system — it is not a hyprglass bug. Until the next Hyprland release, either downgrade/pin hyprutils to 0.13.1, or run hyprland-git (fixed upstream) and rebuild the plugin against its headers.
+
+## Contributing
+
+| Branch | Builds against | Target it for |
+|---|---|---|
+| `hyprland-X.Y` (newest, e.g. `hyprland-0.56`) | the Hyprland X.Y release | fixes and features; releases are cut from it |
+| `main` | hyprland-git | hyprland-git compatibility only; every change of the stable branch is merged into it automatically, or through a `forward-merge/hyprland-X.Y` pull request when it conflicts or breaks the hyprland-git build |
 
 ## License
 

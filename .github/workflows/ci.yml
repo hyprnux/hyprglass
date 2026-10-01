@@ -1,12 +1,19 @@
 name: CI
 
+# Pull requests into a hyprland-X.Y stable branch build against the Hyprland
+# release Arch ships; pull requests into main, and a nightly run of main, build
+# against hyprland-git.
 on:
   pull_request:
     branches:
       - main
+      - "hyprland-*"
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -14,6 +21,7 @@ permissions:
 
 jobs:
   commitlint:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,7 +41,8 @@ jobs:
         run: |
           npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
 
-  build:
+  build-stable:
+    if: startsWith(github.base_ref, 'hyprland-')
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
@@ -48,6 +57,49 @@ jobs:
             pixman \
             libdrm \
             pkgconf
+
+      - name: Check the Hyprland line
+        run: |
+          HYPRLAND_VERSION=$(pacman -Q hyprland | awk '{print $2}' | cut -d'-' -f1)
+          LINE="${GITHUB_BASE_REF#hyprland-}"
+          if [[ "$HYPRLAND_VERSION" != "$LINE".* ]]; then
+            echo "::warning::Arch ships Hyprland ${HYPRLAND_VERSION}, but ${GITHUB_BASE_REF} targets Hyprland ${LINE}.x: this build does not cover that line."
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build plugin
+        run: make
+
+  build-git:
+    if: github.event_name != 'pull_request' || github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      # hyprland-git and its -git dependencies come prebuilt from Chaotic-AUR.
+      - name: Enable Chaotic-AUR
+        run: |
+          pacman-key --init
+          pacman-key --recv-key 3056513887B78AEB --keyserver keyserver.ubuntu.com
+          pacman-key --lsign-key 3056513887B78AEB
+          pacman -U --noconfirm \
+            'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst' \
+            'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst'
+          printf '\n[chaotic-aur]\nInclude = /etc/pacman.d/chaotic-mirrorlist\n' >> /etc/pacman.conf
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed \
+            git \
+            base-devel \
+            hyprland-git \
+            pixman \
+            libdrm \
+            pkgconf
+          pacman -Q hyprland-git
 
       - name: Checkout
         uses: actions/checkout@v4

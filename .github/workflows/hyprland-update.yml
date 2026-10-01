@@ -1,5 +1,8 @@
 name: Check Hyprland Updates
 
+# A new point release of the current line opens a compatibility PR on its
+# hyprland-X.Y branch (merging it releases a build against it). A new minor
+# release opens an issue to cut the next hyprland-X.Y branch from main.
 on:
   schedule:
     # Run daily at 06:00 UTC
@@ -9,6 +12,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 jobs:
   check-update:
@@ -16,32 +20,57 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Check latest Hyprland release
         id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          CURRENT_VERSION=$(cat .hyprland-version | tr -d '[:space:]')
-          echo "Current tracked version: ${CURRENT_VERSION}"
+          LATEST_VERSION=$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+            https://api.github.com/repos/hyprwm/Hyprland/releases/latest \
+            | jq -r '.tag_name // empty' | sed 's/^v//')
 
-          LATEST_VERSION=$(curl -sL https://api.github.com/repos/hyprwm/Hyprland/releases/latest | jq -r '.tag_name' | sed 's/^v//')
-          echo "Latest Hyprland version: ${LATEST_VERSION}"
+          if [[ ! "$LATEST_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::warning::Could not read the latest Hyprland release ('${LATEST_VERSION}')"
+            echo "action=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          LINE="${LATEST_VERSION%.*}"
+          BRANCH="hyprland-${LINE}"
+          echo "Latest Hyprland version: ${LATEST_VERSION} (branch ${BRANCH})"
+
+          echo "new_version=${LATEST_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "line=${LINE}" >> "$GITHUB_OUTPUT"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+          if ! git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then
+            echo "No ${BRANCH} branch yet"
+            echo "action=new-line" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git checkout "$BRANCH"
+          CURRENT_VERSION=$(tr -d '[:space:]' < .hyprland-version)
+          echo "current_version=${CURRENT_VERSION}" >> "$GITHUB_OUTPUT"
 
           if [[ "$CURRENT_VERSION" == "$LATEST_VERSION" ]]; then
             echo "Already up to date"
-            echo "updated=false" >> "$GITHUB_OUTPUT"
+            echo "action=none" >> "$GITHUB_OUTPUT"
           else
-            echo "New version available: ${LATEST_VERSION}"
             echo "$LATEST_VERSION" > .hyprland-version
-            echo "updated=true" >> "$GITHUB_OUTPUT"
-            echo "new_version=${LATEST_VERSION}" >> "$GITHUB_OUTPUT"
-            echo "current_version=${CURRENT_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "action=bump" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create Pull Request
-        if: steps.check.outputs.updated == 'true'
+        if: steps.check.outputs.action == 'bump'
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # With GITHUB_TOKEN the pull request would start no CI run.
+          token: ${{ secrets.FORWARD_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
+          base: ${{ steps.check.outputs.branch }}
           commit-message: "build: update hyprland compatibility to v${{ steps.check.outputs.new_version }}"
           title: "build: update hyprland compatibility to v${{ steps.check.outputs.new_version }}"
           body: |
@@ -53,9 +82,34 @@ jobs:
             | New version | `${{ steps.check.outputs.new_version }}` |
             | Release | [v${{ steps.check.outputs.new_version }}](https://github.com/hyprwm/Hyprland/releases/tag/v${{ steps.check.outputs.new_version }}) |
 
-            Merging this PR will trigger a new release build compiled against the updated Hyprland headers.
+            Merging this PR into `${{ steps.check.outputs.branch }}` will trigger a new release built against the updated Hyprland headers, and pin it for hyprpm.
 
-            > [!NOTE]
-            > The CI build job will verify that the plugin compiles against the new version before this can be merged.
+            > [!IMPORTANT]
+            > Merge it once Arch ships Hyprland v${{ steps.check.outputs.new_version }}: the release builds against Arch's package and refuses any other version.
           branch: chore/hyprland-update-${{ steps.check.outputs.new_version }}
           labels: dependencies
+
+      - name: Ask for the next stable branch
+        if: steps.check.outputs.action == 'new-line'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.check.outputs.new_version }}
+          LINE: ${{ steps.check.outputs.line }}
+          BRANCH: ${{ steps.check.outputs.branch }}
+        run: |
+          TITLE="Hyprland ${VERSION} released: cut ${BRANCH} from main"
+
+          OPEN=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"${TITLE}\" in:title" --json number --jq 'length')
+          if [[ "$OPEN" != "0" ]]; then
+            echo "Issue already open"
+            exit 0
+          fi
+
+          gh issue create --repo "$GITHUB_REPOSITORY" --label dependencies --title "$TITLE" --body "$(cat <<EOF
+          Hyprland [v${VERSION}](https://github.com/hyprwm/Hyprland/releases/tag/v${VERSION}) is out and \`${BRANCH}\` does not exist yet.
+
+          1. Pick the \`main\` commit that builds against Hyprland ${VERSION} (\`main\` follows hyprland-git).
+          2. Create \`${BRANCH}\` from it, set \`.hyprland-version\` to \`${VERSION}\` with a \`build:\` commit, and push: the release workflow publishes the build and pins it for hyprpm.
+          3. From then on, fixes and features target \`${BRANCH}\`; the previous line is frozen.
+          EOF
+          )"

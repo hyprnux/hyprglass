@@ -3,6 +3,8 @@
 
 # Generated files
 # src/shaders.hpp
+src/item-helper/hyprglass-item-v1-server-protocol.h
+src/item-helper/hyprglass-item-v1-protocol.c
 
 # Build artifacts
 *.o

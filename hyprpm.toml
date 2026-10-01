@@ -3,12 +3,12 @@ name = "HyprGlass"
 authors = ["Hyprnux"]
 description = "Apple-style Liquid Glass effect for Hyprland"
 
-# Map a Hyprland release commit -> the hyprglass commit that builds against it.
+# Map a Hyprland release commit -> the hyprglass release that builds against it.
 # hyprpm reads the user's running Hyprland commit, finds the matching pin, and
 # resets this repo to the paired commit before building. If no pin matches it
-# falls back to the default branch (main) HEAD, which always targets the latest
-# Hyprland (see .hyprland-version). New pins are appended automatically on each
-# release (.github/workflows/release.yml).
+# builds main HEAD, which follows hyprland-git: every Hyprland release must stay
+# pinned. Releases come from the hyprland-X.Y branches, and each one updates the
+# pin of the Hyprland version it was built against (.github/workflows/release.yml).
 commit_pins = [
   ["dd220efe7b1e292415bd0ea7161f63df9c95bfd3", "fc65c63f04f96f7ec2c1e54acee50f460d543cd1"], # hyprland 0.53.3 -> hyprglass v0.2.1
   ["0002f148c9a4fe421a9d33c0faa5528cdc411e62", "05542151271f5cdcc55e41cda44ab02397d9d87b"], # hyprland 0.54.0 -> hyprglass v0.2.3
@@ -18,9 +18,11 @@ commit_pins = [
   ["af923e30d1d24f1f4a4f5cb8308065173c1d9539", "f30a1962b520e4f8471b9e353cd2977713bc0a57"], # hyprland 0.55.0 -> hyprglass v0.6.2
   ["a47147bc095e5b3be3eb8bd04f0ac242b968cd4d", "f30a1962b520e4f8471b9e353cd2977713bc0a57"], # hyprland 0.55.1 -> hyprglass v0.6.2
   ["39d7e209c79d451efab1b21151d5938289da838d", "f30a1962b520e4f8471b9e353cd2977713bc0a57"], # hyprland 0.55.2 -> hyprglass v0.6.2
+  ["fe5fe79a29ac3adaf3e75560b2f4b7a6d58b31c9", "16553225226cd15b2b0e5c7319e5242b427df1b2"], # hyprland 0.55.3 -> hyprglass v0.6.3
   ["a0136d8c04687bb36eb8a28eb9d1ff92aea99704", "7ff4064cbed1ef6e6f703139fca4ec20ba0cbb5b"], # hyprland 0.55.4 -> hyprglass v0.6.4
   ["36b2e0cfe0c6094dbc47bd42a437431315bb3087", "c96940a86e6c5c9290dacb9fde204e4172186a96"], # hyprland 0.56.0 -> hyprglass v0.7.0
-  ["efb50993780079460b0cbed1363e2166a2de1d9f", "77636c5711ed572ca199a84d06146ccac0951786"], # hyprland 0.56.2 -> hyprglass v0.8.0
+  ["5c9377c15f85c50648f35ca5a213754f95b93ca0", "725383e86a2a79457a81cdbc2ceb33c07363bd8d"], # hyprland 0.56.1 -> hyprglass v0.8.1
+  ["efb50993780079460b0cbed1363e2166a2de1d9f", "725383e86a2a79457a81cdbc2ceb33c07363bd8d"], # hyprland 0.56.2 -> hyprglass v0.8.1
 ]
 
 [hyprglass]

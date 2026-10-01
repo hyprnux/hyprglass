@@ -17,20 +17,23 @@ precision highp float;
  *     the window boundary, creating natural color bleeding
  *
  * Rendering layers:
- * 1. Edge refraction via smooth outward direction + exponential proximity
+ * 1. Edge refraction via smooth outward direction (optionally along the edges,
+ *    optionally rim-only) + exponential proximity
  * 2. Chromatic aberration (per-channel refraction scale)
  * 3. Edge raw-texture blend for vivid color pickup
  * 4. Subtle center dome lens magnification
  * 5. Frosted tint (brightness boost + desaturation)
  * 6. Configurable color tint overlay
- * 7. Fresnel edge glow
- * 8. Specular highlight (top)
- * 9. Inner shadow (bottom rim)
+ * 7. Bevel (thin lit line at the edge)
+ * 8. Fresnel edge glow (white or tinted by the background)
+ * 9. Specular highlight (top)
+ * 10. Inner shadow (bottom rim)
  */
 
 uniform sampler2D tex;
 uniform vec2 fullSize;
-uniform float radius;
+uniform vec2 invFullSize;      // = 1.0 / fullSize, hoisted out of the per-pixel divisions below
+uniform vec4 radii;            // per-corner radius: top-left, top-right, bottom-right, bottom-left
 uniform vec2 uvPadding;
 
 uniform float refractionStrength;
@@ -39,9 +42,11 @@ uniform float fresnelStrength;
 uniform float specularStrength;
 uniform float glassOpacity;
 uniform float edgeThickness;
+uniform float invBezelWidthPx; // = 1.0 / (edgeThickness * minDim), hoisted per-draw
 uniform vec3 tintColor;
 uniform float tintAlpha;
 uniform float lensDistortion;
+uniform float lensMaxPx;       // = lensDistortion * minDim * 0.006, hoisted per-draw
 uniform float brightness;
 uniform float contrast;
 uniform float saturation;
@@ -50,6 +55,21 @@ uniform float vibrancyDarkness;
 uniform float adaptiveDim;
 uniform float adaptiveBoost;
 uniform float roundingPower;
+uniform float invRoundingPower; // = 1.0 / roundingPower, hoisted per-draw
+uniform float refractionFlow;
+uniform float refractionSpread;
+uniform float fresnelTint;
+uniform float bevelStrength;
+uniform float bevelSize;
+uniform float monitorScale;
+uniform vec3 fresnelColor;
+uniform float fresnelColorAlpha;
+uniform vec3 bevelColor;
+uniform float bevelColorAlpha;
+uniform float bevelTint;
+uniform float bevelAngle;
+uniform float bevelShadow;
+uniform float specularAngle;
 
 uniform sampler2D maskTex;
 uniform int useMask;
@@ -60,6 +80,23 @@ uniform int maskMode;          // 0 = alpha threshold, 1 = protocol region
 uniform int regionRectCount;   // 0..16
 uniform vec4 regionRects[16];  // box-local pixels: xy = offset from box top-left, zw = size
 
+// Subsurface item glass only: the rounded-box SDF (getCornerSDF below) is
+// evaluated over this sub-rect of the drawn box instead of the full box —
+// the item's blur-region extents, which can be smaller than its own surface
+// box (e.g. a capsule pill inside a wider hit-test area). Box-local pixels,
+// same space as regionRects. Windows and alpha-mask layers pass offset (0,0)
+// and size == fullSize, so the SDF is unchanged from the old whole-box math.
+uniform vec2 glassBoxOffsetPx;
+uniform vec2 glassBoxSizePx;
+
+// Maps this fragment's own box UV into the sample texture's normalized space
+// before uvPadding is applied. Identity (offset 0, scale 1) unless the sample
+// texture covers a smaller area than this box — PROTOCOL_REGION layers only,
+// where the background is only ever sampled/blurred inside the blur region's
+// bounding box (see GlassRenderer::sampleBackground callers in GlassLayerSurface.cpp).
+uniform vec2 sampleUVOffset;
+uniform vec2 sampleUVScale;
+
 in vec2 v_texcoord;
 layout(location = 0) out vec4 fragColor;
 
@@ -67,12 +104,18 @@ layout(location = 0) out vec4 fragColor;
 // TEXTURE SAMPLING (window UV -> padded texture UV)
 // ============================================================================
 
+// Box UV -> sample-texture-local UV (undoes sampleUVOffset/uvScale's
+// shrink before the padding remap below sees it).
+vec2 toSampleBoxUV(vec2 wuv) {
+    return (wuv - sampleUVOffset) / sampleUVScale;
+}
+
 vec2 toTexUV(vec2 wuv) {
     return wuv * (1.0 - 2.0 * uvPadding) + uvPadding;
 }
 
 vec4 sampleBlurred(vec2 wuv) {
-    vec2 tuv = toTexUV(wuv);
+    vec2 tuv = toTexUV(toSampleBoxUV(wuv));
     return texture(tex, clamp(tuv, 0.001, 0.999));
 }
 
@@ -80,26 +123,81 @@ vec4 sampleBlurred(vec2 wuv) {
 // SDF
 // ============================================================================
 
-float lpNorm(vec2 v, float p) {
-    return pow(pow(abs(v.x), p) + pow(abs(v.y), p), 1.0 / p);
+float lpNorm(vec2 v, float p, float invP) {
+    // Exact identity: pow(x^2+y^2, 0.5) == length(v) when p == 2.0 (the
+    // Hyprland default). Native sqrt is a single correctly-rounded hardware
+    // op vs. two pow()s (exp2/log2-based) + a third pow() for the outer root.
+    if (p == 2.0) return length(v);
+    return pow(pow(abs(v.x), p) + pow(abs(v.y), p), invP);
 }
 
-float getRoundedBoxSDF(vec2 uv, float r) {
-    vec2 p = (uv - 0.5) * fullSize;
-    vec2 halfSize = fullSize * 0.5;
+// Quadrant lookup for the per-corner radius. p is measured from the box
+// center (as getRoundedBoxSDF/getBevelSDF compute it below): negative y is
+// the top half (v_texcoord grows downward — see the specular highlight's
+// 1.0 - uv.y), negative x is the left half. cornerRadii is (top-left,
+// top-right, bottom-right, bottom-left).
+float pickCornerRadius(vec2 p, vec4 cornerRadii) {
+    float top    = p.x < 0.0 ? cornerRadii.x : cornerRadii.y;
+    float bottom = p.x < 0.0 ? cornerRadii.w : cornerRadii.z;
+    return p.y < 0.0 ? top : bottom;
+}
+
+// posPx/boxSizePx: pixel-space position relative to (and size of) the box the
+// SDF is measured against — the glass box (see glassBoxOffsetPx/SizePx above),
+// not necessarily the fragment's full drawn box.
+float getRoundedBoxSDF(vec2 posPx, vec2 boxSizePx, vec4 cornerRadii) {
+    vec2 p = posPx - boxSizePx * 0.5;
+    vec2 halfSize = boxSizePx * 0.5;
+    float r = pickCornerRadius(p, cornerRadii);
     float clampedR = min(r, min(halfSize.x, halfSize.y));
     vec2 q = abs(p) - halfSize + clampedR;
-    return min(max(q.x, q.y), 0.0) + lpNorm(max(q, 0.0), roundingPower) - clampedR;
+    return min(max(q.x, q.y), 0.0) + lpNorm(max(q, 0.0), roundingPower, invRoundingPower) - clampedR;
 }
 
 float getCornerSDF(vec2 uv) {
-    return getRoundedBoxSDF(uv, radius);
+    vec2 boxLocalPx = uv * fullSize - glassBoxOffsetPx;
+    return getRoundedBoxSDF(boxLocalPx, glassBoxSizePx, radii);
+}
+
+// Edge distance for the bevel, crease-free. Inside the window, getCornerSDF is
+// max(q.x, q.y) - r: the distance to whichever edge is nearer. That has a crease
+// along each corner's 45-degree diagonal, so the edge refraction (and anything
+// else driven by edgeProximity) shows a straight seam in all four corners.
+//
+// Here the contour lines are rounded rectangles that match the window outline
+// exactly at the edge (depth 0) and get rounder going inward: at depth d the box
+// is inset by d and its corner radius is r + d. The radius only grows, so the
+// top and side bevels always blend round the corner. Per pixel the depth is a
+// closed-form quadratic in the corner zone:
+//   |a + 2d| = r + d,  a = |p| - halfSize + r   =>   7d^2 + (4(ax+ay) - 2r) d + |a|^2 - r^2 = 0
+// and the plain straight-edge distance elsewhere. Past depth (h - r) / 2, with h
+// the smaller half-size, the radius would outgrow the inset box: from there the
+// contours are stadiums, i.e. the plain distance to the box rounded by h (so a
+// capsule gets its exact distance everywhere).
+float getBevelSDF(vec2 uv) {
+    vec2  H = glassBoxSizePx * 0.5;
+    float h = min(H.x, H.y);
+    vec2  signedP = uv * fullSize - glassBoxOffsetPx - H;
+    float r = min(pickCornerRadius(signedP, radii), h);
+    vec2  p = abs(signedP);
+    vec2  a = p - H + r;
+    float d = min(r - a.x, r - a.y);                      // straight-edge depth
+    float B = 4.0 * (a.x + a.y) - 2.0 * r;
+    float C = dot(a, a) - r * r;
+    float disc = B * B - 28.0 * C;
+    if (disc >= 0.0) {
+        float dc = (-B + sqrt(disc)) / 14.0;
+        if (a.x + 2.0 * dc >= 0.0 && a.y + 2.0 * dc >= 0.0)
+            d = dc;                                        // in a corner zone: the rounded contour
+    }
+    vec2 s = p - H + h;
+    return -max(d, h - length(max(s, 0.0)) - min(max(s.x, s.y), 0.0));
 }
 
 // ============================================================================
 // REFRACTION DIRECTION
 // Pixel-space direction toward window center — perfectly smooth everywhere,
-// no SDF gradient needed. On straight edges the perpendicular pixel distance
+// no SDF gradient needed (optional edge-following blend below). On straight edges the perpendicular pixel distance
 // dominates, giving approximately edge-normal direction. At corners it
 // naturally follows the diagonal.
 // ============================================================================
@@ -108,6 +206,33 @@ vec2 refractionDir(vec2 uv) {
     vec2 toCenterPx = (vec2(0.5) - uv) * fullSize;
     float len = length(toCenterPx);
     return len > 0.1 ? toCenterPx / len : vec2(0.0);
+}
+
+// Smooth edge-following field: points into the box, hugging each edge's normal
+// away from the corners and blending crease-free through the diagonals.
+vec2 edgeDir(vec2 posPx) {
+    vec2 halfSize = fullSize * 0.5;
+    vec2 n = abs(posPx) / halfSize;
+    vec2 g = sign(posPx) * pow(n, vec2(7.0)) / halfSize;
+    float len = length(g);
+    return len > 0.0 ? -g / len : vec2(0.0);   // points INTO the box
+}
+
+// light direction for a clockwise angle in degrees, 0 = from the top (screen y grows downward)
+vec2 lightDir(float angleDeg) {
+    float a = radians(angleDeg);
+    return vec2(sin(a), -cos(a));
+}
+
+// exact outward normal from the SDF gradient; only meaningful right at the edge
+vec2 sdfOutwardNormal(vec2 uv) {
+    vec2 h = vec2(1.0) / fullSize;
+    vec2 grad = vec2(
+        getCornerSDF(uv + vec2(h.x, 0.0)) - getCornerSDF(uv - vec2(h.x, 0.0)),
+        getCornerSDF(uv + vec2(0.0, h.y)) - getCornerSDF(uv - vec2(0.0, h.y))
+    );
+    float len = length(grad);
+    return len > 0.0 ? grad / len : vec2(0.0, -1.0);
 }
 
 // ============================================================================
@@ -143,14 +268,29 @@ void main() {
         }
     }
 
-    float cornerSdf = getCornerSDF(uv);
+    float cornerSdf    = getCornerSDF(uv);
+    float cornerAlpha  = 1.0 - smoothstep(-1.5, 0.5, cornerSdf);
 
-    if (cornerSdf > 0.0) {
-        discard;
+    if (maskMode == 1) {
+        // Subsurface items: the glass box (glassBoxOffsetPx/SizePx) can be
+        // smaller than the item's own drawn box/region — e.g. a capsule glass
+        // shape inside a rectangular blur region. Outside it, fall back to the
+        // plain surface pixel instead of dropping it (a hard discard here would
+        // silently delete client content, like an icon, that simply isn't under
+        // the glass). cornerAlpha fades smoothly across the boundary (the same
+        // curve already used for glassA below), so this is an antialiased
+        // "glass * coverage, surface over" blend, not a hard cutover — the
+        // actual blend happens in the hasMask composite at the bottom of main().
+        if (cornerAlpha < 0.001) {
+            fragColor = surfacePixel;
+            return;
+        }
+    } else {
+        // Windows, and alpha-mask layers: no surface pixel to fall back to
+        // outside the glass shape, so this is exactly the old hard-edged cutoff.
+        if (cornerSdf > 0.0) discard;
+        if (cornerAlpha < 0.001) discard;
     }
-
-    float cornerAlpha = 1.0 - smoothstep(-1.5, 0.5, cornerSdf);
-    if (cornerAlpha < 0.001) discard;
 
     float minDim = min(fullSize.x, fullSize.y);
     float bezelWidthPx = edgeThickness * minDim;
@@ -159,9 +299,17 @@ void main() {
     // EDGE PROXIMITY + DIRECTION
     // edgeProximity: 1.0 at boundary, exponential decay inward
     // inwardDir: pixel-space direction toward center (smooth everywhere)
+    // Clamped to 1.0: cornerSdf can be positive here (maskMode==1's glass box
+    // can be smaller than fullSize, so fragments just outside it still reach
+    // this code with cornerAlpha > 0.001), and exp() of a positive value would
+    // otherwise overshoot every effect that scales off edgeProximity.
     // ========================================
-    float edgeProximity = exp(cornerSdf / bezelWidthPx);
+    // crease-free bevel distance, so the edge has no seam along the corner diagonals;
+    // it assumes circular corners, so a superellipse outline keeps the exact SDF
+    float bevelSdf = roundingPower == 2.0 ? getBevelSDF(uv) : cornerSdf;
+    float edgeProximity = min(exp(bevelSdf * invBezelWidthPx), 1.0);
     vec2 inwardDir = refractionDir(uv);
+    vec2 posPx = (uv - 0.5) * fullSize; // pixel-space position for the edge-flow direction below
 
     // ========================================
     // EDGE REFRACTION
@@ -171,8 +319,22 @@ void main() {
     // beyond the window boundary.
     // ========================================
     float refractionPx = refractionStrength * 50.0;
-    float refractionMag = edgeProximity * refractionPx;
-    vec2 baseOffset = inwardDir * refractionMag / fullSize;
+    float lensFalloff = edgeProximity;
+    if (refractionSpread < 0.999) {
+        // rim-only lens: window the exponential tail so the centre stays flat
+        float depth = -bevelSdf;
+        float tailWindow = 1.0 - smoothstep(1.5 * bezelWidthPx, 3.0 * bezelWidthPx, depth);
+        lensFalloff = mix(edgeProximity * tailWindow, edgeProximity, refractionSpread);
+    }
+    float refractionMag = lensFalloff * refractionPx;
+    vec2 dir = inwardDir;
+    if (refractionFlow > 0.001) {
+        // pull along the edges instead of toward the centre
+        vec2 mixedDir = mix(inwardDir, edgeDir(posPx), refractionFlow);
+        float mixedLen = length(mixedDir);
+        dir = mixedLen > 0.0001 ? mixedDir / mixedLen : inwardDir;
+    }
+    vec2 baseOffset = dir * refractionMag * invFullSize;
 
     // ========================================
     // CHROMATIC ABERRATION — per-channel refraction scale
@@ -194,9 +356,8 @@ void main() {
             -4.0 * c.x * (1.0 - c.y * c.y),
             -4.0 * c.y * (1.0 - c.x * c.x)
         );
-        float lensMaxPx = lensDistortion * minDim * 0.006;
         float lensFade = 1.0 - edgeProximity;
-        domeUV = dGrad * lensMaxPx * lensFade / fullSize;
+        domeUV = dGrad * lensMaxPx * lensFade * invFullSize;
     }
 
     // ========================================
@@ -250,18 +411,56 @@ void main() {
     color = mix(color, tintColor, tintAlpha);
 
     // ========================================
+    // BEVEL — thin lit line hugging the edge, brightest on the side facing the light
+    // ========================================
+    if (bevelStrength > 0.001) {
+        float sizePx = max(bevelSize * monitorScale, 1.0);   // logical px, uniform across monitor scales
+        float core = 0.25 * sizePx;
+        float tail = sizePx;
+        float ring = (1.0 - smoothstep(-core, 0.0, cornerSdf)) * smoothstep(-tail, -core, cornerSdf);
+
+        // lit side faces the light, the far side fades out and can be shadowed
+        float facing = clamp(dot(sdfOutwardNormal(uv), lightDir(bevelAngle)) * 0.5 + 0.5, 0.0, 1.0);
+
+        vec3 bevelLight = vec3(1.0);
+        if (bevelColorAlpha > 0.001) bevelLight = mix(vec3(1.0), bevelColor, bevelColorAlpha);   // a dark colour gives a dark line
+        if (bevelTint > 0.001) {
+            float maxC = max(max(color.r, color.g), color.b);
+            bevelLight = mix(bevelLight, maxC > 0.001 ? color / maxC : vec3(1.0), bevelTint);
+        }
+
+        color = mix(color, bevelLight, ring * facing * bevelStrength);
+        if (bevelShadow > 0.001)
+            color = mix(color, vec3(0.0), ring * (1.0 - facing) * bevelShadow);
+    }
+
+    // ========================================
     // FRESNEL RIM GLOW (edge zone)
     // ========================================
     if (fresnelStrength > 0.001) {
         float fresnel = edgeProximity * edgeProximity * fresnelStrength * 0.15;
-        color += vec3(1.0) * fresnel;
+        vec3 fresnelLight = vec3(1.0);
+        if (fresnelColorAlpha > 0.001) fresnelLight = mix(vec3(1.0), fresnelColor, fresnelColorAlpha);   // chosen colour, then the tint below
+        if (fresnelTint > 0.001) {
+            // rim light in the background's own hue, at full brightness so the gain matches white
+            float maxC = max(max(color.r, color.g), color.b);
+            fresnelLight = mix(fresnelLight, maxC > 0.001 ? color / maxC : vec3(1.0), fresnelTint);
+        }
+        color += fresnelLight * fresnel;
     }
 
     // ========================================
     // SPECULAR — subtle top highlight (edge zone)
     // ========================================
     if (specularStrength > 0.001) {
-        float topBias = pow(max(1.0 - uv.y, 0.0), 2.0);
+        float specT = max(1.0 - uv.y, 0.0);
+        if (abs(specularAngle) > 0.001) {
+            // rotate the highlight gradient toward the light: at angle 0, lightDir gives
+            // (0,-1) and dot(uv-0.5, L) = 0.5-uv.y, so 0.5+dot(...) reduces to 1-uv.y exactly
+            vec2 L = lightDir(specularAngle);
+            specT = clamp(0.5 + dot(uv - 0.5, L), 0.0, 1.0);
+        }
+        float topBias = pow(specT, 2.0);
         float spec = topBias * edgeProximity * edgeProximity * specularStrength * 0.08;
         color += vec3(1.0, 0.99, 0.97) * spec;
     }

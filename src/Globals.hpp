@@ -5,6 +5,7 @@
 #include "ShaderManager.hpp"
 
 #include <hyprland/src/plugins/PluginAPI.hpp>
+#include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
@@ -17,12 +18,15 @@
 #include <vector>
 
 class CGlassDecoration;
+class CGlassSubsurfaceState;
 
 struct SGlobalState {
     // Event listeners are owned here so PLUGIN_EXIT unregisters them. Static
     // listeners outlived the plugin and fired after unload -> SEGV on reload.
     std::vector<Hyprutils::Signal::CHyprSignalListener> listeners;
 
+    // These WPs wrap the UP<IHyprWindowDecoration> Hyprland owns: dereference with
+    // .get() only, lock() asserts on a unique-owned pointer and terminates.
     std::vector<WP<CGlassDecoration>> decorations;
     CShaderManager                    shaderManager;
     SPluginConfig                     config;
@@ -33,9 +37,29 @@ struct SGlobalState {
     // Shared blur temp framebuffer (reused across all decorations since they render sequentially)
     SP<Render::IFramebuffer> blurTempFramebuffer;
 
+    // Per-monitor temp FBO for subsurface item glass, shared serially by every
+    // glassed item on that monitor in a frame — a per-item copy would be one
+    // full-monitor-sized allocation each. Safe because items on the same
+    // monitor are visited one at a time: CGlassSubsurfacePassElement::draw()
+    // (redirect) and CGlassSubsurfaceCompositeElement::draw()
+    // (composite+restore) for one item always fully bracket each other before
+    // the next item's pair starts (see main.cpp's hkRenderPassAdd) — no two
+    // items on the same monitor ever have it redirected at once. Keyed by
+    // MONITORID rather than CMonitor* (same reasoning as sceneGeneration
+    // below); entries are dropped on monitor removal (see main.cpp).
+    std::unordered_map<MONITORID, SP<Render::IFramebuffer>> subsurfaceTempFramebuffers;
+
     // Layer surface glass state (one per tracked layer, keyed by raw pointer).
     // shared_ptr so CGlassLayerPassElement can hold a copy that survives map erasure mid-frame.
     std::unordered_map<Desktop::View::CLayerSurface*, std::shared_ptr<CGlassLayerSurface>> layerSurfaces;
+
+    // Subsurface item glass state, one per glassed wl_subsurface, keyed by a
+    // weak ref so a destroyed surface's entry is simply unreachable rather
+    // than needing an explicit teardown signal (unlike layers/windows,
+    // hyprglass has no destroy event for an arbitrary subsurface). hyprutils
+    // provides std::hash<CWeakPointer<T>> (see WeakPtr.hpp), same as
+    // watchedSurfaces below. Pruned lazily wherever it's walked (see main.cpp).
+    std::unordered_map<WP<CWLSurfaceResource>, std::shared_ptr<CGlassSubsurfaceState>> subsurfaceGlass;
 
     // Parsed namespace whitelist (empty = match all when layers enabled)
     std::unordered_set<std::string> layerNamespaceFilter;
@@ -70,16 +94,77 @@ struct SGlobalState {
             sceneGeneration[mon->m_id]++;
     }
 
+    // Render-order fingerprint: a per-monitor running hash folded from every
+    // glass-eligible window's identity/geometry/alpha in z-order, compared frame
+    // to frame to catch stacking/membership changes (e.g. a window closing behind
+    // a cached glass window) that no other event bumps scene generation for.
+    struct SRenderFingerprint {
+        size_t runningHash = 0;
+        size_t lastHash    = 0;
+    };
+    std::unordered_map<MONITORID, SRenderFingerprint> renderFingerprints;
+
+    // Surface-commit observation driving the layer live resample: the
+    // subscriptions that discover surfaces, and one commit/destroy pair per
+    // watched surface. Owned here for the same reason as `listeners`: PLUGIN_EXIT
+    // must drop them before render teardown.
+    struct SWatchedSurface {
+        Hyprutils::Signal::CHyprSignalListener commit;
+        Hyprutils::Signal::CHyprSignalListener destroy;
+    };
+    std::vector<Hyprutils::Signal::CHyprSignalListener>         observerListeners;
+    std::unordered_map<WP<CWLSurfaceResource>, SWatchedSurface> watchedSurfaces;
+
+    // Mirrors anySelfSampleConfigured(), refreshed with the observer. Read on every
+    // watched commit, so it must stay a plain bool and not a config walk.
+    bool selfSampleConfigured = false;
+
+    // Bumped on RENDER_BEGIN, so one value per monitor frame. 0 is reserved for
+    // renders we do not manage (snapshots, screencopy, overview framebuffers).
+    uint64_t frameSerial = 0;
+
+    // Hyprland renders a floating window that is allowed over fullscreen more
+    // than once per frame. The redundant copy is redirected into this pass,
+    // which is dropped instead of rendered.
+    // sink before guard: members destruct in reverse declaration order, and the
+    // guard must point m_currentPass away from sink before sink dies.
+    struct SDedupeState {
+        Render::CRenderPass                  sink;
+        UP<Hyprutils::Utils::CScopeGuard>    guard;
+        std::vector<Desktop::View::CWindow*> dropped; // identity only, never dereferenced
+        bool                                 sawFullscreen = false;
+
+        // one workspace pass
+        void resetEpoch() {
+            guard.reset();
+            sink.clear();
+            sawFullscreen = false;
+        }
+
+        // one monitor frame: `dropped` outlives the epoch, a window is rendered
+        // by the pass of another visible workspace too and may only lose one copy
+        void reset() {
+            resetEpoch();
+            dropped.clear();
+        }
+    } dedupe;
+
     // renderLayer hook
     CFunctionHook* renderLayerHook = nullptr;
-    // damageSurface hook (live layer re-render)
-    CFunctionHook* damageSurfaceHook = nullptr;
+
+    // Render::CRenderPass::add hook (subsurface item glass)
+    CFunctionHook* renderPassAddHook             = nullptr;
+    bool           renderPassAddSymbolFound      = false; // for the failure notification text
+    bool           subsurfaceHookFailureNotified = false;
 };
 
 using Render::GL::g_pHyprOpenGL;
 
 inline HANDLE                        PHANDLE = nullptr;
 inline std::unique_ptr<SGlobalState> g_pGlobalState;
+
+// Decoration registered for this window, or nullptr. Borrowed, never owned.
+CGlassDecoration* glassDecorationFor(const PHLWINDOW& window);
 
 inline constexpr std::string_view PLUGIN_NAME        = "hyprglass";
 inline constexpr std::string_view PLUGIN_DESCRIPTION = "Apple-style Liquid Glass effect";

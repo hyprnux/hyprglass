@@ -1,9 +1,58 @@
 
-## [v0.8.1](https://github.com/Hyprnux/hyprglass/compare/v0.8.0...v0.8.1) - 2026-09-04
+## [v0.9.0](https://github.com/Hyprnux/hyprglass/compare/v0.8.1...v0.9.0) - 2026-10-01
+
+### Bug Fixes
+
+* no compositor crash when an app closes a glass item after hyprglass was unloaded or reloaded
+* remove the corner seam in the edge bevel and follow capsule and squircle outlines
+* few artifacts speckles in the glass and fix glass when near monitor borders
+* glass bounding box in logical coordinates so damage and culling match on scaled monitors
+* glass darkened and rendered twice on floating windows over fullscreen windows
+* glass artifacts + useless re-renders for overview plugins ([#69](https://github.com/Hyprnux/hyprglass/issues/69))
+* replace damageSurface hook in favor of a commit listener per surface ([#78](https://github.com/Hyprnux/hyprglass/issues/78))
+
+### CI/CD
+
+* release from hyprland-X.Y branches, merge them into main and build main against hyprland-git
+
+### Chores
+
+* drop blur margin warning (not always right, and hard to maintain)
+* **hyprpm:** install v0.8.1 on Hyprland 0.56.1/0.56.2 and v0.6.3 on 0.55.3
+
+### Documentation
+
+* explain stable and hyprland-git installs and which branch to target
+
+### Features
+
+* hyprctl hyprglass items lists subsurface glass items with their resolved preset and shape
+* apps can set a per-surface glass preset and shape (hyprglass_item_v1 protocol)
+* glass behind window subsurfaces that set a background-effect region ([#61](https://github.com/Hyprnux/hyprglass/issues/61))
+* hyprctl hyprglass stats, debug mode and GPU stage timers for performance tuning
+* self-sampling ourself
+* add refraction and bevel settings + add pomme (apple style)  preset
+
+### Performance Improvements
+
+* fewer blur passes when the same blur is reachable with less work (blur_fold, default on)
+* cheaper glass shader math for standard rounded corners, same look
+* sample and clear only what a protocol-masked layer can show as glass
+* reuse the blurred background of a window until its backdrop changes (windows:background_cache)
+* warn at config reload when Hyprland blur size/passes leave too little damage margin for glass
+* skip the glass effect under fully opaque windows (skip_opaque_windows, default on)
+* let Hyprland skip glass elements outside the damaged area on windows and layers
+
+
+## [v0.8.1](https://github.com/Hyprnux/hyprglass/compare/v0.8.0...v0.8.1) - 2026-09-03
 
 ### Bug Fixes
 
 * issue provoking black artifacts in some monitors configurations ([#56](https://github.com/Hyprnux/hyprglass/issues/56))
+
+### Chores
+
+* **release:** v0.8.1 [skip ci]
 
 
 ## [v0.8.0](https://github.com/Hyprnux/hyprglass/compare/v0.7.0...v0.8.0) - 2026-09-03

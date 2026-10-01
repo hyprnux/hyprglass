@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="hyprglass_item_v1">
+  <copyright>
+    Copyright © 2026 the hyprglass contributors
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the
+    "Software"), to deal in the Software without restriction, including
+    without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to
+    the following conditions:
+
+    The above copyright notice and this permission notice (including the
+    next paragraph) shall be included in all copies or substantial portions
+    of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+    OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <interface name="hyprglass_item_manager_v1" version="1">
+    <description summary="manager to associate glass item hints with surfaces">
+      This is a Hyprland-hyprglass-specific extension. It lets a client hint
+      how the hyprglass compositor plugin should render the Liquid Glass
+      effect it already applies to any surface that also carries an
+      ext-background-effect-v1 blur region: which named preset to use, and
+      what rounded-rect shape to clip the effect to.
+
+      This protocol only ever provides hints. A compositor without the
+      hyprglass plugin loaded, or one that unloads it, has no obligation to
+      honor any request here, and every object created by this protocol
+      keeps working (as a silent no-op) rather than becoming a protocol
+      error, precisely so that hint state never has to be treated as
+      load-bearing by a client.
+
+      Warning! The protocol described in this file is currently in the
+      testing phase. Backward compatible changes may be added together with
+      the corresponding interface version bump. Backward incompatible
+      changes can only be done by bumping the major version of the
+      extension.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        This does not affect any hyprglass_item_v1 objects already created.
+      </description>
+    </request>
+
+    <request name="get_item">
+      <description summary="create a glass item hint object for a surface">
+        Create a hyprglass_item_v1 object for the given wl_surface. Only one
+        active (non-inert) such object may exist per surface at a time;
+        creating a second one for the same surface while the first is still
+        active raises the item_exists error. Inert objects left over from a
+        previous manager global do not count.
+
+        This request does not, by itself, cause the surface to receive any
+        glass effect: the effect is still gated on the surface itself
+        carrying an ext-background-effect-v1 blur region. The object created
+        here only supplies hints used when that effect is drawn.
+      </description>
+      <arg name="id" type="new_id" interface="hyprglass_item_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+
+    <event name="finished">
+      <description summary="the manager is going away">
+        Sent when the compositor is about to make this global permanently
+        unusable, for example because the hyprglass plugin is being
+        unloaded. The client should stop issuing new requests on this
+        manager and any hyprglass_item_v1 objects it created; it does not
+        have to destroy them, since they are guaranteed to remain valid,
+        inert objects (see hyprglass_item_v1's own description) rather than
+        become protocol errors.
+
+        This event is a courtesy for well-behaved clients and does not by
+        itself guarantee no request already in flight will be silently
+        dropped; that guarantee comes from every hyprglass_item_v1 request
+        being defined as a no-op once the object is inert, regardless of
+        this event's timing.
+      </description>
+    </event>
+
+    <enum name="error">
+      <entry name="item_exists" value="0" summary="the surface already has a hyprglass_item_v1 object"/>
+    </enum>
+  </interface>
+
+  <interface name="hyprglass_item_v1" version="1">
+    <description summary="glass rendering hints for one surface">
+      Carries optional per-surface hints for the hyprglass Liquid Glass
+      effect: which preset to use, and what rounded-rect shape to clip the
+      effect to. The two hints are independent: either can be set without
+      the other. None of these requests raises an error for an
+      out-of-range value; being hints, invalid values are ignored or
+      clamped as described per request. All state is double-buffered per wl_surface.commit, in the
+      same manner as wp_viewport or ext_background_effect_surface_v1's
+      set_blur_region: a request sets pending state, and it has no visible
+      effect until the associated wl_surface.commit. For a synchronized
+      wl_subsurface, "the associated commit" is the commit that applies
+      that subsurface's cached state (i.e. its own commit if desynchronized,
+      or the ancestor commit that flushes it if synchronized) — the same
+      cached-state timing defined by wl_subsurface, not the raw
+      wl_surface.commit request on this surface alone.
+
+      Once the hyprglass_item_manager_v1 global that created this object
+      disappears (for example because the hyprglass plugin was unloaded),
+      this object becomes inert: every request on it is silently ignored
+      (no protocol error, no event, no effect on the surface), and the
+      client is not disconnected. A client that keeps a reference to an
+      inert object may destroy it at any time; it may also simply stop
+      using it. Requests are inert independently per object — the
+      disappearance of the manager global does not retroactively affect
+      surfaces' rendering in any other way.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy this item hint object">
+        Destroying this object clears the surface's association with it,
+        but per the double-buffering rule above, any pending (uncommitted)
+        state is simply discarded, and any state already latched by a
+        previous commit is cleared on the next wl_surface.commit, mirroring
+        ext_background_effect_surface_v1's own destroy semantics. If the
+        wl_surface has already been destroyed, cleanup happens immediately.
+      </description>
+    </request>
+
+    <request name="set_preset">
+      <description summary="hint which named preset to use">
+        Sets the pending preset name. An empty string, or a name the
+        hyprglass configuration does not recognize, is treated the same as
+        unset_preset: the compositor falls back to its normal preset
+        resolution chain for this surface (namespace/window default, then
+        global default). The dark or light variant of the preset is still
+        chosen by the parent window's theme, exactly as without this hint.
+      </description>
+      <arg name="name" type="string" summary="preset name"/>
+    </request>
+
+    <request name="unset_preset">
+      <description summary="clear the preset hint">
+        Reverts to the compositor's normal preset resolution chain, as if
+        set_preset had never been called.
+      </description>
+    </request>
+
+    <request name="set_shape">
+      <description summary="hint an explicit rounded-rect clip shape">
+        Sets the pending shape: a rectangle in surface-local logical
+        coordinates, with up to four independent corner radii, that the
+        glass effect is clipped and shaped to. x/y may be negative and/or
+        w/h may extend past the surface's own extents — for example, an
+        item whose top edge is cropped by a wp_viewport when scrolled can
+        report its full, uncropped logical shape here; the
+        ext-background-effect-v1 blur region set on the surface (or an
+        ancestor) is still applied as a flat clip on top of this shape and
+        is the final word on which pixels ever show the effect.
+
+        If w or h is zero or negative, the shape is ignored and the pending
+        state behaves as after unset_shape (a transient layout state such
+        as a collapsing menu is not an error). A negative radius is treated
+        as zero. Radii are not required to fit within w/h — an oversized radius is
+        clamped the same way a CSS border-radius would be (each pair of
+        radii sharing an edge is scaled down proportionally so they no
+        longer overlap). Corners are circular arcs.
+
+        Calling this request after set_inherit_shape (in the same or an
+        earlier pending state) makes this shape take effect instead;
+        set_shape and set_inherit_shape are mutually exclusive, and
+        whichever was requested most recently in the pending state wins.
+      </description>
+      <arg name="x" type="fixed" summary="left edge, surface-local logical px"/>
+      <arg name="y" type="fixed" summary="top edge, surface-local logical px"/>
+      <arg name="width" type="fixed" summary="width, logical px"/>
+      <arg name="height" type="fixed" summary="height, logical px"/>
+      <arg name="radius_top_left" type="fixed"/>
+      <arg name="radius_top_right" type="fixed"/>
+      <arg name="radius_bottom_right" type="fixed"/>
+      <arg name="radius_bottom_left" type="fixed"/>
+    </request>
+
+    <request name="set_inherit_shape">
+      <description summary="hint to reuse the parent window's shape">
+        Requests that the item be shaped by the parent window's own rounded
+        box: the window's geometry, corner rounding and rounding_power (its
+        squircle exponent), instead of an explicit shape. The blur region
+        still clips it flat. An edge-attached item (e.g. a full-width bar at
+        the bottom of the window) therefore gets the window's corners on the
+        window edges it touches and straight edges elsewhere, and a
+        full-window scrim follows the window outline without its region
+        having to match it exactly. This is a distinct request, not a magic
+        radius value passed to set_shape, since rounding_power is not
+        expressible as a radius.
+
+        This is mutually exclusive with set_shape; whichever of the two was
+        requested most recently in the pending state wins. It has no
+        effect if the surface has no associated window (for example, a
+        layer-shell or standalone surface).
+      </description>
+    </request>
+
+    <request name="unset_shape">
+      <description summary="clear the shape hint">
+        Reverts to the compositor's normal shape fallback for an item with
+        no explicit shape, as if set_shape and set_inherit_shape had never
+        been called: the extents of its ext-background-effect-v1 blur
+        region, with corners from the plugin:hyprglass:subsurfaces:radius
+        setting (a capsule by default).
+      </description>
+    </request>
+  </interface>
+</protocol>
