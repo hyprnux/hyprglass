@@ -12,7 +12,8 @@
 
 #include <algorithm>
 #include <GLES3/gl32.h>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
@@ -103,7 +104,7 @@ CGlassDecoration::EEnabledResolution CGlassDecoration::resolveEnabled() const {
         // Nothing behind an opaque window is visible, unless the window
         // self-samples: then the glass shows the window's own content, which
         // does change, so the opaque-skip must yield to it.
-        if (skipOpaque && window && window->opaque()) {
+        if (skipOpaque && window && window->presentation().opaque()) {
             const bool         isDark = resolveThemeIsDark();
             const std::string  preset = resolvePresetName();
             const SResolveContext ctx = {preset, isDark, config, g_pGlobalState->customPresets};
@@ -211,7 +212,7 @@ void CGlassDecoration::draw(PHLMONITOR monitor, float const& alpha) {
         if (const auto window = m_window.lock()) {
             const auto workspace = window->m_workspace;
             const Vector2D workspaceRenderOffset =
-                (workspace && !window->m_pinned) ? workspace->m_renderOffset->value() : Vector2D();
+                (workspace && !(window->m_state & Desktop::View::WINDOW_STATE_PINNED)) ? workspace->m_renderOffset->value() : Vector2D();
             const auto fullscreenMode = Fullscreen::controller()->getFullscreenModes(window).internal;
 
             auto& fingerprint = g_pGlobalState->renderFingerprints[monitor->m_id];
@@ -247,7 +248,7 @@ void CGlassDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     // Hyprland's per-tick window damage carries none of our sampling padding.
     // Damage only: no cache state may be touched from a render.
     const auto window = m_window.lock();
-    if (window && !window->m_pinned) {
+    if (window && !(window->m_state & Desktop::View::WINDOW_STATE_PINNED)) {
         const auto workspace = window->m_workspace;
         if (workspace && workspace->m_renderOffset->isBeingAnimated())
             damageEntire();
@@ -381,8 +382,8 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     // Hyprland renders internal-fullscreen windows unrounded (dontRound), we need to
     // match, or the glass would show rounded gaps at the screen corners
     const bool fsUnrounded = Fullscreen::controller()->getFullscreenModes(window).internal == Fullscreen::FSMODE_FULLSCREEN;
-    float cornerRadius  = fsUnrounded ? 0.0f : window->rounding() * monitorScale;
-    float roundingPower = window->roundingPower();
+    float cornerRadius  = fsUnrounded ? 0.0f : window->presentation().rounding() * monitorScale;
+    float roundingPower = window->presentation().roundingPower();
 
     // Resolved here, not inside the cache branch below, so it stays fresh on a
     // cache-hit frame too, when neither sampleBackground() nor blendOwnContent() run.
@@ -399,8 +400,8 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     // not the active/inactive dimming or opacity rules: those make the surface
     // more translucent — revealing more glass — and shouldn't wash out the
     // glass pane itself. Rebuild the fade-only alpha from its components.
-    float glassAlpha = window->alphaTotalWithout(Desktop::View::WINDOW_ALPHA_ACTIVE);
-    if (const auto workspace = window->m_workspace; workspace && !window->m_pinned)
+    float glassAlpha = window->presentation().alpha().getTotalWithout(Desktop::View::WINDOW_ALPHA_ACTIVE);
+    if (const auto workspace = window->m_workspace; workspace && !(window->m_state & Desktop::View::WINDOW_STATE_PINNED))
         glassAlpha *= workspace->m_alpha->value();
 
     const MONITORID monitorId = monitor ? monitor->m_id : -1; // -1 mirrors Hyprland's own MONITOR_INVALID
@@ -501,8 +502,8 @@ void CGlassDecoration::updateWindow(PHLWINDOW) {
     // layer; switching to it bumps on its own. Same predicate Hyprland renders
     // by: a slide or fade keeps drawing an already-invisible workspace.
     const auto workspace = ownWindow->m_workspace;
-    if (workspace && !workspace->m_visible && !workspace->m_forceRendering && !workspace->m_renderOffset->isBeingAnimated() &&
-        !workspace->m_alpha->isBeingAnimated() && !ownWindow->m_pinned)
+    if (workspace && !workspace->visible() && !workspace->m_forceRendering && !workspace->m_renderOffset->isBeingAnimated() &&
+        !workspace->m_alpha->isBeingAnimated() && !(ownWindow->m_state & Desktop::View::WINDOW_STATE_PINNED))
         return;
 
     g_pGlobalState->bumpSceneGeneration(monitor);

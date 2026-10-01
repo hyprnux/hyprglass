@@ -15,7 +15,8 @@
 #include "SubsurfaceGeometry.hpp"
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
@@ -60,11 +61,11 @@ static void clearSubsurfaceFramebufferForMonitor(PHLMONITOR monitor) {
 }
 
 static void onNewWindow(PHLWINDOW window) {
-    if (std::ranges::any_of(window->m_windowDecorations,
+    if (std::ranges::any_of(window->presentation().decorations(),
                             [](const auto& decoration) { return decoration->getDisplayName() == "HyprGlass"; }))
         return;
 
-    auto decoration = makeUnique<CGlassDecoration>(window);
+    auto decoration = makeShared<CGlassDecoration>(window);
     g_pGlobalState->decorations.emplace_back(decoration);
     decoration->m_self = decoration;
     HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(decoration));
@@ -109,7 +110,7 @@ static void drawGlassForFullscreenWindow(const PHLWINDOW& window, const PHLMONIT
 static bool otherSpecialWorkspaceVisible(const PHLWORKSPACE& workspace) {
     for (const auto& ref : State::workspaceState()->workspaces()) {
         const auto other = ref.lock();
-        if (!other || other == workspace || !other->m_isSpecialWorkspace)
+        if (!other || other == workspace || other->type() != Workspace::eWorkspaceType::SPECIAL)
             continue;
         if (other->m_alpha->value() > 0.f)
             return true;
@@ -129,16 +130,16 @@ static bool isRedundantCopy(const PHLWINDOW& window, const PHLMONITOR& monitor) 
     const auto& dedupe = g_pGlobalState->dedupe;
 
     // the "and floating ones too" loop, below the fullscreen window
-    if (!window->m_isFloating)
+    if (!window->isFloating())
         return false;
 
     // pinned windows get a third render after the workspace passes, and nothing
     // in the render stages tells it apart from these two
-    if (window->m_pinned)
+    if ((window->m_state & Desktop::View::WINDOW_STATE_PINNED))
         return false;
 
     // the "then render windows over fullscreen" loop must redraw it
-    if (!window->m_isMapped)
+    if (!window->mapped())
         return false;
 
     // this must be the copy below the fullscreen window, which is rendered
@@ -162,16 +163,16 @@ static bool isRedundantCopy(const PHLWINDOW& window, const PHLMONITOR& monitor) 
     if (!fullscreenWindow || fullscreenWindow->m_workspace != workspace || !Fullscreen::controller()->isFullscreen(fullscreenWindow))
         return false;
 
-    if (window->m_monitor == workspace->m_monitor && workspace->m_isSpecialWorkspace != window->onSpecialWorkspace())
+    if (window->m_monitor == workspace->m_monitor && (workspace->type() == Workspace::eWorkspaceType::SPECIAL) != window->onSpecialWorkspace())
         return false;
-    if (workspace->m_isSpecialWorkspace && (window->m_monitor != workspace->m_monitor || otherSpecialWorkspaceVisible(workspace)))
+    if (workspace->type() == Workspace::eWorkspaceType::SPECIAL && (window->m_monitor != workspace->m_monitor || otherSpecialWorkspaceVisible(workspace)))
         return false;
 
     if (window->isFadingOutUnderFullscreen() || !window->shouldRenderOverFullscreen())
         return false;
 
     // the pre-filter both loops share
-    if (window->alphaValue(Desktop::View::WINDOW_ALPHA_FADE) * window->alphaValue(Desktop::View::WINDOW_ALPHA_FULLSCREEN) == 0.f)
+    if (window->presentation().alphaValue(Desktop::View::WINDOW_ALPHA_FADE) * window->presentation().alphaValue(Desktop::View::WINDOW_ALPHA_FULLSCREEN) == 0.f)
         return false;
 
     return g_pHyprRenderer->shouldRenderWindow(window, monitor);
@@ -432,7 +433,7 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PH
             it = layerStates.emplace(rawPtr, std::make_shared<CGlassLayerSurface>(layerSurface)).first;
         }
 
-        if (!layerSurface->m_mapped) {
+        if (!layerSurface->mapped()) {
             ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, layerSurface, monitor, now, popups, lockscreen);
             return;
         }
@@ -769,7 +770,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     for (auto& window : Desktop::viewState()->windows()) {
-        if (window->isHidden() || !window->m_isMapped)
+        if (window->isHidden() || !window->mapped())
             continue;
         onNewWindow(window);
     }

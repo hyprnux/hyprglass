@@ -9,6 +9,7 @@
 #include <GLES3/gl32.h>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 
 // CSS border-radius overlap rule: if two radii sharing an edge would sum to
 // more than that edge's length, every radius (not just that pair) shrinks by
@@ -300,9 +301,9 @@ void CGlassSubsurfaceState::compositeAndRestore(PHLMONITOR monitor, const CBox& 
                 maskInfo.glassBoxSizePx   = Vector2D(transformedWindowBox.w, transformedWindowBox.h);
                 haveGlassBox              = true;
 
-                const float windowRadius = window->rounding() * static_cast<float>(monitor->m_scale);
+                const float windowRadius = window->presentation().rounding() * static_cast<float>(monitor->m_scale);
                 radii                    = {windowRadius, windowRadius, windowRadius, windowRadius};
-                roundingPower            = window->roundingPower();
+                roundingPower            = window->presentation().roundingPower();
             }
         }
         // else: no parent window (e.g. a layer-shell or standalone surface) —

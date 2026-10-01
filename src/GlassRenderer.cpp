@@ -6,7 +6,8 @@
 #include <algorithm>
 #include <array>
 #include <GLES3/gl32.h>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include <hyprland/src/desktop/view/window/WindowEffectsController.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
@@ -187,7 +188,7 @@ void blendOwnContent(SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW wind
 
     // Hyprland renders a transformed window through a redirected pass and blits the
     // result; our untransformed copy would not match what the user sees.
-    if (!window->m_transformers.empty())
+    if (window->effects().hasActiveTransformers())
         return;
 
     const auto hlSurface = window->wlSurface();
@@ -321,7 +322,7 @@ void blendOwnContent(SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW wind
             // The texture path tracks no buffer of its own, and the window's real draw
             // may be discarded as occluded, releasing the buffer we just read.
             if (surface->m_current.buffer && !surface->m_current.buffer->isSynchronous())
-                g_pHyprRenderer->m_usedAsyncBuffers.emplace_back(surface->m_current.buffer);
+                monitor->m_usedAsyncBuffers.emplace_back(surface, surface->m_current.buffer);
         },
         nullptr);
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
 
 // Shared by CGlassLayerSurface::sampleAndRedirect and

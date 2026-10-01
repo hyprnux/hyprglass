@@ -4,7 +4,7 @@
 #include "PluginConfig.hpp"
 
 #include <chrono>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/SharedDefs.hpp>
