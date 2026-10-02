@@ -164,8 +164,8 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 | `refraction_spread` | float | `1.0` | — | — | How deep the distortion reaches: 1 across the whole window, 0 only a rim with a flat center (0.0-1.0) |
 | `chromatic_aberration` | float | `0.5` | — | — | Spectral dispersion at edges (0.0-1.0) |
 | `fresnel_strength` | float | `0.6` | — | — | Edge glow intensity (0.0-1.0) |
-| `fresnel_tint` | float | `0.0` | — | — | Color of the fresnel rim light: 0 white, 1 the colors behind the glass (0.0-1.0) |
-| `fresnel_color` | color | `0xffffff00` | — | — | Color of the fresnel rim light; alpha sets how much it replaces white (0xRRGGBBAA) |
+| `fresnel_tint` | float | `0.0` | — | — | Color of the edge glow: 0 white, 1 the colors behind the glass (0.0-1.0) |
+| `fresnel_color` | color | `0xffffff00` | — | — | Color of the edge glow; alpha sets how much it replaces white (0xRRGGBBAA) |
 | `specular_strength` | float | `0.8` | — | — | Specular highlight brightness (0.0-1.0) |
 | `specular_angle` | float | `0.0` | — | — | Where the specular highlight comes from, in degrees: 0 from the top, 90 from the right, clockwise |
 | `bevel_strength` | float | `0.0` | — | — | Thin lit line along the glass edge, a nicer border (0.0-1.0) |
@@ -183,11 +183,13 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 | `contrast` | float | — | `0.90` | `0.92` | Contrast around midpoint |
 | `saturation` | float | — | `0.80` | `0.85` | Desaturation (0 = grayscale, 1 = full) |
 | `vibrancy` | float | — | `0.15` | `0.12` | Selective saturation boost |
-| `vibrancy_darkness` | float | — | `0.0` | `0.0` | Vibrancy influence on dark areas (0-1) |
+| `vibrancy_darkness` | float | — | `0.0` | `0.0` | Holds vibrancy back in dark areas: 0 boosts everywhere, 1 leaves black untouched, above 1 desaturates dark areas |
 | `adaptive_dim` | float | — | `0.4` | `0.0` | Dims bright areas behind the glass (white is white 0 -to- 1 white becomes black) |
 | `adaptive_boost` | float | — | `0.0` | `0.4` | Boosts dark areas behind the glass (black is black 0 -to- 1 black becomes white) |
 
 `—` in Global Default = falls through to per-theme default. `—` in Dark/Light = inherits global value.
+
+Ranges in parentheses are the usual span, not limits: only `blur_iterations` and `self_sample` are clamped, and the built-in presets go past some of them (`glass` uses `refraction_strength = 8.0`).
 
 #### Self sampling
 
@@ -486,6 +488,8 @@ hyprglass items
 - Layer surface glass uses a function hook on `renderLayer`, which is a private Hyprland internal. The hook may break on Hyprland updates that change this function's signature.
 
 ## Troubleshooting
+
+`hyprctl plugin list` shows the hyprglass version you are running: include it in bug reports. A build from a checkout without its tags reports `dev`.
 
 ### "Version mismatch" on hyprland-git or a self-built Hyprland
 
