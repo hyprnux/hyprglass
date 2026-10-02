@@ -11,3 +11,5 @@ hyprglassItemHelperBlobStart:
 .incbin "src/item-helper/hyprglass-item-helper.so"
 .global hyprglassItemHelperBlobEnd
 hyprglassItemHelperBlobEnd:
+
+.section .note.GNU-stack,"",@progbits
