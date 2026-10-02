@@ -1,8 +1,10 @@
 #include "Diagnostics.hpp"
 #include "Globals.hpp"
+#include "GlassDecoration.hpp"
 #include "GlassSubsurfaceState.hpp"
 #include "ItemHints.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdio>
@@ -363,6 +365,83 @@ std::string formatStats(eHyprCtlOutputFormat format) {
     return out;
 }
 
+// `hyprctl -j hyprglass status` is a contract for shells and scripts: bump it
+// when a field is removed, renamed or changes meaning; adding fields keeps it.
+constexpr int STATUS_SCHEMA = 1;
+
+struct SFeatureStatus {
+    bool             enabled = false;
+    std::string_view reason; // empty when the feature is active
+
+    [[nodiscard]] bool active() const noexcept { return reason.empty(); }
+};
+
+std::string formatStatus(eHyprCtlOutputFormat format) {
+    // Registered after g_pGlobalState is created and unregistered before it is reset.
+    const auto& config = g_pGlobalState->config;
+
+    const bool        shadersFailed  = g_pGlobalState->shaderManager.compileFailed();
+    const std::string_view shaders   = shadersFailed ? "failed" : g_pGlobalState->shaderManager.isInitialized() ? "ready" : "pending";
+    const bool        protocolActive = ItemHints::active();
+
+    // Same order as the render path: the setting, then the hook, then the shaders.
+    auto featureStatus = [&](Hyprlang::INT* const* enabledValue, bool hooked) {
+        SFeatureStatus status;
+        status.enabled = enabledValue && **enabledValue;
+        if (!status.enabled)
+            status.reason = "disabled";
+        else if (!hooked)
+            status.reason = "hook_missing";
+        else if (shadersFailed)
+            status.reason = "shaders_failed";
+        return status;
+    };
+
+    auto windows = featureStatus(config.enabled, true);
+    // With enabled = 0, windows tagged hyprglass_enabled still get glass.
+    if (!windows.enabled &&
+        std::ranges::any_of(g_pGlobalState->decorations, [](const auto& decoration) {
+            auto* glassDecoration = decoration.get();
+            return glassDecoration && glassDecoration->isGlassEnabled();
+        }))
+        windows.reason = shadersFailed ? "shaders_failed" : "";
+
+    const auto layers      = featureStatus(config.layersEnabled, g_pGlobalState->renderLayerHook != nullptr);
+    auto       subsurfaces = featureStatus(config.subsurfacesEnabled, g_pGlobalState->renderPassAddHook != nullptr);
+    // Item glass draws only on windows that have glass themselves.
+    if (subsurfaces.active() && !windows.active())
+        subsurfaces.reason = "window_glass_off";
+
+    const bool active = windows.active() || layers.active() || subsurfaces.active();
+
+    if (format == eHyprCtlOutputFormat::FORMAT_JSON) {
+        auto featureJson = [](const SFeatureStatus& status) {
+            return std::format("{{\"enabled\": {}, \"active\": {}, \"reason\": {}}}", status.enabled ? "true" : "false", status.active() ? "true" : "false",
+                               status.active() ? std::string("null") : std::format("\"{}\"", status.reason));
+        };
+        return std::format("{{\n  \"schema\": {}, \"version\": \"{}\", \"active\": {}, \"shaders\": \"{}\", \"itemProtocol\": {},\n"
+                           "  \"features\": {{\n    \"windows\": {},\n    \"layers\": {},\n    \"subsurfaces\": {}\n  }}\n}}\n",
+                           STATUS_SCHEMA, escapeJSONStrings(std::string(PLUGIN_VERSION)), active ? "true" : "false", shaders,
+                           protocolActive ? "true" : "false", featureJson(windows), featureJson(layers), featureJson(subsurfaces));
+    }
+
+    auto featureText = [](const SFeatureStatus& status) {
+        if (status.active())
+            return std::string("on");
+        if (status.reason == "disabled")
+            return std::string("off");
+        std::string text{status.reason};
+        std::ranges::replace(text, '_', ' ');
+        return text;
+    };
+
+    std::string out = std::format("hyprglass {}: {}\n", PLUGIN_VERSION, active ? "active" : "inactive");
+    out += std::format("  shaders: {}\n", shaders);
+    out += std::format("  windows: {}   layers: {}   subsurfaces: {}\n", featureText(windows), featureText(layers), featureText(subsurfaces));
+    out += std::format("  hyprglass_item_v1 protocol: {}\n", protocolActive ? "active" : "inactive");
+    return out;
+}
+
 SP<SHyprCtlCommand> s_command;
 
 } // namespace
@@ -476,7 +555,10 @@ void registerHyprCtlCommand(HANDLE handle) {
             if (rest == "items")
                 return formatItems(format);
 
-            return "hyprglass: usage: hyprctl hyprglass <stats [reset]|items>  (add -j for JSON, e.g. hyprctl -j hyprglass items)\n";
+            if (rest == "status")
+                return formatStatus(format);
+
+            return "hyprglass: usage: hyprctl hyprglass <status|stats [reset]|items>  (add -j for JSON, e.g. hyprctl -j hyprglass status)\n";
         },
     });
 }

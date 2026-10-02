@@ -441,6 +441,44 @@ For windows, the plugin integrates with Hyprland's render pass system as a `DECO
 hyprctl plugin unload /path/to/hyprglass.so
 ```
 
+## Status
+
+`hyprctl plugin list` only says hyprglass is loaded. `hyprctl hyprglass status` says whether it can draw glass:
+
+```bash
+hyprctl hyprglass status
+hyprctl -j hyprglass status      # same, as JSON
+```
+
+```
+hyprglass 0.9.1: active
+  shaders: ready
+  windows: on   layers: hook missing   subsurfaces: off
+  hyprglass_item_v1 protocol: active
+```
+
+```json
+{
+  "schema": 1, "version": "0.9.1", "active": true, "shaders": "ready", "itemProtocol": true,
+  "features": {
+    "windows": {"enabled": true, "active": true, "reason": null},
+    "layers": {"enabled": true, "active": false, "reason": "hook_missing"},
+    "subsurfaces": {"enabled": false, "active": false, "reason": "disabled"}
+  }
+}
+```
+
+| Field | Values |
+|---|---|
+| `schema` | Raised when a field is removed, renamed or changes meaning. New fields and new `shaders` or `reason` values can appear without a raise: treat any non-null `reason` as inactive. |
+| `version` | Same as `hyprctl plugin list`. |
+| `active` | `true` when at least one feature is active. |
+| `shaders` | `ready`, `pending` (compiled at the first glass draw) or `failed` (retried at the next draw). |
+| `itemProtocol` | `hyprglass_item_v1` is offered to clients. |
+| `features.*.enabled` | The setting: `enabled`, `layers:enabled`, `subsurfaces:enabled`. |
+| `features.*.active` | The feature draws glass. `windows` is active with `enabled = 0` while a window tagged `hyprglass_enabled` is open. |
+| `features.*.reason` | `null` when active, else `disabled`, `hook_missing` (after a Hyprland update, or another plugin hooked it first: reinstall or report it), `shaders_failed`, or for `subsurfaces`, `window_glass_off` (items only draw on windows that have glass). |
+
 ## Performance diagnostics
 
 | Option | Type | Default | Description |

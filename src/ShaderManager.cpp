@@ -105,17 +105,13 @@ void CShaderManager::initializeIfNeeded() {
     if (m_initialized)
         return;
 
-    if (!compileGlassShader())
-        return;
-
-    if (!compileBlurShader())
-        return;
-
-    m_initialized = true;
+    m_initialized   = compileGlassShader() && compileBlurShader();
+    m_compileFailed = !m_initialized;
 }
 
 void CShaderManager::destroy() noexcept {
     glassShader->destroy();
     blurShader->destroy();
-    m_initialized = false;
+    m_initialized   = false;
+    m_compileFailed = false;
 }
