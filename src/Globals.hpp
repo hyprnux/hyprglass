@@ -169,4 +169,7 @@ CGlassDecoration* glassDecorationFor(const PHLWINDOW& window);
 inline constexpr std::string_view PLUGIN_NAME        = "hyprglass";
 inline constexpr std::string_view PLUGIN_DESCRIPTION = "Apple-style Liquid Glass effect";
 inline constexpr std::string_view PLUGIN_AUTHOR      = "Hyprnux";
-inline constexpr std::string_view PLUGIN_VERSION     = "1.0.0";
+#ifndef HYPRGLASS_VERSION
+#define HYPRGLASS_VERSION "dev"
+#endif
+inline constexpr std::string_view PLUGIN_VERSION     = HYPRGLASS_VERSION;

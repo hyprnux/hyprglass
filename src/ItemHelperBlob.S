@@ -11,3 +11,7 @@ hyprglassItemHelperBlobStart:
 .incbin "src/item-helper/hyprglass-item-helper.so"
 .global hyprglassItemHelperBlobEnd
 hyprglassItemHelperBlobEnd:
+
+// Assembly gets no GNU-stack note on its own, which some linkers read as needing an
+// executable stack. %progbits, not @progbits: @ starts a comment on 32-bit ARM.
+.section .note.GNU-stack,"",%progbits

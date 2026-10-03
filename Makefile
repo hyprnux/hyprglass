@@ -4,9 +4,22 @@ CXX ?= g++
 CC ?= gcc
 WAYLAND_SCANNER ?= wayland-scanner
 CXXFLAGS = -fPIC -g -O2 -std=c++23
-LDFLAGS = -shared
+# Never ask for an executable stack, whatever an object or the linker defaults to:
+# glibc 2.41+ refuses to load such a library.
+LDFLAGS = -shared -Wl,-z,noexecstack
 INCLUDES = $(shell pkg-config --cflags hyprland pixman-1 libdrm)
 LIBS = $(shell pkg-config --libs hyprland) -ldl
+
+# Shown by `hyprctl plugin list`. Release builds pass HYPRGLASS_VERSION; other
+# builds describe their own checkout (never an enclosing repository), keeping
+# only characters safe in a C string. Changing it needs `make clean`.
+ifndef HYPRGLASS_VERSION
+HYPRGLASS_VERSION := $(shell [ -e .git ] && git describe --tags --dirty 2>/dev/null | sed 's/^v//' | tr -cd 'A-Za-z0-9._+-')
+endif
+ifeq ($(HYPRGLASS_VERSION),)
+HYPRGLASS_VERSION := dev
+endif
+CXXFLAGS += -DHYPRGLASS_VERSION='"$(HYPRGLASS_VERSION)"'
 
 ifeq ($(basename $(CXX)),g++)
 	CXXFLAGS += --no-gnu-unique
@@ -61,7 +74,7 @@ $(ITEM_HELPER_DIR)/%.o: $(ITEM_HELPER_DIR)/%.c
 
 $(HELPER_SO): $(HELPER_OBJ)
 	@echo "Linking $(HELPER_SO)..."
-	@$(CC) -shared -fPIC -o $@ $(HELPER_OBJ) $(WAYLAND_SERVER_LIBS)
+	@$(CC) -shared -fPIC -Wl,-z,noexecstack -o $@ $(HELPER_OBJ) $(WAYLAND_SERVER_LIBS)
 
 # .incbin's path is relative to this Makefile's own working directory (the
 # repo root), the same base every other SOURCES path here is written against.
