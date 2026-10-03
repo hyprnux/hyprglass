@@ -65,6 +65,8 @@ struct SBlurUniforms {
 class CShaderManager {
   public:
     [[nodiscard]] bool isInitialized() const noexcept { return m_initialized; }
+    // The last compile attempt failed; it is retried at the next glass draw.
+    [[nodiscard]] bool compileFailed() const noexcept { return m_compileFailed; }
 
     void initializeIfNeeded();
     void destroy() noexcept;
@@ -77,6 +79,7 @@ class CShaderManager {
 
   private:
     bool m_initialized = false;
+    bool m_compileFailed = false;
 
     [[nodiscard]] static std::string loadShaderSource(const char* fileName);
     [[nodiscard]] bool compileGlassShader();

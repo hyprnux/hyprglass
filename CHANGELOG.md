@@ -1,4 +1,17 @@
 
+## [v0.9.1](https://github.com/Hyprnux/hyprglass/compare/v0.9.0...v0.9.1) - 2026-10-03
+
+### Bug Fixes
+
+* hyprglass loads on glibc 2.41+ instead of failing with "cannot enable executable stack" ([#86](https://github.com/Hyprnux/hyprglass/issues/86))
+* hyprctl hyprglass status tells whether glass is actually drawn, not just loaded
+* hyprctl plugin list shows the installed hyprglass version instead of 1.0.0
+
+### Documentation
+
+* give option ranges as typical values and describe vibrancy_darkness as the shader applies it
+
+
 ## [v0.9.0](https://github.com/Hyprnux/hyprglass/compare/v0.8.1...v0.9.0) - 2026-10-01
 
 ### Bug Fixes
@@ -19,6 +32,7 @@
 
 * drop blur margin warning (not always right, and hard to maintain)
 * **hyprpm:** install v0.8.1 on Hyprland 0.56.1/0.56.2 and v0.6.3 on 0.55.3
+* **release:** v0.9.0 [skip ci]
 
 ### Documentation
 
