@@ -456,6 +456,13 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
         .uvScale   = {transformBox.w / monitorWidth, transformBox.h / monitorHeight},
     };
 
+    {
+        const auto& cfg = g_pGlobalState->config;
+        const float coverage = cfg.layersAlphaCoverage ? static_cast<float>(**cfg.layersAlphaCoverage) : 0.0f;
+        // Fade-out scales the surface alpha, so scale the full-strength point with it.
+        maskInfo.coverage = std::max(0.0f, coverage) * std::clamp(alpha, 0.0f, 1.0f);
+    }
+
     switch (maskSource) {
         case EMaskSource::ALPHA_THRESHOLD: {
             float maskThreshold = 0.001f;

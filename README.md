@@ -268,6 +268,7 @@ hg.layer("debug-panel", { exclude = true })
 | `layers:live_resample_fps` | int | `30` | Max re-renders per second per layer for live resample. `0` = uncapped |
 | `layers:force_live_resample` | bool | `false` (`0` in .conf) | Experimental: re-render layer glass every frame regardless of changes, ignoring `live_resample_fps`. Heavy GPU/battery cost |
 | `layers:mask_mode` | string | `auto` | Where the glass goes: `auto` = where the app requests blur, else where content is visible; `region` = only where the app requests blur; `alpha` = only where content is visible |
+| `layers:alpha_coverage` | float | `0.45` | Glass strength follows the surface's alpha up to this value, so antialiased edges (rounded corners) fade out instead of ending on a hard, stepped edge, and a coarse blur region still takes the surface's own outline. `0` = hard mask (previous behaviour) |
 | `layers:namespace_mask_modes` | string | `""` | Per-namespace `mask_mode` (`ns=mode` pairs, comma-separated) |
 | `layers:manage_blur` | bool | `true` (`1` in .conf) | Replace Hyprland's own blur with glass on glassed layers (`layerrule = ignorealpha` then has no effect, use `mask_threshold`). Set to `0` to keep Hyprland's blur |
 

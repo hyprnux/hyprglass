@@ -76,6 +76,7 @@ uniform int useMask;
 uniform vec2 maskUVOffset;
 uniform vec2 maskUVScale;
 uniform float maskAlphaThreshold;
+uniform float maskCoverage;      // layers: glass follows surface alpha up to this (0 = hard mask)
 uniform int maskMode;          // 0 = alpha threshold, 1 = protocol region
 uniform int regionRectCount;   // 0..16
 uniform vec4 regionRects[16];  // box-local pixels: xy = offset from box top-left, zw = size
@@ -478,6 +479,11 @@ void main() {
     // the glass re-samples its own output: unclamped color diverges over frames
     color = clamp(color, 0.0, 1.0);
     float glassA = clamp(glassOpacity * cornerAlpha, 0.0, 1.0);
+    // Antialiased layer edges: a pixel the surface only partly covers gets proportionally
+    // less glass, so rounded corners fade out instead of ending on a hard, stepped edge
+    // (and a coarse region, such as a bounding box, still takes the surface's own shape).
+    if (hasMask && maskCoverage > 0.0)
+        glassA *= smoothstep(0.0, maskCoverage, surfacePixel.a);
 
     if (hasMask) {
         // Layers only: composite the rendered surface over the glass effect
