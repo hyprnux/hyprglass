@@ -87,12 +87,12 @@ SFoldedBlur foldBlurPasses(float radius, int iterations) noexcept {
     return {totalRadius / std::sqrt(static_cast<float>(foldedIterations)), foldedIterations};
 }
 
-void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IFramebuffer> sourceFramebuffer,
-                       CBox box, Vector2D& outPaddingRatio, int downscale) {
+void sampleBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sampleFramebuffer,
+                       SP<Render::IFramebuffer> sourceFramebuffer, CBox box, Vector2D& outPaddingRatio, int downscale) {
     if (!sourceFramebuffer)
         return;
 
-    Diagnostics::CScopedStageTimer stageTimer(Diagnostics::EStage::SampleBackground);
+    Diagnostics::CScopedStageTimer stageTimer(ctx, Diagnostics::EStage::SampleBackground);
 
     const int  pad = SAMPLE_PADDING_PX;
     const auto map = sampleMapFor(box, downscale);
@@ -103,7 +103,7 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
     // Full-res source pixels this call blits, before any downscale — what the
     // GPU actually reads off the source framebuffer, not the (possibly
     // half-res) destination the sample FBO ends up holding.
-    if (const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock())
+    if (const auto monitor = ctx.m_data.pMonitor.lock())
         Diagnostics::recordSampledPixels(monitor->m_id, static_cast<double>(fullWidth) * static_cast<double>(fullHeight));
 
     int sampleWidth  = map.width;
@@ -175,8 +175,8 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
 }
 
-void blendOwnContent(SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW window, PHLMONITOR monitor,
-                      const CBox& box, int downscale, float amount, float cornerRadius, float roundingPower) {
+void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW window,
+                      PHLMONITOR monitor, const CBox& box, int downscale, float amount, float cornerRadius, float roundingPower) {
     if (amount <= 0.0f || !sampleFramebuffer || !window || !monitor)
         return;
 
@@ -204,48 +204,24 @@ void blendOwnContent(SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW wind
     if (fbSize.x != map.width || fbSize.y != map.height)
         return;
 
-    auto& renderData = g_pHyprRenderer->m_renderData;
+    auto& renderData = ctx.m_data;
 
     // Leave the caller the state sampleBackground leaves: scissor off, viewport from
     // the re-bound framebuffer's own size (monitor sizes are wrong here, #41).
-    // Declared before the FB guard so it runs after that framebuffer is back, on the
-    // throwing path too.
+    // Declared before the framebuffer/draw-state guards so it runs last.
+    // By then currentFB and the GL framebuffer binding have been restored.
     const Hyprutils::Utils::CScopeGuard restoreGLState([&] {
-        g_pHyprOpenGL->scissor(nullptr);
+        g_pHyprOpenGL->scissor(ctx, nullptr);
         if (const auto& restored = renderData.currentFB)
             g_pHyprOpenGL->setViewport(0, 0, static_cast<int>(restored->m_size.x), static_cast<int>(restored->m_size.y));
     });
 
-    auto guard = g_pHyprRenderer->bindTempFB(sampleFramebuffer);
-
-    const auto  savedProjection      = renderData.projectionType;
-    const auto  savedFbSize          = renderData.fbSize;
-    const auto  savedRenderModif     = renderData.renderModif;
-    const auto  savedWindow          = renderData.currentWindow;
-    const auto  savedSurface         = renderData.surface;
-    const auto  savedClipBox         = renderData.clipBox;
-    const auto  savedUVTopLeft       = renderData.primarySurfaceUVTopLeft;
-    const auto  savedUVBottomRight   = renderData.primarySurfaceUVBottomRight;
-    const bool  savedTransformDamage = renderData.transformDamage;
-
-    // draw() allocates a pass element per surface, so the restores must survive a
-    // throw: every later element would otherwise project through the sample size.
-    // Only render data, no GL state, so running after the FB rebind below is safe.
-    const Hyprutils::Utils::CScopeGuard restoreRenderData([&] {
-        renderData.primarySurfaceUVBottomRight = savedUVBottomRight;
-        renderData.primarySurfaceUVTopLeft     = savedUVTopLeft;
-        renderData.clipBox                     = savedClipBox;
-        renderData.surface                     = savedSurface;
-        renderData.currentWindow               = savedWindow;
-        renderData.renderModif                 = savedRenderModif;
-        renderData.transformDamage             = savedTransformDamage;
-        // before setProjectionType: RPT_FB recomputes the projection from fbSize
-        renderData.fbSize = savedFbSize;
-        g_pHyprRenderer->setProjectionType(savedProjection);
-    });
+    Render::GL::CFramebufferBindingGuard bindings{g_pHyprRenderer->glBackend()};
+    auto state = ctx.saveDrawState();
+    g_pHyprRenderer->bindFB(ctx, sampleFramebuffer);
 
     renderData.fbSize = fbSize;
-    g_pHyprRenderer->setProjectionType(Render::RPT_EXPORT);
+    g_pHyprRenderer->setProjectionType(ctx, Render::RPT_EXPORT);
     // our boxes and damage rects are sample-framebuffer pixels, not monitor space
     renderData.transformDamage = false;
     // an overview plugin's modifier would otherwise be applied a second time
@@ -308,7 +284,7 @@ void blendOwnContent(SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW wind
                 renderData.primarySurfaceUVBottomRight = Vector2D(-1, -1);
             }
 
-            g_pHyprRenderer->draw(CTexPassElement::SRenderData{
+            g_pHyprRenderer->draw(ctx, CTexPassElement::SRenderData{
                 .tex           = texture,
                 .box           = map.toSample(framebufferBox),
                 .a             = amount,
@@ -322,23 +298,21 @@ void blendOwnContent(SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW wind
             // The texture path tracks no buffer of its own, and the window's real draw
             // may be discarded as occluded, releasing the buffer we just read.
             if (surface->m_current.buffer && !surface->m_current.buffer->isSynchronous())
-                monitor->m_usedAsyncBuffers.emplace_back(surface, surface->m_current.buffer);
+                ctx.m_usedAsyncBuffers.emplace_back(surface, surface->m_current.buffer);
         },
         nullptr);
-
-    guard.reset();
 }
 
-void blurBackground(SP<Render::IFramebuffer> sampleFramebuffer, float radius, int iterations,
-                    SP<Render::IFramebuffer> callerFramebuffer) {
+void blurBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer> sampleFramebuffer, float radius,
+                     int iterations, SP<Render::IFramebuffer> callerFramebuffer) {
     auto& shaderManager = g_pGlobalState->shaderManager;
     if (!sampleFramebuffer || !callerFramebuffer || radius <= 0.0f || iterations <= 0 || !shaderManager.isInitialized())
         return;
 
-    Diagnostics::CScopedStageTimer stageTimer(Diagnostics::EStage::BlurBackground);
+    Diagnostics::CScopedStageTimer stageTimer(ctx, Diagnostics::EStage::BlurBackground);
 
     // Two ping-pong passes (horizontal, vertical) per iteration.
-    if (const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock())
+    if (const auto monitor = ctx.m_data.pMonitor.lock())
         Diagnostics::recordBlurPasses(monitor->m_id, static_cast<uint64_t>(iterations) * 2);
 
     int width  = static_cast<int>(sampleFramebuffer->m_size.x);
@@ -408,7 +382,8 @@ void blurBackground(SP<Render::IFramebuffer> sampleFramebuffer, float radius, in
         static_cast<int>(callerFramebuffer->m_size.y));
 }
 
-void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> targetFramebuffer,
+void applyGlassEffect(Render::CRenderContext& ctx,
+                       SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> targetFramebuffer,
                        CBox& rawBox, CBox& transformedBox,
                        float alpha, const std::array<float, 4>& radii, float roundingPower,
                        const Vector2D& paddingRatio, const SResolveContext& resolveContext,
@@ -416,18 +391,18 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
     if (!sampleFramebuffer || !targetFramebuffer)
         return;
 
-    Diagnostics::CScopedStageTimer stageTimer(Diagnostics::EStage::ApplyGlassEffect);
+    Diagnostics::CScopedStageTimer stageTimer(ctx, Diagnostics::EStage::ApplyGlassEffect);
 
-    if (const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock())
+    if (const auto monitor = ctx.m_data.pMonitor.lock())
         Diagnostics::recordGlassPixels(monitor->m_id, rawBox.w * rawBox.h);
 
     auto& shaderManager  = g_pGlobalState->shaderManager;
     const auto& uniforms = shaderManager.glassUniforms;
 
     const auto transform = Math::wlTransformToHyprutils(
-        Math::invertTransform(g_pHyprRenderer->m_renderData.pMonitor->m_transform));
+        Math::invertTransform(ctx.m_data.pMonitor->m_transform));
 
-    Mat3x3 glMatrix = g_pHyprRenderer->projectBoxToTarget(rawBox, transform);
+    Mat3x3 glMatrix = g_pHyprRenderer->projectBoxToTarget(ctx, rawBox, transform);
     auto texture    = sampleFramebuffer->getTexture();
 
     glMatrix.transpose();
@@ -487,7 +462,7 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
     glUniform1f(uniforms.bevelShadow,         resolvePresetFloat(resolveContext, &SPresetValues::bevelShadow, &SOverridableConfig::bevelShadow));
 
     // bevel width is defined in logical px; scale it to framebuffer px per monitor
-    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
+    const auto monitor = ctx.m_data.pMonitor.lock();
     glUniform1f(uniforms.monitorScale, monitor && monitor->m_scale > 0.0f ? monitor->m_scale : 1.0f);
 
     uploadThemeUniforms(resolveContext);
@@ -575,10 +550,10 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
     // Only finalDamage is copied to the screen, and elementDamage (which finalDamage is a
     // subset of) already covers every pixel we're visible at, so scissoring to the damage
     // clips no pixel that would otherwise reach the screen.
-    CBox damageExtents = g_pHyprRenderer->m_renderData.damage.copy().intersect(rawBox).getExtents();
-    g_pHyprOpenGL->scissor(damageExtents.w > 0 && damageExtents.h > 0 ? damageExtents : rawBox);
+    CBox damageExtents = ctx.m_data.damage.copy().intersect(rawBox).getExtents();
+    g_pHyprOpenGL->scissor(ctx, damageExtents.w > 0 && damageExtents.h > 0 ? damageExtents : rawBox);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    g_pHyprOpenGL->scissor(nullptr);
+    g_pHyprOpenGL->scissor(ctx, nullptr);
 }
 
 } // namespace GlassRenderer

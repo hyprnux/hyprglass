@@ -21,12 +21,12 @@ class CGlassPassElement : public IPassElement {
     explicit CGlassPassElement(const SGlassPassData& data);
     ~CGlassPassElement() override = default;
 
-    std::vector<UP<IPassElement>> draw() override;
-    [[nodiscard]] bool                needsLiveBlur() override;
-    [[nodiscard]] bool                needsPrecomputeBlur() override;
-    [[nodiscard]] std::optional<CBox> boundingBox() override;
-    [[nodiscard]] bool                disableSimplification() override;
-    void                               discard() override;
+    std::vector<UP<IPassElement>> draw(Render::CRenderContext& ctx) override;
+    [[nodiscard]] bool                needsLiveBlur(Render::CRenderContext& ctx) override;
+    [[nodiscard]] bool                needsPrecomputeBlur(Render::CRenderContext&) override;
+    [[nodiscard]] std::optional<CBox> boundingBox(Render::CRenderContext& ctx) override;
+    [[nodiscard]] bool                disableSimplification(Render::CRenderContext&) override;
+    void                               discard(Render::CRenderContext& ctx) override;
 
     [[nodiscard]] const char* passName() override { return "CGlassPassElement"; }
     [[nodiscard]] ePassElementType type() override { return EK_CUSTOM; }
@@ -34,7 +34,7 @@ class CGlassPassElement : public IPassElement {
   private:
     // Shared by boundingBox() and needsLiveBlur() so they can never disagree
     // about whether a box exists — see needsLiveBlur()'s comment.
-    [[nodiscard]] std::optional<CBox> paddedLogicalBox() const;
+    [[nodiscard]] std::optional<CBox> paddedLogicalBox(Render::CRenderContext& ctx) const;
 
     SGlassPassData m_data;
 };

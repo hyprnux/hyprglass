@@ -14,13 +14,17 @@ namespace RenderGuards {
 // mainFB alone is not a usable guard: it is truthy for the whole span of a
 // normal frame's begin()/end(), not just replays, so a bare mainFB check would
 // never see a foreign render as foreign.
-[[nodiscard]] inline bool isForeignRender() {
-    const auto& renderData = g_pHyprRenderer->m_renderData;
+[[nodiscard]] inline bool isForeignRender(Render::CRenderContext& ctx) {
+    const auto& renderData = ctx.m_data;
 
     if (renderData.mainFB && renderData.currentFB != renderData.mainFB)
         return true;
 
     return renderData.renderModif.enabled && !renderData.renderModif.modifs.empty();
+}
+
+[[nodiscard]] inline bool shouldSkipGlass(Render::CRenderContext& ctx) {
+    return ctx.m_renderingSnapshot || isForeignRender(ctx);
 }
 
 } // namespace RenderGuards

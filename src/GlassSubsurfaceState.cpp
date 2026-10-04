@@ -102,14 +102,14 @@ std::string CGlassSubsurfaceState::resolvePresetName(SPresetHintOutcome* hintOut
     return "default";
 }
 
-void CGlassSubsurfaceState::sampleAndRedirect(PHLMONITOR monitor, const CBox& transformBox, float alpha) {
+void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& transformBox, float alpha) {
     auto& shaderManager = g_pGlobalState->shaderManager;
     shaderManager.initializeIfNeeded();
 
     if (!shaderManager.isInitialized() || !monitor)
         return;
 
-    auto source = g_pHyprRenderer->m_renderData.currentFB;
+    auto source = ctx.m_data.currentFB;
     if (!source)
         return;
 
@@ -118,7 +118,7 @@ void CGlassSubsurfaceState::sampleAndRedirect(PHLMONITOR monitor, const CBox& tr
     // gives `hyprctl hyprglass stats` a compositor-side counter proving this
     // hook ran per item, per frame — this plugin never logs to hyprland.log,
     // so the hyprctl stats command is the only corroboration available.
-    Diagnostics::CScopedStageTimer stageTimer(Diagnostics::EStage::SubsurfaceSample);
+    Diagnostics::CScopedStageTimer stageTimer(ctx, Diagnostics::EStage::SubsurfaceSample);
     const MONITORID monitorId = monitor ? monitor->m_id : -1; // -1 mirrors Hyprland's own MONITOR_INVALID
 
     const uint64_t currentGeneration = g_pGlobalState->getSceneGeneration(monitor);
@@ -129,7 +129,7 @@ void CGlassSubsurfaceState::sampleAndRedirect(PHLMONITOR monitor, const CBox& tr
     const bool backgroundChanged = !m_hasCachedSample || currentGeneration != m_lastSceneGeneration || movedOrResized;
 
     const bool sampleCovered = !backgroundChanged ||
-        GlassRenderer::sampleRegionCovered(transformBox, source, g_pHyprRenderer->m_renderData.damage);
+        GlassRenderer::sampleRegionCovered(transformBox, source, ctx.m_data.damage);
 
     if (!sampleCovered) {
         // The work buffer is cleared outside this frame's damage: sampling now
@@ -143,25 +143,25 @@ void CGlassSubsurfaceState::sampleAndRedirect(PHLMONITOR monitor, const CBox& tr
     } else if (backgroundChanged) {
         Diagnostics::recordSubsurfaceCacheMiss(monitorId);
 
-        const bool             isDark  = resolveThemeIsDark();
-        const std::string      preset  = resolvePresetName();
-        const SResolveContext  ctx     = {preset, isDark, g_pGlobalState->config, g_pGlobalState->customPresets};
+        const bool             isDark          = resolveThemeIsDark();
+        const std::string      preset          = resolvePresetName();
+        const SResolveContext  resolveContext  = {preset, isDark, g_pGlobalState->config, g_pGlobalState->customPresets};
 
-        float blurStrength = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
+        float blurStrength = resolvePresetFloat(resolveContext, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
         int   downscale    = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-        GlassRenderer::sampleBackground(m_sampleFramebuffer, source, transformBox, m_samplePaddingRatio, downscale);
+        GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, source, transformBox, m_samplePaddingRatio, downscale);
 
         float blurRadius     = blurStrength * 12.0f / downscale;
-        int   blurIterations = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
+        int   blurIterations = std::clamp(static_cast<int>(resolvePresetInt(resolveContext, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
 
-        if (ctx.config.blurFold && **ctx.config.blurFold) {
+        if (resolveContext.config.blurFold && **resolveContext.config.blurFold) {
             const auto folded = GlassRenderer::foldBlurPasses(blurRadius, blurIterations);
             blurRadius        = folded.radius;
             blurIterations    = folded.iterations;
         }
 
-        GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source);
+        GlassRenderer::blurBackground(ctx, m_sampleFramebuffer, blurRadius, blurIterations, source);
 
         m_hasCachedSample     = true;
         m_lastSceneGeneration = currentGeneration;
@@ -191,26 +191,26 @@ void CGlassSubsurfaceState::sampleAndRedirect(PHLMONITOR monitor, const CBox& tr
 
     m_savedCurrentFB = source;
 
-    g_pHyprRenderer->m_renderData.currentFB = sharedFB;
+    ctx.m_data.currentFB = sharedFB;
     glBindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(sharedFB.get())->getFBID());
 
     CBox clearBox = transformBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
 
     if (std::isfinite(clearBox.x) && std::isfinite(clearBox.y) && std::isfinite(clearBox.w) && std::isfinite(clearBox.h) &&
         clearBox.w > 0.0 && clearBox.h > 0.0) {
-        g_pHyprOpenGL->scissor(clearBox, false);
+        g_pHyprOpenGL->scissor(ctx, clearBox, false);
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-        g_pHyprOpenGL->scissor(nullptr);
+        g_pHyprOpenGL->scissor(ctx, nullptr);
     }
 
     m_redirectedThisFrame = true;
 }
 
-void CGlassSubsurfaceState::compositeAndRestore(PHLMONITOR monitor, const CBox& rawBox, const CBox& transformBox,
-                                                 CRegion& transformedRegion, float alpha) {
+void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& rawBox,
+                                                 const CBox& transformBox, CRegion& transformedRegion, float alpha) {
     if (m_savedCurrentFB) {
-        g_pHyprRenderer->m_renderData.currentFB = m_savedCurrentFB;
+        ctx.m_data.currentFB = m_savedCurrentFB;
         glBindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_savedCurrentFB.get())->getFBID());
         m_savedCurrentFB.reset();
     }
@@ -223,7 +223,7 @@ void CGlassSubsurfaceState::compositeAndRestore(PHLMONITOR monitor, const CBox& 
     if (!shaderManager.isInitialized() || !m_hasCachedSample || !monitor)
         return;
 
-    auto target = g_pHyprRenderer->m_renderData.currentFB;
+    auto target = ctx.m_data.currentFB;
     if (!target)
         return;
 
@@ -231,13 +231,13 @@ void CGlassSubsurfaceState::compositeAndRestore(PHLMONITOR monitor, const CBox& 
     // ApplyGlassEffect bracket sees this one already open and no-ops instead
     // of nesting (GL forbids concurrent GL_TIME_ELAPSED queries) — mirrors
     // CGlassLayerSurface::compositeAndRestore().
-    Diagnostics::CScopedStageTimer stageTimer(Diagnostics::EStage::SubsurfaceComposite);
+    Diagnostics::CScopedStageTimer stageTimer(ctx, Diagnostics::EStage::SubsurfaceComposite);
     Diagnostics::recordSubsurfaceGlassDraw(monitor->m_id);
 
-    const bool            isDark = resolveThemeIsDark();
+    const bool            isDark          = resolveThemeIsDark();
     SPresetHintOutcome    presetHint;
-    const std::string     preset = resolvePresetName(&presetHint);
-    const SResolveContext ctx    = {preset, isDark, g_pGlobalState->config, g_pGlobalState->customPresets};
+    const std::string     preset          = resolvePresetName(&presetHint);
+    const SResolveContext resolveContext  = {preset, isDark, g_pGlobalState->config, g_pGlobalState->customPresets};
 
     float roundingPower = 2.0f;
 
@@ -356,9 +356,10 @@ void CGlassSubsurfaceState::compositeAndRestore(PHLMONITOR monitor, const CBox& 
 
     CBox mutableRawBox       = rawBox;
     CBox mutableTransformBox = transformBox;
-    GlassRenderer::applyGlassEffect(m_sampleFramebuffer, target,
+    GlassRenderer::applyGlassEffect(ctx,
+                                     m_sampleFramebuffer, target,
                                      mutableRawBox, mutableTransformBox, alpha,
-                                     radii, roundingPower, m_samplePaddingRatio, ctx,
+                                     radii, roundingPower, m_samplePaddingRatio, resolveContext,
                                      &maskInfo);
 
     // Record the box/radii/roundingPower/preset already computed above for

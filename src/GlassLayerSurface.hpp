@@ -17,10 +17,10 @@ class CGlassLayerSurface {
     enum class EMaskSource { ALPHA_THRESHOLD, PROTOCOL_REGION, NONE };
 
     // Phase 1 (pre-surface): sample+blur background, redirect currentFB → temp FBO
-    void sampleAndRedirect(PHLMONITOR monitor, float alpha);
+    void sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, float alpha);
 
     // Phase 2 (post-surface): restore currentFB, apply glass masked by temp FBO, blit surface
-    void compositeAndRestore(PHLMONITOR monitor, float alpha, EMaskSource maskSource);
+    void compositeAndRestore(Render::CRenderContext& ctx, PHLMONITOR monitor, float alpha, EMaskSource maskSource);
 
     void damageIfMoved();
 
