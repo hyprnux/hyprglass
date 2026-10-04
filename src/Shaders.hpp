@@ -78,8 +78,8 @@ uniform vec2 maskUVScale;
 uniform float maskAlphaThreshold;
 uniform float maskCoverage;      // layers: glass follows surface alpha up to this (0 = hard mask)
 uniform int maskMode;          // 0 = alpha threshold, 1 = protocol region
-uniform int regionRectCount;   // 0..16
-uniform vec4 regionRects[16];  // box-local pixels: xy = offset from box top-left, zw = size
+uniform int regionRectCount;   // 0..64
+uniform vec4 regionRects[64];  // box-local pixels: xy = offset from box top-left, zw = size
 
 // Subsurface item glass only: the rounded-box SDF (getCornerSDF below) is
 // evaluated over this sub-rect of the drawn box instead of the full box —

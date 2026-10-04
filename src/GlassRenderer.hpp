@@ -46,8 +46,10 @@ struct SFoldedBlur {
 // the input is returned unchanged.
 [[nodiscard]] SFoldedBlur foldBlurPasses(float radius, int iterations) noexcept;
 
-// Must match the `regionRects[16]` array size declared in Shaders.hpp.
-inline constexpr int MAX_REGION_RECTS = 16;
+// Must match the `regionRects[64]` array size declared in Shaders.hpp. 64 lets a client trace a
+// rounded shape to within a pixel or two; at 16 a capsule's curve steps by several pixels, and
+// anything the client draws just outside the shape (a glow, a shadow) falls inside the steps.
+inline constexpr int MAX_REGION_RECTS = 64;
 
 // Box-local pixel rect uploaded to the shader's regionRects uniform array.
 struct SRegionRect {
