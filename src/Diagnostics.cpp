@@ -44,7 +44,7 @@ struct SStageQueryRing {
     // The monitor being rendered when each pending slot's query was opened
     // (captured in CScopedStageTimer's constructor). A query's result is only
     // ever readable well after glEndQuery, on a later call to drainStage(), by
-    // which point g_pHyprRenderer->m_renderData.pMonitor may have moved on to
+    // which point the render context's m_data.pMonitor may have moved on to
     // another monitor entirely — the result must carry its own monitor id
     // rather than being attributed to whatever is current at drain time.
     std::array<MONITORID, QUERY_RING_SIZE> monitor{};
@@ -607,7 +607,7 @@ void shutdown() {
     }
 }
 
-CScopedStageTimer::CScopedStageTimer(EStage stage) : m_stage(stage) {
+CScopedStageTimer::CScopedStageTimer(Render::CRenderContext& ctx, EStage stage) : m_stage(stage) {
     if (!timersEnabledByConfig() || !timerExtensionAvailable() || s_queryActive)
         return;
 
@@ -634,7 +634,7 @@ CScopedStageTimer::CScopedStageTimer(EStage stage) : m_stage(stage) {
     // bracket always wraps GL work for whichever monitor is currently being
     // rendered.
     MONITORID monitorId = -1; // -1 mirrors Hyprland's own MONITOR_INVALID
-    if (const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock())
+    if (const auto monitor = ctx.m_data.pMonitor.lock())
         monitorId = monitor->m_id;
     ring.monitor[slot] = monitorId;
 

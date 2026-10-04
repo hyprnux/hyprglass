@@ -114,20 +114,20 @@ struct SSampleMap {
 [[nodiscard]] bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage,
                                        const PHLMONITOR& monitor);
 
-void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IFramebuffer> sourceFramebuffer,
-                       CBox box, Vector2D& outPaddingRatio, int downscale = 1);
+void sampleBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sampleFramebuffer,
+                       SP<Render::IFramebuffer> sourceFramebuffer, CBox box, Vector2D& outPaddingRatio, int downscale = 1);
 
 // Draws the window's own committed surfaces over the sampled background, so the
 // blur that follows works on a mix of the desktop and the window's own content.
 // box is the same framebuffer-space box sampleBackground() was given.
-void blendOwnContent(SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW window, PHLMONITOR monitor,
-                      const CBox& box, int downscale, float amount, float cornerRadius, float roundingPower);
+void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW window,
+                      PHLMONITOR monitor, const CBox& box, int downscale, float amount, float cornerRadius, float roundingPower);
 
 // callerFramebuffer is re-bound after the blur ping-pong; the viewport is
 // restored from its size so it always matches the re-bound framebuffer
 // (monitor fields would be wrong on 90°/270° transformed monitors).
-void blurBackground(SP<Render::IFramebuffer> sampleFramebuffer, float radius, int iterations,
-                    SP<Render::IFramebuffer> callerFramebuffer);
+void blurBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer> sampleFramebuffer, float radius,
+                     int iterations, SP<Render::IFramebuffer> callerFramebuffer);
 
 // When mask is non-null (layers only), the shader composites the surface content
 // over the glass effect in a single pass. When mask is null (windows), the shader
@@ -137,7 +137,8 @@ void blurBackground(SP<Render::IFramebuffer> sampleFramebuffer, float radius, in
 // Windows and layers pass the same value four times — see CGlassDecoration::
 // renderPass() and CGlassLayerSurface::compositeAndRestore(); only subsurface
 // item glass (CGlassSubsurfaceState) ever passes unequal corners.
-void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> targetFramebuffer,
+void applyGlassEffect(Render::CRenderContext& ctx,
+                       SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> targetFramebuffer,
                        CBox& rawBox, CBox& transformedBox,
                        float alpha, const std::array<float, 4>& radii, float roundingPower,
                        const Vector2D& paddingRatio, const SResolveContext& resolveContext,

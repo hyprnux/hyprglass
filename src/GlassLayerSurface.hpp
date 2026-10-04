@@ -17,7 +17,7 @@ class CGlassLayerSurface {
     enum class EMaskSource { ALPHA_THRESHOLD, PROTOCOL_REGION, NONE };
 
     // Phase 1 (pre-surface): sample+blur background, redirect currentFB → temp FBO
-    void sampleAndRedirect(PHLMONITOR monitor, float alpha, bool xray);
+    void sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, float alpha, bool xray);
 
     // Resolved once per frame where the pass element is queued. Never for a
     // background or bottom layer: they render before the snapshot is taken.
@@ -27,7 +27,7 @@ class CGlassLayerSurface {
     [[nodiscard]] bool xraySnapshotCovers(PHLMONITOR monitor) const;
 
     // Phase 2 (post-surface): restore currentFB, apply glass masked by temp FBO, blit surface
-    void compositeAndRestore(PHLMONITOR monitor, float alpha, EMaskSource maskSource);
+    void compositeAndRestore(Render::CRenderContext& ctx, PHLMONITOR monitor, float alpha, EMaskSource maskSource);
 
     void damageIfMoved();
 

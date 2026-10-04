@@ -42,13 +42,13 @@ class CGlassSubsurfaceState {
     // Phase 1 (pre-surface): sample+blur background under transformBox, redirect
     // currentFB → temp FBO so the original CSurfacePassElement draw (called by
     // main.cpp's hook between this and compositeAndRestore) lands there instead.
-    void sampleAndRedirect(PHLMONITOR monitor, const CBox& transformBox, float alpha);
+    void sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& transformBox, float alpha);
 
     // Phase 2 (post-surface): restore currentFB, composite glass masked by the
     // protocol region with the temp FBO's content (the item's own foreground) on top.
     // transformedRegion is non-const: CRegion::getExtents() is a non-const method.
-    void compositeAndRestore(PHLMONITOR monitor, const CBox& rawBox, const CBox& transformBox,
-                              CRegion& transformedRegion, float alpha);
+    void compositeAndRestore(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& rawBox,
+                              const CBox& transformBox, CRegion& transformedRegion, float alpha);
 
     [[nodiscard]] bool alive() const { return !m_surface.expired(); }
 

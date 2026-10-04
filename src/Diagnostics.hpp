@@ -111,7 +111,7 @@ enum class EStage : int {
 // already open — never blocks, never nests.
 class CScopedStageTimer {
   public:
-    explicit CScopedStageTimer(EStage stage);
+    explicit CScopedStageTimer(Render::CRenderContext& ctx, EStage stage);
     ~CScopedStageTimer();
 
     CScopedStageTimer(const CScopedStageTimer&)            = delete;

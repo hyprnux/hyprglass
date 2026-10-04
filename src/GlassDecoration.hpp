@@ -16,7 +16,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
 
     [[nodiscard]] SDecorationPositioningInfo getPositioningInfo() override;
     void                                     onPositioningReply(const SDecorationPositioningReply& reply) override;
-    void                                     draw(PHLMONITOR monitor, float const& alpha, const SP<Workspace::CWorkspacePresentable>& presentation) override;
+    void                                     draw(Render::CRenderContext& ctx, PHLMONITOR monitor, float const& alpha, const Render::SWindowRenderPresentation&) override;
     [[nodiscard]] eDecorationType            getDecorationType() override;
     void                                     updateWindow(PHLWINDOW window) override;
     void                                     damageEntire() override;
@@ -25,7 +25,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
     [[nodiscard]] std::string                getDisplayName() override;
 
     [[nodiscard]] PHLWINDOW getOwner();
-    void                    renderPass(PHLMONITOR monitor, const float& alpha, bool xray);
+    void                    renderPass(Render::CRenderContext& ctx, PHLMONITOR monitor, const float& alpha, bool xray);
     void                    onFullscreenStateChanged();
 
     // Content below committed damage in our sample region — resample next frame.
@@ -38,7 +38,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // this frame. Called identically from CGlassPassElement::needsLiveBlur()
     // (draw()-time) and from renderPass() itself — safe to call twice, no GL
     // calls. transformBox is monitor-local physical pixels (see callers).
-    [[nodiscard]] bool wantsBackgroundResample(PHLMONITOR monitor, const CBox& transformBox, bool xray) const;
+    [[nodiscard]] bool wantsBackgroundResample(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& transformBox, bool xray) const;
 
     // Owner test without the shared_ptr copy getOwner() hands out.
     [[nodiscard]] bool  ownsWindow(const PHLWINDOW& window) const { return m_window == window; }
@@ -110,7 +110,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // many duplicate copies happened to render, not on the scene.
     uint64_t m_lastFoldedFrameSerial = 0;
 
-    void               queueGlassPass(float alpha, bool xray);
+    void               queueGlassPass(Render::CRenderContext& ctx, float alpha, bool xray);
     [[nodiscard]] bool isCurrentGlassPass(uint64_t serial, uint32_t index) const {
         return serial == 0 || (serial == m_glassFrameSerial && index == m_glassQueueIndex);
     }
