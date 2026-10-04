@@ -116,6 +116,8 @@ inline constexpr auto LAYERS_NAMESPACE_MASK_THRESHOLDS  = "plugin:hyprglass:laye
 inline constexpr auto LAYERS_NAMESPACE_LIVE_RESAMPLE    = "plugin:hyprglass:layers:namespace_live_resample";
 inline constexpr auto LAYERS_LIVE_RESAMPLE              = "plugin:hyprglass:layers:live_resample";
 inline constexpr auto LAYERS_LIVE_RESAMPLE_FPS          = "plugin:hyprglass:layers:live_resample_fps";
+// Surface alpha at which layer glass reaches full strength; 0 keeps the hard mask.
+inline constexpr auto LAYERS_ALPHA_COVERAGE             = "plugin:hyprglass:layers:alpha_coverage";
 inline constexpr auto LAYERS_FORCE_LIVE_RESAMPLE        = "plugin:hyprglass:layers:force_live_resample";
 inline constexpr auto LAYERS_MASK_MODE                  = "plugin:hyprglass:layers:mask_mode";
 inline constexpr auto LAYERS_NAMESPACE_MASK_MODES       = "plugin:hyprglass:layers:namespace_mask_modes";
@@ -353,6 +355,7 @@ struct SPluginConfig {
     StringConfigPtr       layersNamespaceLiveResample;
     Hyprlang::INT* const* layersLiveResample             = nullptr;
     Hyprlang::INT* const* layersLiveResampleFps          = nullptr;
+    Hyprlang::FLOAT* const* layersAlphaCoverage          = nullptr;
     Hyprlang::INT* const* layersForceLiveResample        = nullptr;
     StringConfigPtr       layersMaskMode;
     StringConfigPtr       layersNamespaceMaskModes;
