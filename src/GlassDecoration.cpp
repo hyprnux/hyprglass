@@ -410,7 +410,7 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
         // the most expensive GPU work (blit + blur passes) entirely.
         Diagnostics::recordWindowCacheHit(monitorId);
     } else {
-        const bool covered = GlassRenderer::sampleRegionCovered(transformBox, source, g_pHyprRenderer->m_renderData.damage);
+        const bool covered = GlassRenderer::sampleRegionCovered(transformBox, source, g_pHyprRenderer->m_renderData.damage, monitor);
 
         if (covered) {
             float blurStrength   = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);

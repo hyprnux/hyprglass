@@ -303,7 +303,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
 
     const CBox sampleBox     = regionSampleBox.value_or(transformBox);
     const bool sampleCovered = !backgroundChanged ||
-                               GlassRenderer::sampleRegionCovered(sampleBox, source, g_pHyprRenderer->m_renderData.damage);
+                               GlassRenderer::sampleRegionCovered(sampleBox, source, g_pHyprRenderer->m_renderData.damage, monitor);
 
     if (!layerSurface->m_mapped) {
         // During fade-out, re-sampling captures stale pixels. Reuse cached sample.
