@@ -419,9 +419,9 @@ std::string formatStatus(eHyprCtlOutputFormat format) {
             return std::format("{{\"enabled\": {}, \"active\": {}, \"reason\": {}}}", status.enabled ? "true" : "false", status.active() ? "true" : "false",
                                status.active() ? std::string("null") : std::format("\"{}\"", status.reason));
         };
-        return std::format("{{\n  \"schema\": {}, \"version\": \"{}\", \"active\": {}, \"shaders\": \"{}\", \"itemProtocol\": {},\n"
+        return std::format("{{\n  \"schema\": {}, \"version\": \"{}\", \"versionCheck\": \"{}\", \"active\": {}, \"shaders\": \"{}\", \"itemProtocol\": {},\n"
                            "  \"features\": {{\n    \"windows\": {},\n    \"layers\": {},\n    \"subsurfaces\": {}\n  }}\n}}\n",
-                           STATUS_SCHEMA, escapeJSONStrings(std::string(PLUGIN_VERSION)), active ? "true" : "false", shaders,
+                           STATUS_SCHEMA, escapeJSONStrings(std::string(PLUGIN_VERSION)), g_pGlobalState->versionCheck, active ? "true" : "false", shaders,
                            protocolActive ? "true" : "false", featureJson(windows), featureJson(layers), featureJson(subsurfaces));
     }
 
@@ -436,6 +436,7 @@ std::string formatStatus(eHyprCtlOutputFormat format) {
     };
 
     std::string out = std::format("hyprglass {}: {}\n", PLUGIN_VERSION, active ? "active" : "inactive");
+    out += std::format("  version check: {}\n", g_pGlobalState->versionCheck);
     out += std::format("  shaders: {}\n", shaders);
     out += std::format("  windows: {}   layers: {}   subsurfaces: {}\n", featureText(windows), featureText(layers), featureText(subsurfaces));
     out += std::format("  hyprglass_item_v1 protocol: {}\n", protocolActive ? "active" : "inactive");

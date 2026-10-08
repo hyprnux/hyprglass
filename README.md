@@ -33,7 +33,7 @@ hyprpm then stays on that branch through `hyprpm update`. Repeat this with the n
 
 ### Pre-built release
 
-Grab `hyprglass.so` from [Releases](https://github.com/hyprnux/hyprglass/releases/latest). Each release targets a specific Hyprland API version — check the release notes to confirm it matches yours.
+Grab `hyprglass.so` from [Releases](https://github.com/hyprnux/hyprglass/releases/latest). Each release targets a specific Hyprland API version — check the release notes to confirm it matches yours. If it doesn't match, hyprglass stays paused instead of crashing Hyprland (see [Troubleshooting](#troubleshooting)).
 
 ```bash
 hyprctl plugin load /path/to/hyprglass.so
@@ -452,6 +452,7 @@ hyprctl -j hyprglass status      # same, as JSON
 
 ```
 hyprglass 0.9.1: active
+  version check: match
   shaders: ready
   windows: on   layers: hook missing   subsurfaces: off
   hyprglass_item_v1 protocol: active
@@ -459,7 +460,7 @@ hyprglass 0.9.1: active
 
 ```json
 {
-  "schema": 1, "version": "0.9.1", "active": true, "shaders": "ready", "itemProtocol": true,
+  "schema": 1, "version": "0.9.1", "versionCheck": "match", "active": true, "shaders": "ready", "itemProtocol": true,
   "features": {
     "windows": {"enabled": true, "active": true, "reason": null},
     "layers": {"enabled": true, "active": false, "reason": "hook_missing"},
@@ -472,12 +473,22 @@ hyprglass 0.9.1: active
 |---|---|
 | `schema` | Raised when a field is removed, renamed or changes meaning. New fields and new `shaders` or `reason` values can appear without a raise: treat any non-null `reason` as inactive. |
 | `version` | Same as `hyprctl plugin list`. |
+| `versionCheck` | `match` (built for this Hyprland), `unknown` (Hyprland or hyprglass was built without a release tag or commit: only Hyprland's libraries were checked) or `skipped` (`HYPRGLASS_SKIP_VERSION_CHECK`). |
 | `active` | `true` when at least one feature is active. |
 | `shaders` | `ready`, `pending` (compiled at the first glass draw) or `failed` (retried at the next draw). |
 | `itemProtocol` | `hyprglass_item_v1` is offered to clients. |
 | `features.*.enabled` | The setting: `enabled`, `layers:enabled`, `subsurfaces:enabled`. |
 | `features.*.active` | The feature draws glass. `windows` is active with `enabled = 0` while a window tagged `hyprglass_enabled` is open. |
 | `features.*.reason` | `null` when active, else `disabled`, `hook_missing` (after a Hyprland update, or another plugin hooked it first: reinstall or report it), `shaders_failed`, or for `subsurfaces`, `window_glass_off` (items only draw on windows that have glass). |
+
+A paused hyprglass (see [Troubleshooting](#troubleshooting)) draws nothing and has no `hyprctl hyprglass` command: `hyprctl hyprglass status` answers `unknown request`. `hyprctl plugin list` (or `hyprctl -j plugin list`) gives the reason as its description, `Paused (<reason>): <message>`, where `<reason>` is `hyprland_version` or `dependencies`:
+
+```
+Plugin hyprglass by Hyprnux:
+	Handle: 7f3a2c000000
+	Version: 0.10.0
+	Description: Paused (hyprland_version): built for Hyprland 0.56, running 0.57
+```
 
 ## Performance diagnostics
 
@@ -529,11 +540,27 @@ hyprglass items
 
 `hyprctl plugin list` shows the hyprglass version you are running: include it in bug reports. A build from a checkout without its tags reports `dev`.
 
-### "Version mismatch" on hyprland-git or a self-built Hyprland
+### "Paused: built for Hyprland 0.56, running 0.57"
 
-The plugin compares its build-time Hyprland ABI signature against the running compositor. The comparison uses the dependency ABI suffix (`_aq_…_hu_…`), not the exact commit hash, so a plugin built against matching headers loads fine on git builds. If it still fails, the reported hashes (shown in the error notification) tell you which dependency versions differ — rebuild the plugin against the headers of the Hyprland you are actually running.
+hyprglass stays loaded but does nothing when the running Hyprland isn't the one it was built for: another release line (0.56 vs 0.57), or another commit when either side is hyprland-git. Rebuild it for the running Hyprland, then reload it:
 
-As a last resort, setting `HYPRGLASS_SKIP_VERSION_CHECK=1` downgrades the failure to a warning. The variable must be present in **Hyprland's own environment**: export it from your session manager (uwsm, greetd, …) or set it early in your Hyprland config via the `env` keyword. This is unsupported — a real ABI mismatch can crash Hyprland.
+```bash
+hyprpm update                                  # hyprpm
+hyprctl plugin unload /path/to/hyprglass.so    # manual build: unload, make, load
+hyprctl plugin load /path/to/hyprglass.so
+```
+
+With a pre-built release, download the one made for your Hyprland. While paused, `plugin:hyprglass:*` lines in a .conf config show up in `hyprctl configerrors`; a Lua config guarded by `if hl.plugin.hyprglass then` is skipped.
+
+A Nix build of hyprland-git reports itself as the release it follows, so a hyprglass built for that release isn't paused there.
+
+### "Paused: built with aquamarine 0.15 -> 0.16"
+
+Same fix: one of Hyprland's libraries changed version since hyprglass was built.
+
+### Skipping the check
+
+`HYPRGLASS_SKIP_VERSION_CHECK=1` loads hyprglass despite the version checks above. It must be in **Hyprland's own environment**: export it from your session manager (uwsm, greetd, …) or set it early in your Hyprland config with the `env` keyword. This is unsupported: a real mismatch can crash Hyprland.
 
 ### Build fails inside Hyprland's own headers ("cannot convert 'PHLLS' … to 'bool' … explicit conversion function was not considered")
 
