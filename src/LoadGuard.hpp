@@ -4,6 +4,7 @@
 
 #include <hyprland/src/plugins/PluginAPI.hpp>
 
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -16,6 +17,7 @@ enum class EPauseReason {
     None,
     HyprlandVersion, // built for another Hyprland release line or commit
     Dependencies,    // same Hyprland, other aquamarine/hyprutils/... versions
+    Duplicate,       // another hyprglass copy is already active
 };
 
 struct SVerdict {
@@ -28,6 +30,10 @@ struct SVerdict {
 // extern "C" and unchanged across Hyprland versions, so they are safe to call
 // from a build made for another Hyprland.
 [[nodiscard]] SVerdict checkCompatibility(HANDLE handle);
+
+// Reads Hyprland's plugin list, whose layout comes from our headers: call it
+// only once checkCompatibility() passed. Empty when no other copy is active.
+[[nodiscard]] std::optional<std::string> otherActiveCopyPath();
 
 // HYPRGLASS_SKIP_VERSION_CHECK, read from Hyprland's own environment.
 [[nodiscard]] bool skipRequested();

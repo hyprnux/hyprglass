@@ -1,6 +1,10 @@
 #include "LoadGuard.hpp"
+#include "Globals.hpp"
+
+#include <hyprland/src/plugins/PluginSystem.hpp>
 
 #include <cstdlib>
+#include <dlfcn.h>
 #include <format>
 
 namespace LoadGuard {
@@ -28,6 +32,22 @@ SVerdict checkCompatibility(HANDLE handle) {
     return verdict;
 }
 
+std::optional<std::string> otherActiveCopyPath() {
+    for (const auto* plugin : g_pPluginSystem->getAllPlugins()) {
+        // The copy being initialised has no name yet; a same-handle entry is
+        // this file loaded through another path (symlink, hardlink).
+        if (plugin->m_name != PLUGIN_NAME)
+            continue;
+        // A paused copy must not keep a working one from loading. Copies older
+        // than this check have no such symbol and are always active.
+        using FInstanceActive     = bool (*)();
+        const auto instanceActive = reinterpret_cast<FInstanceActive>(dlsym(plugin->m_handle, "hyprglass_instance_active"));
+        if (!instanceActive || instanceActive())
+            return plugin->m_path;
+    }
+    return std::nullopt;
+}
+
 bool skipRequested() {
     const char* skip = std::getenv("HYPRGLASS_SKIP_VERSION_CHECK");
     return skip && *skip && std::string_view{skip} != "0";
@@ -37,6 +57,7 @@ std::string_view reasonCode(EPauseReason reason) noexcept {
     switch (reason) {
         case EPauseReason::HyprlandVersion: return "hyprland_version";
         case EPauseReason::Dependencies: return "dependencies";
+        case EPauseReason::Duplicate: return "duplicate";
         case EPauseReason::None: break;
     }
     return "";

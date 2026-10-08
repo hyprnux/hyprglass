@@ -645,6 +645,14 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
 
+// Internal linkage on purpose: never shared with another loaded file.
+static bool s_instanceActive = false;
+
+// Read by a later copy's LoadGuard::otherActiveCopyPath() through dlsym.
+APICALL EXPORT bool hyprglass_instance_active() {
+    return s_instanceActive;
+}
+
 // Returning normally keeps Hyprland from reporting a failed load: the copy
 // stays listed, with the reason as its description. addNotification, not V2:
 // V2 passes Hyprland types inside std::any.
@@ -665,7 +673,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                      CHyprColor{1.0, 0.8, 0.2, 1.0}, 10000);
     }
 
-    PHANDLE = handle;
+    if (const auto otherPath = LoadGuard::otherActiveCopyPath())
+        return pausedDescription(handle, {.reason = LoadGuard::EPauseReason::Duplicate, .message = std::format("already loaded from {}", *otherPath)});
+
+    PHANDLE          = handle;
+    s_instanceActive = true;
 
     g_pGlobalState               = std::make_unique<SGlobalState>();
     g_pGlobalState->versionCheck = LoadGuard::checkResult(verdict);
@@ -835,8 +847,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
-    if (!g_pGlobalState)
+    if (!s_instanceActive || !g_pGlobalState)
         return;
+    s_instanceActive = false;
 
     // Withdraws the global and clears every callback into this plugin before
     // anything else runs, since the helper library itself is never unloaded.
