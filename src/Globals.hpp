@@ -4,6 +4,7 @@
 #include "PluginConfig.hpp"
 #include "ShaderManager.hpp"
 
+#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
@@ -149,6 +150,9 @@ struct SGlobalState {
         }
     } dedupe;
 
+    // Pending re-enable of Hyprland shadows after a config reload (see main.cpp)
+    UP<SEventLoopDoLaterLock> shadowFixLock;
+
     // renderLayer hook
     CFunctionHook* renderLayerHook = nullptr;
 
@@ -165,6 +169,9 @@ inline std::unique_ptr<SGlobalState> g_pGlobalState;
 
 // Decoration registered for this window, or nullptr. Borrowed, never owned.
 CGlassDecoration* glassDecorationFor(const PHLWINDOW& window);
+
+// Turns Hyprland shadows back on if window glass is in use and they are off.
+void scheduleShadowsForWindowGlass();
 
 inline constexpr std::string_view PLUGIN_NAME        = "hyprglass";
 inline constexpr std::string_view PLUGIN_DESCRIPTION = "Apple-style Liquid Glass effect";

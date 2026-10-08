@@ -27,6 +27,7 @@
 #include <hyprland/src/render/pass/SurfacePassElement.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/supplementary/propRefresher/PropRefresher.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 
@@ -641,6 +642,46 @@ static void notifySubsurfaceHookFailure() {
     });
 }
 
+// Window glass samples a background Hyprland only composites while the shadow
+// decoration is in the render pipeline: without it, it reads stale or black content.
+static void ensureShadowsForWindowGlass() {
+    if (!g_pGlobalState)
+        return;
+
+    const auto& config = g_pGlobalState->config;
+    // enabled = 0 with hyprglass_enabled tags is a whitelist: it still needs shadows
+    const bool windowGlassInUse = (config.enabled && **config.enabled) ||
+        std::ranges::any_of(g_pGlobalState->decorations, [](const auto& decoration) {
+            auto* glassDecoration = decoration.get();
+            return glassDecoration && glassDecoration->isGlassEnabled();
+        });
+    if (!windowGlassInUse)
+        return;
+
+    const auto shadowEnabled = Config::mgr()->getConfigValue("decoration:shadow:enabled");
+    if (!shadowEnabled.dataptr || !shadowEnabled.type)
+        return;
+
+    if (*shadowEnabled.type == typeid(Hyprlang::INT)) {
+        if (!**reinterpret_cast<Hyprlang::INT* const*>(shadowEnabled.dataptr))
+            HyprlandAPI::invokeHyprctlCommand("keyword", "decoration:shadow:enabled true");
+    } else if (*shadowEnabled.type == typeid(Config::BOOL)) {
+        // Lua config: set the value the way hl.config() does at runtime. hyprctl
+        // eval would do the same but also clears the list hyprctl configerrors shows.
+        auto* const shadow = *reinterpret_cast<Config::BOOL* const*>(shadowEnabled.dataptr);
+        if (!*shadow) {
+            *shadow = true;
+            Config::Supplementary::refresher()->scheduleRefresh(Config::Supplementary::REFRESH_WINDOW_STATES);
+        }
+    }
+}
+
+// Deferred so the keyword never runs inside a config reload or a render pass
+void scheduleShadowsForWindowGlass() {
+    if (g_pGlobalState && g_pEventLoopManager)
+        g_pGlobalState->shadowFixLock = g_pEventLoopManager->doLaterLock([] { ensureShadowsForWindowGlass(); });
+}
+
 // ── Hook target resolution ───────────────────────────────────────────────────
 
 // Hyprland 0.56.2 symbols. Itanium mangling encodes the full signature, so a
@@ -783,20 +824,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // config values are only final here: Hyprland reloads the config after PLUGIN_INIT returns
         refreshSurfaceObserver();
         notifySubsurfaceHookFailure();
+        // every reload restores the user's value
+        scheduleShadowsForWindowGlass();
     }));
 
 
     registerConfig(PHANDLE);
     initConfigPointers(PHANDLE, g_pGlobalState->config);
     Diagnostics::registerHyprCtlCommand(PHANDLE);
-
-    // Shadows must be enabled for the glass effect to sample the correct background.
-    // Force-enable if the user has disabled them.
-    const auto shadowEnabled = Config::mgr()->getConfigValue("decoration:shadow:enabled");
-    auto* const PSHADOWENABLED = reinterpret_cast<Hyprlang::INT* const*>(shadowEnabled.dataptr);
-    if (PSHADOWENABLED && !**PSHADOWENABLED) {
-        HyprlandAPI::invokeHyprctlCommand("keyword", "decoration:shadow:enabled true");
-    }
 
     for (auto& window : Desktop::viewState()->windows()) {
         if (window->isHidden() || !window->m_isMapped)
@@ -872,6 +907,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 APICALL EXPORT void PLUGIN_EXIT() {
     if (!g_pGlobalState)
         return;
+
+    // a pending callback would run after dlclose
+    g_pGlobalState->shadowFixLock.reset();
 
     // Withdraws the global and clears every callback into this plugin before
     // anything else runs, since the helper library itself is never unloaded.

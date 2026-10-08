@@ -225,6 +225,9 @@ void CGlassDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     const auto enabledResolution = resolveEnabled();
     const bool enabled = enabledResolution == EEnabledResolution::Enabled;
     updateNoBlurProp(enabled);
+    if (enabled && !m_glassWasEnabled)
+        scheduleShadowsForWindowGlass();
+    m_glassWasEnabled = enabled;
     if (!enabled) {
         m_lastSelfSample = 0.0f;
 
