@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <dlfcn.h>
 #include <optional>
 #include <sstream>
 
@@ -640,6 +641,35 @@ static void notifySubsurfaceHookFailure() {
     });
 }
 
+// ── Hook target resolution ───────────────────────────────────────────────────
+
+// Hyprland 0.56.2 symbols. Itanium mangling encodes the full signature, so a
+// match is exactly the overload the hooks were written for.
+namespace HookSymbols {
+    inline constexpr auto RENDER_LAYER =
+        "_ZN6Render13IHyprRenderer11renderLayerEN9Hyprutils6Memory14CSharedPointerIN7Desktop4View13CLayerSurfaceEEENS3_IN7Monitor8CMonitorEEERKNSt6chrono10time_"
+        "pointINSB_3_V212steady_clockENSB_8durationIlSt5ratioILl1ELl1000000000EEEEEEbb";
+    inline constexpr auto RENDER_PASS_ADD = "_ZN6Render11CRenderPass3addEON9Hyprutils6Memory14CUniquePointerI12IPassElementEE";
+}
+
+// dlsym first: findFunctionsByName() runs nm on the Hyprland binary, a fork from
+// the compositor that slows down its startup. The dladdr check, against a
+// function the Hyprland executable defines, rejects a same-named symbol from
+// any other loaded object.
+static void* resolveHyprlandFunction(const char* mangledName, const std::string& fallbackSearch, bool (*accept)(const SFunctionMatch&)) {
+    Dl_info hyprland{};
+    Dl_info symbol{};
+    void*   address = dlsym(RTLD_DEFAULT, mangledName);
+    if (address && dladdr(reinterpret_cast<void*>(&HyprlandAPI::findFunctionsByName), &hyprland) && dladdr(address, &symbol) && symbol.dli_fbase == hyprland.dli_fbase)
+        return address;
+
+    for (const auto& match : HyprlandAPI::findFunctionsByName(PHANDLE, fallbackSearch)) {
+        if (accept(match))
+            return match.address;
+    }
+    return nullptr;
+}
+
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
@@ -750,7 +780,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         parseLayerNamespaceFilters();
         commitPendingLayers(); // merge Lua layer() calls on top of string config
         validateConfig();
-        // config values are only valid here: reloadConfig() is asynchronous
+        // config values are only final here: Hyprland reloads the config after PLUGIN_INIT returns
         refreshSurfaceObserver();
         notifySubsurfaceHookFailure();
     }));
@@ -775,20 +805,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     // Hook renderLayer for layer surface glass support
-    bool renderLayerFound = false;
-    auto renderLayerMatches = HyprlandAPI::findFunctionsByName(PHANDLE, "renderLayer");
-    for (const auto& match : renderLayerMatches) {
-        // Match the overload: Render::IHyprRenderer::renderLayer(PHLLS, PHLMONITOR, steady_tp, bool, bool)
-        if (match.demangled.contains("renderLayer") && match.demangled.contains("LayerSurface")) {
-            renderLayerFound = true;
-            g_pGlobalState->renderLayerHook = HyprlandAPI::createFunctionHook(PHANDLE, match.address, (void*)hkRenderLayer);
-            // createFunctionHook succeeds even when another plugin already owns the
-            // address; only hook() reports that, and m_original then stays null
-            if (g_pGlobalState->renderLayerHook && !g_pGlobalState->renderLayerHook->hook()) {
-                HyprlandAPI::removeFunctionHook(PHANDLE, g_pGlobalState->renderLayerHook);
-                g_pGlobalState->renderLayerHook = nullptr;
-            }
-            break;
+    // Fallback match for the overload Render::IHyprRenderer::renderLayer(PHLLS, PHLMONITOR, steady_tp, bool, bool)
+    void* const renderLayerAddress = resolveHyprlandFunction(HookSymbols::RENDER_LAYER, "renderLayer", [](const SFunctionMatch& match) {
+        return match.demangled.contains("renderLayer") && match.demangled.contains("LayerSurface");
+    });
+    const bool renderLayerFound = renderLayerAddress != nullptr;
+    if (renderLayerFound) {
+        g_pGlobalState->renderLayerHook = HyprlandAPI::createFunctionHook(PHANDLE, renderLayerAddress, (void*)hkRenderLayer);
+        // createFunctionHook succeeds even when another plugin already owns the
+        // address; only hook() reports that, and m_original then stays null
+        if (g_pGlobalState->renderLayerHook && !g_pGlobalState->renderLayerHook->hook()) {
+            HyprlandAPI::removeFunctionHook(PHANDLE, g_pGlobalState->renderLayerHook);
+            g_pGlobalState->renderLayerHook = nullptr;
         }
     }
 
@@ -803,31 +831,29 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     // Hook CRenderPass::add for subsurface item glass support.
-    // findFunctionsByName() greps the MANGLED symbol table (see
+    // The fallback findFunctionsByName() greps the MANGLED symbol table (see
     // HyprlandAPI::findFunctionsByName, PluginAPI.cpp) — Itanium mangling has no
     // "::", so "CRenderPass::add" would never match there (only in the
     // demangled copy it separately keeps for the match's .demangled field).
     // "CRenderPass3add" is the mangled nested-name substring
     // (_ZN6Render11CRenderPass3addE...) and is confirmed unique in the running
     // binary; the demangled double-check below is what actually verifies it.
-    bool renderPassAddFound = false;
-    auto renderPassAddMatches = HyprlandAPI::findFunctionsByName(PHANDLE, "CRenderPass3add");
-    for (const auto& match : renderPassAddMatches) {
-        if (match.demangled.contains("CRenderPass::add") && match.demangled.contains("IPassElement")) {
-            renderPassAddFound = true;
-            g_pGlobalState->renderPassAddHook = HyprlandAPI::createFunctionHook(PHANDLE, match.address, (void*)hkRenderPassAdd);
-            if (g_pGlobalState->renderPassAddHook && !g_pGlobalState->renderPassAddHook->hook()) {
-                HyprlandAPI::removeFunctionHook(PHANDLE, g_pGlobalState->renderPassAddHook);
-                g_pGlobalState->renderPassAddHook = nullptr;
-            }
-            break;
+    void* const renderPassAddAddress = resolveHyprlandFunction(HookSymbols::RENDER_PASS_ADD, "CRenderPass3add", [](const SFunctionMatch& match) {
+        return match.demangled.contains("CRenderPass::add") && match.demangled.contains("IPassElement");
+    });
+    if (renderPassAddAddress) {
+        g_pGlobalState->renderPassAddHook = HyprlandAPI::createFunctionHook(PHANDLE, renderPassAddAddress, (void*)hkRenderPassAdd);
+        if (g_pGlobalState->renderPassAddHook && !g_pGlobalState->renderPassAddHook->hook()) {
+            HyprlandAPI::removeFunctionHook(PHANDLE, g_pGlobalState->renderPassAddHook);
+            g_pGlobalState->renderPassAddHook = nullptr;
         }
     }
 
     // the failure notification waits for the config: see notifySubsurfaceHookFailure()
-    g_pGlobalState->renderPassAddSymbolFound = renderPassAddFound;
+    g_pGlobalState->renderPassAddSymbolFound = renderPassAddAddress != nullptr;
 
-    HyprlandAPI::reloadConfig();
+    // No reloadConfig(): Hyprland reloads the config after every plugin load.
+    // Until then the values parsed so far are committed here.
     initConfigPointers(PHANDLE, g_pGlobalState->config);
     commitPendingPresets();
     parseLayerNamespaceFilters();
