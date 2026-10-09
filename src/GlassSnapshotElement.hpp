@@ -12,9 +12,9 @@ class CGlassSnapshotElement : public IPassElement {
     CGlassSnapshotElement()           = default;
     ~CGlassSnapshotElement() override = default;
 
-    std::vector<UP<IPassElement>> draw() override;
-    [[nodiscard]] bool            needsLiveBlur() override { return false; }
-    [[nodiscard]] bool            needsPrecomputeBlur() override { return false; }
+    std::vector<UP<IPassElement>> draw(Render::CRenderContext& ctx) override;
+    [[nodiscard]] bool            needsLiveBlur(Render::CRenderContext&) override { return false; }
+    [[nodiscard]] bool            needsPrecomputeBlur(Render::CRenderContext&) override { return false; }
 
     [[nodiscard]] const char*      passName() override { return "CGlassSnapshotElement"; }
     [[nodiscard]] ePassElementType type() override { return EK_CUSTOM; }
@@ -29,10 +29,10 @@ void requestXraySnapshot(PHLMONITOR monitor);
 
 // RENDER_BEGIN: advances the rendered monitor's frame count, drops a snapshot
 // nothing asked for lately and cuts this frame's damage from its valid region.
-void beginXraySnapshotFrame();
+void beginXraySnapshotFrame(Render::CRenderContext& ctx);
 
 // RENDER_PRE_WINDOWS: sizes the snapshot to the frame and queues the copy.
-void queueXraySnapshot();
+void queueXraySnapshot(Render::CRenderContext& ctx);
 
 // The monitor's snapshot when it matches `frame` and holds every pixel
 // sampleBackground() reads for `box` (framebuffer pixels), else nullptr.

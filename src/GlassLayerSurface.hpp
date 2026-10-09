@@ -24,7 +24,7 @@ class CGlassLayerSurface {
     [[nodiscard]] bool resolveXray() const;
 
     // The x-ray snapshot holds everything this layer would sample.
-    [[nodiscard]] bool xraySnapshotCovers(PHLMONITOR monitor) const;
+    [[nodiscard]] bool xraySnapshotCovers(Render::CRenderContext& ctx, PHLMONITOR monitor) const;
 
     // Phase 2 (post-surface): restore currentFB, apply glass masked by temp FBO, blit surface
     void compositeAndRestore(Render::CRenderContext& ctx, PHLMONITOR monitor, float alpha, EMaskSource maskSource);

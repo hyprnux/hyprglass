@@ -96,7 +96,7 @@ bool CGlassPassElement::needsLiveBlur(Render::CRenderContext& ctx) {
     // An x-ray snapshot that already covers the box is sampled instead of the
     // frame. One that does not needs this hint: it un-occludes the background
     // under opaque windows so the snapshot copy picks it up this frame.
-    return !(m_data.xray && xraySnapshotCovering(monitor, g_pHyprRenderer->m_renderData.currentFB, transformBox));
+    return !(m_data.xray && xraySnapshotCovering(monitor, ctx.m_data.currentFB, transformBox));
 }
 
 bool CGlassPassElement::needsPrecomputeBlur(Render::CRenderContext&) {

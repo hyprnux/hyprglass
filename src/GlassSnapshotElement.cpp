@@ -25,7 +25,7 @@ static bool matchesFrame(const SP<Render::IFramebuffer>& snapshot, const SP<Rend
     return snapshot && frame && snapshot->m_size == frame->m_size && snapshot->m_drmFormat == frame->m_drmFormat;
 }
 
-// m_renderData.damage is in the monitor's transformed space, the framebuffer in
+// The render damage is in the monitor's transformed space, the framebuffer in
 // the output's native orientation: rotate it like Hyprland's own frame damage.
 static CRegion framebufferDamage(const PHLMONITOR& monitor, const CRegion& damage) {
     CRegion region = damage.copy();
@@ -48,8 +48,8 @@ void requestXraySnapshot(PHLMONITOR monitor) {
     snapshot.lastRequestFrame = snapshot.monitorFrames;
 }
 
-void beginXraySnapshotFrame() {
-    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
+void beginXraySnapshotFrame(Render::CRenderContext& ctx) {
+    const auto monitor = ctx.m_data.pMonitor.lock();
     if (!g_pGlobalState || !monitor)
         return;
 
@@ -70,18 +70,17 @@ void beginXraySnapshotFrame() {
     // Fires for every frame, solitary and mirror frames included, so a frame
     // that never reaches PRE_WINDOWS still leaves its damage invalid.
     if (!snapshot.valid.empty())
-        snapshot.valid.subtract(framebufferDamage(monitor, g_pHyprRenderer->m_renderData.damage));
+        snapshot.valid.subtract(framebufferDamage(monitor, ctx.m_data.damage));
 }
 
-void queueXraySnapshot() {
+void queueXraySnapshot(Render::CRenderContext& ctx) {
     // Not the monitor's own frame: an overview plugin emits this stage while
     // rendering its own framebuffer, which has the windows in it already.
-    if (!g_pGlobalState || RenderGuards::isForeignRender() || g_pHyprRenderer->m_bRenderingSnapshot ||
-        g_pHyprRenderer->m_renderData.projectionType != Render::RPT_MONITOR)
+    if (!g_pGlobalState || RenderGuards::isForeignRender(ctx) || ctx.m_renderingSnapshot || ctx.m_data.projectionType != Render::RPT_MONITOR)
         return;
 
-    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
-    const auto source  = g_pHyprRenderer->m_renderData.currentFB;
+    const auto monitor = ctx.m_data.pMonitor.lock();
+    const auto source  = ctx.m_data.currentFB;
     if (!monitor || !source || source->m_size.x <= 0 || source->m_size.y <= 0)
         return;
 
@@ -105,7 +104,7 @@ void queueXraySnapshot() {
             return;
     }
 
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassSnapshotElement>());
+    g_pHyprRenderer->currentPass(ctx).add(makeUnique<CGlassSnapshotElement>());
 }
 
 SP<Render::IFramebuffer> xraySnapshotCovering(PHLMONITOR monitor, const SP<Render::IFramebuffer>& frame, const CBox& box) {
@@ -123,12 +122,12 @@ SP<Render::IFramebuffer> xraySnapshotCovering(PHLMONITOR monitor, const SP<Rende
     return snapshot.framebuffer;
 }
 
-std::vector<UP<IPassElement>> CGlassSnapshotElement::draw() {
+std::vector<UP<IPassElement>> CGlassSnapshotElement::draw(Render::CRenderContext& ctx) {
     if (!g_pGlobalState)
         return {};
 
-    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
-    const auto source  = g_pHyprRenderer->m_renderData.currentFB;
+    const auto monitor = ctx.m_data.pMonitor.lock();
+    const auto source  = ctx.m_data.currentFB;
     if (!monitor || !source)
         return {};
 
@@ -147,7 +146,7 @@ std::vector<UP<IPassElement>> CGlassSnapshotElement::draw() {
 
     // Only this element's damage holds freshly drawn background: the work buffer
     // is cleared elsewhere, and occluded damage was never drawn.
-    CRegion copied = framebufferDamage(monitor, g_pHyprRenderer->m_renderData.damage);
+    CRegion copied = framebufferDamage(monitor, ctx.m_data.damage);
     copied.intersect(CBox{{}, source->m_size});
     if (copied.empty())
         return {};

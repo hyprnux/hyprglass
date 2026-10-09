@@ -73,7 +73,7 @@ bool CGlassLayerSurface::resolveXray() const {
     return resolvePresetInt(ctx, &SPresetValues::xray, &SOverridableConfig::xray, GlobalDefaults::XRAY) > 0;
 }
 
-bool CGlassLayerSurface::xraySnapshotCovers(PHLMONITOR monitor) const {
+bool CGlassLayerSurface::xraySnapshotCovers(Render::CRenderContext& ctx, PHLMONITOR monitor) const {
     const auto layerSurface = m_layerSurface.lock();
     if (!layerSurface || !monitor)
         return false;
@@ -84,7 +84,7 @@ bool CGlassLayerSurface::xraySnapshotCovers(PHLMONITOR monitor) const {
 
     // The full layer box: sampleAndRedirect() samples it or the blur region
     // inside it, so covering it covers both.
-    return static_cast<bool>(xraySnapshotCovering(monitor, g_pHyprRenderer->m_renderData.currentFB, transformedLayerBox(*layerBox, monitor)));
+    return static_cast<bool>(xraySnapshotCovering(monitor, ctx.m_data.currentFB, transformedLayerBox(*layerBox, monitor)));
 }
 
 std::string CGlassLayerSurface::resolvePresetName() const {

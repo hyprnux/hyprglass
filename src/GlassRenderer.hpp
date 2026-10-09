@@ -109,7 +109,7 @@ struct SSampleMap {
 // True when every pixel sampleBackground() would read for `box` lies inside
 // `damage`. The only coverage predicate. `box` is in post-transform framebuffer
 // pixels, not the logical space boundingBox() pads in; `damage` is in render
-// space like m_renderData.damage, and is transformed by `monitor` to match
+// space like the render context's damage, and is transformed by `monitor` to match
 // (a null monitor for a region already in framebuffer space, like the x-ray one).
 [[nodiscard]] bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage,
                                        const PHLMONITOR& monitor);

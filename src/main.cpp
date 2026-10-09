@@ -248,11 +248,13 @@ static void onRenderStage(const Event::SRenderStageEvent event) {
             // swept here instead — once per monitor frame, far cheaper than
             // the CRenderPass::add hook this state is populated from.
             std::erase_if(g_pGlobalState->subsurfaceGlass, [](const auto& pair) { return pair.first.expired(); });
-            beginXraySnapshotFrame();
+            if (event.context)
+                beginXraySnapshotFrame(event.context->get());
             break;
         case RENDER_PRE_WINDOWS:
             g_pGlobalState->dedupe.resetEpoch();
-            queueXraySnapshot();
+            if (event.context)
+                queueXraySnapshot(event.context->get());
             break;
         case RENDER_PRE_WINDOW:
           assert(event.context);
@@ -697,12 +699,12 @@ void scheduleShadowsForWindowGlass() {
 
 // ── Hook target resolution ───────────────────────────────────────────────────
 
-// Hyprland 0.56.2 symbols. Itanium mangling encodes the full signature, so a
-// match is exactly the overload the hooks were written for.
+// hyprland-git symbols (0.56.0-275-g5e04ae1f9). Itanium mangling encodes the
+// full signature, so a match is exactly the overload the hooks were written for.
 namespace HookSymbols {
     inline constexpr auto RENDER_LAYER =
-        "_ZN6Render13IHyprRenderer11renderLayerEN9Hyprutils6Memory14CSharedPointerIN7Desktop4View13CLayerSurfaceEEENS3_IN7Monitor8CMonitorEEERKNSt6chrono10time_"
-        "pointINSB_3_V212steady_clockENSB_8durationIlSt5ratioILl1ELl1000000000EEEEEEbb";
+        "_ZN6Render13IHyprRenderer11renderLayerERNS_14CRenderContextEN9Hyprutils6Memory14CSharedPointerIN7Desktop4View13CLayerSurfaceEEENS5_IN7Monitor8CMonitorEEERKNSt6chrono10time_"
+        "pointINSD_3_V212steady_clockENSD_8durationIlSt5ratioILl1ELl1000000000EEEEEEbb";
     inline constexpr auto RENDER_PASS_ADD = "_ZN6Render11CRenderPass3addEON9Hyprutils6Memory14CUniquePointerI12IPassElementEE";
 }
 
@@ -855,9 +857,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     // Hook renderLayer for layer surface glass support
-    // Fallback match for the overload Render::IHyprRenderer::renderLayer(PHLLS, PHLMONITOR, steady_tp, bool, bool)
+    // Fallback match for the overload Render::IHyprRenderer::renderLayer(CRenderContext&, PHLLS, PHLMONITOR, steady_tp, bool, bool)
     void* const renderLayerAddress = resolveHyprlandFunction(HookSymbols::RENDER_LAYER, "renderLayer", [](const SFunctionMatch& match) {
-        return match.demangled.contains("renderLayer") && match.demangled.contains("LayerSurface");
+        return match.demangled.contains("renderLayer") && match.demangled.contains("CRenderContext") && match.demangled.contains("LayerSurface");
     });
     const bool renderLayerFound = renderLayerAddress != nullptr;
     if (renderLayerFound) {
