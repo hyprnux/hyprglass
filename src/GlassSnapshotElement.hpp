@@ -5,7 +5,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 
 // X-ray: copies the frame's damaged region into the monitor's snapshot
-// framebuffer. Added at RENDER_PRE_WINDOWS, so the snapshot holds the desktop
+// framebuffer. Queued at RENDER_PRE_WINDOWS, so the snapshot holds the desktop
 // with no window in it.
 class CGlassSnapshotElement : public IPassElement {
   public:
@@ -15,18 +15,25 @@ class CGlassSnapshotElement : public IPassElement {
     std::vector<UP<IPassElement>> draw() override;
     [[nodiscard]] bool            needsLiveBlur() override { return false; }
     [[nodiscard]] bool            needsPrecomputeBlur() override { return false; }
-    [[nodiscard]] bool            undiscardable() override { return true; }
 
     [[nodiscard]] const char*      passName() override { return "CGlassSnapshotElement"; }
     [[nodiscard]] ePassElementType type() override { return EK_CUSTOM; }
 };
 
-// Marks the monitor's snapshot as still wanted, creating it on the first ask.
-void                     requestXraySnapshot(PHLMONITOR monitor);
+// False under render:xp_mode, which draws no wallpaper or bottom layers to show.
+[[nodiscard]] bool xrayHasBackground();
 
-// Allocates or resizes the snapshot framebuffer to match the frame's, before
-// the pass runs. False when there is nothing to copy into.
-bool                     prepareXraySnapshot(PHLMONITOR monitor);
+// Marks the monitor's snapshot as still wanted this frame, creating it on the
+// first ask. Called while the pass is built, never from inside it.
+void requestXraySnapshot(PHLMONITOR monitor);
 
-// The monitor's snapshot if it is filled and matches this frame, else nullptr.
-SP<Render::IFramebuffer> xraySnapshotFor(PHLMONITOR monitor, const SP<Render::IFramebuffer>& frame);
+// RENDER_BEGIN: advances the rendered monitor's frame count, drops a snapshot
+// nothing asked for lately and cuts this frame's damage from its valid region.
+void beginXraySnapshotFrame();
+
+// RENDER_PRE_WINDOWS: sizes the snapshot to the frame and queues the copy.
+void queueXraySnapshot();
+
+// The monitor's snapshot when it matches `frame` and holds every pixel
+// sampleBackground() reads for `box` (framebuffer pixels), else nullptr.
+[[nodiscard]] SP<Render::IFramebuffer> xraySnapshotCovering(PHLMONITOR monitor, const SP<Render::IFramebuffer>& frame, const CBox& box);

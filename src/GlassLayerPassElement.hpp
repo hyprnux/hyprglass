@@ -12,6 +12,8 @@ class CGlassLayerPassElement : public IPassElement {
     struct SGlassLayerPassData {
         std::shared_ptr<CGlassLayerSurface> layerState;
         float                               alpha = 1.0f;
+        // Resolved once where the element is queued: needsLiveBlur() and draw() must agree on it.
+        bool                                xray  = false;
     };
 
     explicit CGlassLayerPassElement(const SGlassLayerPassData& data);

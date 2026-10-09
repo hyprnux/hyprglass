@@ -19,11 +19,6 @@ inline constexpr std::string_view TAG_PRESET_PREFIX = "hyprglass_preset_";
 inline constexpr std::string_view TAG_ENABLED  = "hyprglass_enabled";
 inline constexpr std::string_view TAG_DISABLED = "hyprglass_disabled";
 
-// Per-window x-ray, overriding the global `xray`. Like Hyprland's `xray off`
-// window rule, off wins when both are present.
-inline constexpr std::string_view TAG_XRAY   = "hyprglass_xray";
-inline constexpr std::string_view TAG_NOXRAY = "hyprglass_noxray";
-
 // Hyprland stores dynamic tags (`tagwindow` dispatcher, dynamic window rules)
 // with a trailing '*'. CTagKeeper::isTagged() normalizes this for exact lookups,
 // but code iterating getTags() or registering preset names must strip it itself
@@ -70,7 +65,6 @@ inline constexpr auto DEFAULT_PRESET      = "plugin:hyprglass:default_preset";
 inline constexpr auto MANAGE_WINDOW_BLUR  = "plugin:hyprglass:manage_window_blur";
 inline constexpr auto SKIP_OPAQUE_WINDOWS = "plugin:hyprglass:skip_opaque_windows";
 inline constexpr auto BLUR_FOLD           = "plugin:hyprglass:blur_fold";
-inline constexpr auto XRAY                = "plugin:hyprglass:xray";
 
 // Performance diagnostics
 inline constexpr auto DEBUG_MODE   = "plugin:hyprglass:debug:mode";
@@ -110,6 +104,7 @@ inline constexpr auto BEVEL_TINT            = "plugin:hyprglass:bevel_tint";
 inline constexpr auto BEVEL_ANGLE           = "plugin:hyprglass:bevel_angle";
 inline constexpr auto BEVEL_SHADOW          = "plugin:hyprglass:bevel_shadow";
 inline constexpr auto SELF_SAMPLE           = "plugin:hyprglass:self_sample";
+inline constexpr auto XRAY                  = "plugin:hyprglass:xray";
 
 // Layer surface support
 inline constexpr auto LAYERS_ENABLED            = "plugin:hyprglass:layers:enabled";
@@ -125,7 +120,6 @@ inline constexpr auto LAYERS_FORCE_LIVE_RESAMPLE        = "plugin:hyprglass:laye
 inline constexpr auto LAYERS_MASK_MODE                  = "plugin:hyprglass:layers:mask_mode";
 inline constexpr auto LAYERS_NAMESPACE_MASK_MODES       = "plugin:hyprglass:layers:namespace_mask_modes";
 inline constexpr auto LAYERS_MANAGE_BLUR                = "plugin:hyprglass:layers:manage_blur";
-inline constexpr auto LAYERS_NAMESPACE_XRAY             = "plugin:hyprglass:layers:namespace_xray";
 
 // Subsurface item glass support (see GlassSubsurfaceState).
 // Preset resolution: subsurfaces:preset -> layers:preset (if set) -> window default preset.
@@ -173,6 +167,7 @@ inline constexpr auto DARK_BEVEL_TINT           = "plugin:hyprglass:dark:bevel_t
 inline constexpr auto DARK_BEVEL_ANGLE          = "plugin:hyprglass:dark:bevel_angle";
 inline constexpr auto DARK_BEVEL_SHADOW         = "plugin:hyprglass:dark:bevel_shadow";
 inline constexpr auto DARK_SELF_SAMPLE          = "plugin:hyprglass:dark:self_sample";
+inline constexpr auto DARK_XRAY                 = "plugin:hyprglass:dark:xray";
 
 // Overridable — light theme overrides
 inline constexpr auto LIGHT_BLUR_STRENGTH        = "plugin:hyprglass:light:blur_strength";
@@ -204,6 +199,7 @@ inline constexpr auto LIGHT_BEVEL_TINT           = "plugin:hyprglass:light:bevel
 inline constexpr auto LIGHT_BEVEL_ANGLE          = "plugin:hyprglass:light:bevel_angle";
 inline constexpr auto LIGHT_BEVEL_SHADOW         = "plugin:hyprglass:light:bevel_shadow";
 inline constexpr auto LIGHT_SELF_SAMPLE          = "plugin:hyprglass:light:self_sample";
+inline constexpr auto LIGHT_XRAY                 = "plugin:hyprglass:light:xray";
 
 } // namespace ConfigKeys
 
@@ -238,6 +234,7 @@ struct SOverridableConfig {
     Hyprlang::FLOAT* const* bevelAngle          = nullptr;
     Hyprlang::FLOAT* const* bevelShadow         = nullptr;
     Hyprlang::FLOAT* const* selfSample          = nullptr;
+    Hyprlang::INT* const*   xray                = nullptr;
 };
 
 // Plain values for a user-defined preset layer (all sentinel = not set → inherit)
@@ -271,6 +268,7 @@ struct SPresetValues {
     float   bevelAngle         = static_cast<float>(SENTINEL_FLOAT);
     float   bevelShadow        = static_cast<float>(SENTINEL_FLOAT);
     float   selfSample         = static_cast<float>(SENTINEL_FLOAT);
+    int64_t xray               = SENTINEL_INT;
 };
 
 struct SCustomPreset {
@@ -303,6 +301,26 @@ inline std::string_view readStringConfig(const StringConfigPtr& ptr) {
     return {};
 }
 
+// A Hyprland key whose storage is a bool under the Lua config and an INTEGER
+// under legacy .conf: read through its reported type, never as a bare int64.
+struct IntegerConfigPtr {
+    void* const*          dataptr = nullptr;
+    const std::type_info* type    = nullptr;
+};
+
+inline Config::INTEGER readIntegerConfig(const IntegerConfigPtr& ptr) {
+    if (!ptr.dataptr || !ptr.type)
+        return 0;
+
+    if (*ptr.type == typeid(bool))
+        return **reinterpret_cast<const bool* const*>(ptr.dataptr);
+
+    if (*ptr.type == typeid(Config::INTEGER))
+        return **reinterpret_cast<const Config::INTEGER* const*>(ptr.dataptr);
+
+    return 0;
+}
+
 struct SPluginConfig {
     Hyprlang::INT* const* enabled           = nullptr;
     // Glass replaces Hyprland's blur for glassed windows: when set, the plugin
@@ -316,9 +334,9 @@ struct SPluginConfig {
     // Derives a smaller blur pass count from the requested radius (GlassRenderer::
     // foldBlurPasses) instead of always running blur_iterations passes at full radius.
     Hyprlang::INT* const* blurFold = nullptr;
-    // Hide the windows under the glass: it is sampled from the frame as it was
-    // before any window was drawn. Tags and per-layer settings override it.
-    Hyprlang::INT* const* xray              = nullptr;
+    // Hyprland's render:xp_mode: no wallpaper or bottom layers are drawn, so
+    // there is nothing for x-ray to show.
+    IntegerConfigPtr      xpMode;
     StringConfigPtr      defaultTheme;
     StringConfigPtr      defaultPreset;
 
@@ -339,7 +357,6 @@ struct SPluginConfig {
     StringConfigPtr       layersMaskMode;
     StringConfigPtr       layersNamespaceMaskModes;
     Hyprlang::INT* const* layersManageBlur               = nullptr;
-    StringConfigPtr       layersNamespaceXray;
 
     Hyprlang::INT* const*   subsurfacesEnabled = nullptr;
     StringConfigPtr         subsurfacesPreset;

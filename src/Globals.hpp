@@ -4,7 +4,6 @@
 #include "PluginConfig.hpp"
 #include "ShaderManager.hpp"
 
-#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
@@ -150,25 +149,20 @@ struct SGlobalState {
         }
     } dedupe;
 
-    // X-ray: per-monitor snapshot of the frame taken before any window is
-    // drawn, refreshed in the damaged region by CGlassSnapshotElement.
+    // X-ray: per-monitor copy of the frame as it stood before any window was
+    // drawn, kept by CGlassSnapshotElement (see GlassSnapshotElement.hpp).
     struct SBackgroundSnapshot {
-        SP<Render::IFramebuffer>  fb;
-        // frameSerial of the last sample and of the last element added. The
-        // snapshot is refreshed while something sampled it within IDLE_FRAMES
-        // and dropped after that.
-        uint64_t                  requestedFrame = 0;
-        uint64_t                  addedFrame     = 0;
-        // A full-monitor damage frame has been copied since the framebuffer
-        // was (re)allocated; until then samplers use the live frame.
-        bool                      complete       = false;
-        // Cancels itself if the plugin unloads before the redraw runs.
-        UP<SEventLoopDoLaterLock> pendingFullRedraw;
+        SP<Render::IFramebuffer> framebuffer;
+        // Framebuffer pixels that still hold this monitor's current background:
+        // cut by each frame's damage at RENDER_BEGIN, refilled by each copy.
+        CRegion valid;
+        // Counted per monitor, so frames rendered on another monitor never age
+        // this one's snapshot.
+        uint64_t monitorFrames    = 0;
+        uint64_t lastRequestFrame = 0;
+        uint64_t queuedFrame      = 0;
     };
     std::unordered_map<MONITORID, SBackgroundSnapshot> backgroundSnapshots;
-
-    // Per-namespace x-ray for layer surfaces (hg.layer xray / layers:namespace_xray)
-    std::unordered_map<std::string, bool> layerNamespaceXray;
 
     // renderLayer hook
     CFunctionHook* renderLayerHook = nullptr;

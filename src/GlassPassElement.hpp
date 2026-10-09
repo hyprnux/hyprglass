@@ -16,6 +16,8 @@ class CGlassPassElement : public IPassElement {
         // Stamped in CGlassDecoration::queueGlassPass. 0 = pass we do not de-duplicate.
         uint64_t             frameSerial = 0;
         uint32_t             queueIndex  = 0;
+        // Resolved once in draw(): needsLiveBlur() and renderPass() must agree on it.
+        bool                 xray        = false;
     };
 
     explicit CGlassPassElement(const SGlassPassData& data);

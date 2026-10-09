@@ -15,7 +15,7 @@ std::vector<UP<IPassElement>> CGlassLayerPassElement::draw() {
         return {};
 
     if (m_data.layerState && m_data.layerState->getLayerSurface())
-        m_data.layerState->sampleAndRedirect(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.alpha);
+        m_data.layerState->sampleAndRedirect(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.alpha, m_data.xray);
 
     return {};
 }
@@ -55,9 +55,10 @@ bool CGlassLayerPassElement::needsLiveBlur() {
     if (!paddedLogicalBox().has_value())
         return false;
 
-    // X-ray samples the snapshot, never the live frame, so there is nothing
-    // under this layer that has to be re-rendered for us this frame.
-    return !m_data.layerState || !m_data.layerState->xraySnapshot(g_pHyprRenderer->m_renderData.pMonitor.lock());
+    // An x-ray snapshot that already covers the layer is sampled instead of the
+    // frame. One that does not needs this hint: it un-occludes the background
+    // under opaque windows so the snapshot copy picks it up this frame.
+    return !(m_data.xray && m_data.layerState->xraySnapshotCovers(g_pHyprRenderer->m_renderData.pMonitor.lock()));
 }
 
 bool CGlassLayerPassElement::needsPrecomputeBlur() {

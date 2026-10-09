@@ -5,10 +5,10 @@
 #include "GlassLayerPassElement.hpp"
 #include "GlassLayerSurface.hpp"
 #include "GlassRenderer.hpp"
+#include "GlassSnapshotElement.hpp"
 #include "GlassSubsurfaceCompositeElement.hpp"
 #include "GlassSubsurfacePassElement.hpp"
 #include "GlassSubsurfaceState.hpp"
-#include "GlassSnapshotElement.hpp"
 #include "Globals.hpp"
 #include "ItemHints.hpp"
 #include "PluginConfig.hpp"
@@ -51,13 +51,14 @@ static void clearLayerGlassOnClose(PHLLS layerSurface) {
         g_pHyprRenderer->damageMonitor(monitor);
 }
 
-static void clearSubsurfaceFramebufferForMonitor(PHLMONITOR monitor) {
+static void onMonitorGone(PHLMONITOR monitor) {
     if (!g_pGlobalState || !monitor)
         return;
 
-    // The monitor is gone, so its temp FBO can never be reused: drop it
-    // instead of keeping a dead entry around indefinitely.
+    // The monitor is gone, so its framebuffers can never be reused: drop them
+    // instead of keeping dead entries around indefinitely.
     g_pGlobalState->subsurfaceTempFramebuffers.erase(monitor->m_id);
+    g_pGlobalState->backgroundSnapshots.erase(monitor->m_id);
 }
 
 static void onNewWindow(PHLWINDOW window) {
@@ -225,43 +226,6 @@ static void endWindowRender() {
     dedupe.sink.clear();
 }
 
-// X-ray: between the bottom layers and the first window, queue the copy of
-// this frame's damage into the monitor's snapshot. Nothing exists until a
-// window or layer asks for it, and the snapshot is dropped once nothing has
-// asked for IDLE_FRAMES.
-static void queueXraySnapshot() {
-    // Not the monitor's own frame: an overview plugin emits this stage while
-    // rendering its own framebuffer, which has the windows in it already.
-    if (RenderGuards::isForeignRender() || g_pHyprRenderer->m_bRenderingSnapshot || g_pHyprRenderer->m_renderData.projectionType != Render::RPT_MONITOR)
-        return;
-
-    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
-    if (!monitor)
-        return;
-
-    const auto it = g_pGlobalState->backgroundSnapshots.find(monitor->m_id);
-    if (it == g_pGlobalState->backgroundSnapshots.end())
-        return;
-    auto& snapshot = it->second;
-
-    const uint64_t serial = g_pGlobalState->frameSerial;
-
-    constexpr uint64_t IDLE_FRAMES = 600; // ~10 s at 60 Hz without a sampler: let it go
-    if (serial > snapshot.requestedFrame + IDLE_FRAMES) {
-        g_pGlobalState->backgroundSnapshots.erase(it);
-        return;
-    }
-
-    if (snapshot.addedFrame == serial) // this frame's pass already has the element
-        return;
-    snapshot.addedFrame = serial;
-
-    if (!prepareXraySnapshot(monitor))
-        return;
-
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassSnapshotElement>());
-}
-
 static void onRenderStage(eRenderStage stage) {
     if (!g_pGlobalState)
         return;
@@ -279,6 +243,7 @@ static void onRenderStage(eRenderStage stage) {
             // swept here instead — once per monitor frame, far cheaper than
             // the CRenderPass::add hook this state is populated from.
             std::erase_if(g_pGlobalState->subsurfaceGlass, [](const auto& pair) { return pair.first.expired(); });
+            beginXraySnapshotFrame();
             break;
         case RENDER_PRE_WINDOWS:
             g_pGlobalState->dedupe.resetEpoch();
@@ -364,14 +329,6 @@ static void parseLayerNamespaceFilters() {
     parseKeyValuePairs(config.layersNamespaceMaskModes, '=', [&](const std::string& ns, const std::string& val) {
         if (auto mode = parseLayerMaskMode(val))
             g_pGlobalState->layerNamespaceMaskModes[ns] = *mode;
-    });
-
-    g_pGlobalState->layerNamespaceXray.clear();
-    parseKeyValuePairs(config.layersNamespaceXray, '=', [&](const std::string& ns, const std::string& val) {
-        if (val == "1" || val == "true" || val == "on" || val == "yes")
-            g_pGlobalState->layerNamespaceXray.emplace(ns, true);
-        else if (val == "0" || val == "false" || val == "off" || val == "no")
-            g_pGlobalState->layerNamespaceXray.emplace(ns, false);
     });
 }
 
@@ -500,8 +457,14 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PH
             return;
         }
 
+        // Requested here, while the pass is built: a pre-surface element that
+        // simplify() discards still keeps the snapshot alive.
+        const bool xray = it->second->resolveXray();
+        if (xray)
+            requestXraySnapshot(monitor);
+
         // Pre-surface: sample+blur background, redirect currentFB → temp FBO
-        CGlassLayerPassElement::SGlassLayerPassData preData{it->second, alpha};
+        CGlassLayerPassElement::SGlassLayerPassData preData{it->second, alpha, xray};
         g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassLayerPassElement>(preData));
 
         const bool manageBlur = config.layersManageBlur && **config.layersManageBlur;
@@ -734,8 +697,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.layer.closed.listen([&](PHLLS layerSurface) { clearLayerGlassOnClose(layerSurface); }));
 
-    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.destroyMon.listen(
-        [&](PHLMONITOR monitor) { clearSubsurfaceFramebufferForMonitor(monitor); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) { onMonitorGone(monitor); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.destroyMon.listen([](PHLMONITOR monitor) { onMonitorGone(monitor); }));
 
     // Z-order / visibility changes invalidate layer glass caches on the affected monitor only.
     // Per-monitor to avoid triggering re-samples on idle monitors (feedback loop).
@@ -784,14 +747,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         [&](PHLWORKSPACE ws) {
             if (ws) if (auto mon = ws->m_monitor.lock()) g_pGlobalState->bumpSceneGeneration(mon);
         }));
-
-    auto dropMonitorSnapshot = [](PHLMONITOR m) {
-        if (!g_pGlobalState || !m)
-            return;
-        g_pGlobalState->backgroundSnapshots.erase(m->m_id);
-    };
-    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.removed.listen([=](PHLMONITOR m) { dropMonitorSnapshot(m); }));
-    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.destroyMon.listen([=](PHLMONITOR m) { dropMonitorSnapshot(m); }));
 
     // Clear pending presets/layers before config re-parse, commit after
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.preReload.listen([&]() {

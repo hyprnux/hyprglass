@@ -17,7 +17,14 @@ class CGlassLayerSurface {
     enum class EMaskSource { ALPHA_THRESHOLD, PROTOCOL_REGION, NONE };
 
     // Phase 1 (pre-surface): sample+blur background, redirect currentFB → temp FBO
-    void sampleAndRedirect(PHLMONITOR monitor, float alpha);
+    void sampleAndRedirect(PHLMONITOR monitor, float alpha, bool xray);
+
+    // Resolved once per frame where the pass element is queued. Never for a
+    // background or bottom layer: they render before the snapshot is taken.
+    [[nodiscard]] bool resolveXray() const;
+
+    // The x-ray snapshot holds everything this layer would sample.
+    [[nodiscard]] bool xraySnapshotCovers(PHLMONITOR monitor) const;
 
     // Phase 2 (post-surface): restore currentFB, apply glass masked by temp FBO, blit surface
     void compositeAndRestore(PHLMONITOR monitor, float alpha, EMaskSource maskSource);
@@ -69,8 +76,8 @@ class CGlassLayerSurface {
 
     void damageSampleRegion();
 
-    // The cached sample came from the x-ray snapshot: switching x-ray on or
-    // off, or filling the snapshot in, must not reuse a sample of the other.
+    // The cached sample came from the x-ray snapshot: switching x-ray on or off
+    // must not reuse a sample of the other.
     bool m_cachedFromSnapshot = false;
 
     // Track last position/size to detect movement and expand damage
@@ -114,11 +121,4 @@ class CGlassLayerSurface {
     [[nodiscard]] bool           resolveThemeIsDark() const;
     [[nodiscard]] std::string    resolvePresetName() const;
     [[nodiscard]] ELayerMaskMode resolveMaskMode() const;
-    [[nodiscard]] bool           resolveXray() const;
-
-  public:
-    // The x-ray snapshot to sample this frame, or nullptr when x-ray is off for
-    // this layer or the snapshot is not filled in yet. Public: sampling it
-    // instead of the frame is also what lets the pass element skip live blur.
-    [[nodiscard]] SP<Render::IFramebuffer> xraySnapshot(PHLMONITOR monitor) const;
 };

@@ -138,27 +138,13 @@ bool CGlassDecoration::resolveThemeIsDark() const {
 }
 
 bool CGlassDecoration::resolveXray() const {
-    try {
-        const auto window = m_window.lock();
-        if (window && window->m_ruleApplicator) {
-            const auto& tags = window->m_ruleApplicator->m_tagKeeper;
-            // As with Hyprland's `xray off` window rule, off wins over the global.
-            if (tags.isTagged(std::string(TAG_NOXRAY)))
-                return false;
-            if (tags.isTagged(std::string(TAG_XRAY)))
-                return true;
-        }
-    } catch (...) {}
+    if (!xrayHasBackground())
+        return false;
 
-    const auto& config = g_pGlobalState->config;
-    return config.xray && **config.xray;
-}
-
-SP<Render::IFramebuffer> CGlassDecoration::xraySnapshot(PHLMONITOR monitor) const {
-    if (!resolveXray())
-        return nullptr;
-
-    return xraySnapshotFor(monitor, g_pHyprRenderer->m_renderData.currentFB);
+    const bool            isDark = resolveThemeIsDark();
+    const std::string     preset = resolvePresetName();
+    const SResolveContext ctx    = {preset, isDark, g_pGlobalState->config, g_pGlobalState->customPresets};
+    return resolvePresetInt(ctx, &SPresetValues::xray, &SOverridableConfig::xray, GlobalDefaults::XRAY) > 0;
 }
 
 std::string CGlassDecoration::resolvePresetName() const {
@@ -190,13 +176,14 @@ SDecorationPositioningInfo CGlassDecoration::getPositioningInfo() {
 
 void CGlassDecoration::onPositioningReply(const SDecorationPositioningReply& reply) {}
 
-void CGlassDecoration::queueGlassPass(float alpha) {
+void CGlassDecoration::queueGlassPass(float alpha, bool xray) {
     // A duplicate copy is redirected into the dedupe sink and dropped whole: it
     // needs no glass, and stamping it would leave the surviving element stale.
     if (g_pGlobalState->dedupe.guard)
         return;
 
     CGlassPassElement::SGlassPassData data{m_self, alpha};
+    data.xray = xray;
 
     // Only the real monitor pass is de-duplicated: snapshots, screencopy and
     // overview framebuffers render the window once, out of frame order.
@@ -266,11 +253,11 @@ void CGlassDecoration::draw(PHLMONITOR monitor, float const& alpha) {
     if (RenderGuards::isForeignRender())
         return;
 
-    // X-ray: ask for next frame's snapshot while we still sample this one's.
-    if (resolveXray())
+    const bool xray = resolveXray();
+    if (xray)
         requestXraySnapshot(monitor);
 
-    queueGlassPass(alpha);
+    queueGlassPass(alpha, xray);
 
     // A slide translates the scene under us without any geometry change, and
     // Hyprland's per-tick window damage carries none of our sampling padding.
@@ -304,7 +291,7 @@ void CGlassDecoration::markBackgroundDirty() {
     damageEntire();
 }
 
-bool CGlassDecoration::wantsBackgroundResample(PHLMONITOR monitor, const CBox& transformBox) const {
+bool CGlassDecoration::wantsBackgroundResample(PHLMONITOR monitor, const CBox& transformBox, bool xray) const {
     const auto& config = g_pGlobalState->config;
     if (!config.windowsBackgroundCache || !**config.windowsBackgroundCache)
         return true; // kill switch off: exact pre-cache behavior, no other state consulted
@@ -323,8 +310,8 @@ bool CGlassDecoration::wantsBackgroundResample(PHLMONITOR monitor, const CBox& t
     if (m_backgroundDirty)
         return true; // markBackgroundDirty() mark not yet escalated into a scene-generation bump
 
-    if (m_cachedFromSnapshot != static_cast<bool>(xraySnapshot(monitor)))
-        return true; // x-ray toggled, or its snapshot just became usable
+    if (m_cachedFromSnapshot != xray)
+        return true; // x-ray switched on or off
 
     const auto window = m_window.lock();
     if (!window)
@@ -368,7 +355,7 @@ bool CGlassDecoration::wantsBackgroundResample(PHLMONITOR monitor, const CBox& t
     return false;
 }
 
-void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
+void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha, bool xray) {
     // Belt and braces: draw() already refuses to queue a pass element for a foreign
     // render, but a caller that reaches renderPass() during one anyway must not sample
     // the foreign framebuffer into this decoration's persistent background cache.
@@ -388,10 +375,6 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
     const auto source = g_pHyprRenderer->m_renderData.currentFB;
     if (!source)
         return;
-
-    // Until the snapshot is filled in, x-ray falls back to the live frame.
-    const auto snapshot     = xraySnapshot(monitor);
-    const auto sampleSource = snapshot ? snapshot : source;
 
     auto optBox = WindowGeometry::computeWindowBox(window, monitor);
     if (!optBox)
@@ -441,20 +424,21 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
 
     const MONITORID monitorId = monitor ? monitor->m_id : -1; // -1 mirrors Hyprland's own MONITOR_INVALID
 
-    if (!wantsBackgroundResample(monitor, transformBox)) {
+    if (!wantsBackgroundResample(monitor, transformBox, xray)) {
         // Background unchanged since the last real sample — reuse it, skip
         // the most expensive GPU work (blit + blur passes) entirely.
         Diagnostics::recordWindowCacheHit(monitorId);
     } else {
-        // The snapshot holds the background everywhere, so x-ray needs no
-        // damage under the window to sample cleanly.
-        const bool covered = snapshot || GlassRenderer::sampleRegionCovered(transformBox, source, g_pHyprRenderer->m_renderData.damage);
+        // X-ray never samples the live frame: it holds the windows it hides.
+        const auto snapshot = xray ? xraySnapshotCovering(monitor, source, transformBox) : nullptr;
+        const bool covered  = xray ? static_cast<bool>(snapshot) :
+                                     GlassRenderer::sampleRegionCovered(transformBox, source, g_pHyprRenderer->m_renderData.damage);
 
         if (covered) {
             float blurStrength   = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
             int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-            GlassRenderer::sampleBackground(m_sampleFramebuffer, sampleSource, transformBox, m_samplePaddingRatio, downscale);
+            GlassRenderer::sampleBackground(m_sampleFramebuffer, xray ? snapshot : source, transformBox, m_samplePaddingRatio, downscale);
 
             // Only here, on a real (non-cached) sample: blending onto a cache-hit
             // frame would double-composite our own content over an already-blurred FBO.
@@ -474,22 +458,27 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
             GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source);
 
             m_hasCachedSample       = true;
-            m_cachedFromSnapshot    = static_cast<bool>(snapshot);
+            m_cachedFromSnapshot    = xray;
             m_lastSceneGeneration   = g_pGlobalState->getSceneGeneration(monitor);
             m_lastGenerationMonitor = monitorId;
             m_backgroundDirty       = false;
             Diagnostics::recordWindowCacheMiss(monitorId);
-        } else if (m_hasCachedSample) {
+        } else if (m_hasCachedSample && (!xray || m_cachedFromSnapshot)) {
             // Not enough of the padded box is damaged yet to safely re-sample
-            // (would pick up stale pixels outside this frame's damage).
-            // Force it into next frame's damage and draw the stale cache for
-            // now — a future pass scissors the draw to what's actually damaged.
+            // (would pick up stale pixels outside this frame's damage), or not
+            // yet in the x-ray snapshot. Force it into next frame's damage and
+            // draw the stale cache for now — a future pass scissors the draw
+            // to what's actually damaged.
             damageEntire();
             Diagnostics::recordWindowDeferredResample(monitorId);
+            if (xray)
+                Diagnostics::recordXrayDeferredResample(monitorId);
         } else {
-            // No cache yet and not enough damage to sample cleanly: nothing
-            // valid to draw this frame.
+            // No cache yet (or only a live one under x-ray) and not enough
+            // damage to sample cleanly: nothing valid to draw this frame.
             damageEntire();
+            if (xray)
+                Diagnostics::recordXrayDeferredResample(monitorId);
             return;
         }
     }
