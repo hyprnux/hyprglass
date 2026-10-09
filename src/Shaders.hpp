@@ -23,7 +23,7 @@ precision highp float;
  * 3. Edge raw-texture blend for vivid color pickup
  * 4. Subtle center dome lens magnification
  * 5. Frosted tint (brightness boost + desaturation)
- * 6. Configurable color tint overlay
+ * 6. Configurable color tint overlay, then frosted grain
  * 7. Bevel (thin lit line at the edge)
  * 8. Fresnel edge glow (white or tinted by the background)
  * 9. Specular highlight (top)
@@ -37,7 +37,7 @@ uniform vec4 radii;            // per-corner radius: top-left, top-right, bottom
 uniform vec2 uvPadding;
 
 uniform float refractionStrength;
-uniform float noise;
+uniform float noiseStrength;
 uniform float chromaticAberration;
 uniform float fresnelStrength;
 uniform float specularStrength;
@@ -120,8 +120,9 @@ vec4 sampleBlurred(vec2 wuv) {
     return texture(tex, clamp(tuv, 0.001, 0.999));
 }
 
-float hash(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * 1689.1984);
+// hash12 from "Hash without Sine" (Dave Hoskins), tuned for integer pixel coordinates
+float pixelHash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
     p3 += dot(p3, p3.yzx + 33.33);
     return fract((p3.x + p3.y) * p3.z);
 }
@@ -386,18 +387,6 @@ void main() {
     }
 
     // ========================================
-    // FROSTED NOISE FINISH
-    // Fine, stable grain helps a blurred background read as frosted rather
-    // than as a perfectly smooth color wash. Use the same hash and noise
-    // amplitude as Hyprland's blur finish pass.
-    // ========================================
-    if (noise > 0.001) {
-        float noiseHash = hash(v_texcoord);
-        float noiseAmount = noiseHash - 0.5;
-        color += noiseAmount * noise;
-    }
-
-    // ========================================
     // FROSTED TINT (per-theme tone mapping)
     // ========================================
     float blurredLum = dot(color, vec3(0.2126, 0.7152, 0.0722));
@@ -429,6 +418,17 @@ void main() {
     // ========================================
     color = mix(color, tintColor, tintAlpha);
 
+    // grain-free copy for the rim tints, so the grain does not speckle their hue
+    vec3 tintSource = color;
+
+    // ========================================
+    // FROSTED GRAIN
+    // Hashed on box-local pixels so the grain moves with the glass and keeps
+    // its size on any window; after the tint so the tint does not fade it.
+    // ========================================
+    if (noiseStrength > 0.001)
+        color += (pixelHash(floor(uv * fullSize)) - 0.5) * noiseStrength * 0.1;
+
     // ========================================
     // BEVEL — thin lit line hugging the edge, brightest on the side facing the light
     // ========================================
@@ -444,13 +444,15 @@ void main() {
         vec3 bevelLight = vec3(1.0);
         if (bevelColorAlpha > 0.001) bevelLight = mix(vec3(1.0), bevelColor, bevelColorAlpha);   // a dark colour gives a dark line
         if (bevelTint > 0.001) {
-            float maxC = max(max(color.r, color.g), color.b);
-            bevelLight = mix(bevelLight, maxC > 0.001 ? color / maxC : vec3(1.0), bevelTint);
+            float maxC = max(max(tintSource.r, tintSource.g), tintSource.b);
+            bevelLight = mix(bevelLight, maxC > 0.001 ? tintSource / maxC : vec3(1.0), bevelTint);
         }
 
-        color = mix(color, bevelLight, ring * facing * bevelStrength);
-        if (bevelShadow > 0.001)
-            color = mix(color, vec3(0.0), ring * (1.0 - facing) * bevelShadow);
+        // the fresnel tint below reads the bevelled colour, so bevel the copy too
+        float bevelLit = ring * facing * bevelStrength;
+        float bevelDark = bevelShadow > 0.001 ? ring * (1.0 - facing) * bevelShadow : 0.0;
+        color = mix(mix(color, bevelLight, bevelLit), vec3(0.0), bevelDark);
+        tintSource = mix(mix(tintSource, bevelLight, bevelLit), vec3(0.0), bevelDark);
     }
 
     // ========================================
@@ -462,8 +464,8 @@ void main() {
         if (fresnelColorAlpha > 0.001) fresnelLight = mix(vec3(1.0), fresnelColor, fresnelColorAlpha);   // chosen colour, then the tint below
         if (fresnelTint > 0.001) {
             // rim light in the background's own hue, at full brightness so the gain matches white
-            float maxC = max(max(color.r, color.g), color.b);
-            fresnelLight = mix(fresnelLight, maxC > 0.001 ? color / maxC : vec3(1.0), fresnelTint);
+            float maxC = max(max(tintSource.r, tintSource.g), tintSource.b);
+            fresnelLight = mix(fresnelLight, maxC > 0.001 ? tintSource / maxC : vec3(1.0), fresnelTint);
         }
         color += fresnelLight * fresnel;
     }

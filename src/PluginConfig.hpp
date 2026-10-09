@@ -77,7 +77,7 @@ inline constexpr auto PRESET_KEYWORD = "preset";
 // Overridable — global level
 inline constexpr auto BLUR_STRENGTH        = "plugin:hyprglass:blur_strength";
 inline constexpr auto BLUR_ITERATIONS      = "plugin:hyprglass:blur_iterations";
-inline constexpr auto NOISE                = "plugin:hyprglass:noise";
+inline constexpr auto NOISE_STRENGTH       = "plugin:hyprglass:noise_strength";
 inline constexpr auto REFRACTION_STRENGTH  = "plugin:hyprglass:refraction_strength";
 inline constexpr auto CHROMATIC_ABERRATION = "plugin:hyprglass:chromatic_aberration";
 inline constexpr auto FRESNEL_STRENGTH     = "plugin:hyprglass:fresnel_strength";
@@ -141,7 +141,7 @@ inline constexpr auto WINDOWS_LIVE_RESAMPLE_FPS = "plugin:hyprglass:windows:live
 // Overridable — dark theme overrides
 inline constexpr auto DARK_BLUR_STRENGTH        = "plugin:hyprglass:dark:blur_strength";
 inline constexpr auto DARK_BLUR_ITERATIONS      = "plugin:hyprglass:dark:blur_iterations";
-inline constexpr auto DARK_NOISE                = "plugin:hyprglass:dark:noise";
+inline constexpr auto DARK_NOISE_STRENGTH       = "plugin:hyprglass:dark:noise_strength";
 inline constexpr auto DARK_REFRACTION_STRENGTH  = "plugin:hyprglass:dark:refraction_strength";
 inline constexpr auto DARK_CHROMATIC_ABERRATION = "plugin:hyprglass:dark:chromatic_aberration";
 inline constexpr auto DARK_FRESNEL_STRENGTH     = "plugin:hyprglass:dark:fresnel_strength";
@@ -174,7 +174,7 @@ inline constexpr auto DARK_XRAY                 = "plugin:hyprglass:dark:xray";
 // Overridable — light theme overrides
 inline constexpr auto LIGHT_BLUR_STRENGTH        = "plugin:hyprglass:light:blur_strength";
 inline constexpr auto LIGHT_BLUR_ITERATIONS      = "plugin:hyprglass:light:blur_iterations";
-inline constexpr auto LIGHT_NOISE                = "plugin:hyprglass:light:noise";
+inline constexpr auto LIGHT_NOISE_STRENGTH       = "plugin:hyprglass:light:noise_strength";
 inline constexpr auto LIGHT_REFRACTION_STRENGTH  = "plugin:hyprglass:light:refraction_strength";
 inline constexpr auto LIGHT_CHROMATIC_ABERRATION = "plugin:hyprglass:light:chromatic_aberration";
 inline constexpr auto LIGHT_FRESNEL_STRENGTH     = "plugin:hyprglass:light:fresnel_strength";
@@ -210,7 +210,7 @@ inline constexpr auto LIGHT_XRAY                 = "plugin:hyprglass:light:xray"
 struct SOverridableConfig {
     Hyprlang::FLOAT* const* blurStrength        = nullptr;
     Hyprlang::INT* const*   blurIterations      = nullptr;
-    Hyprlang::FLOAT* const* noise               = nullptr;
+    Hyprlang::FLOAT* const* noiseStrength       = nullptr;
     Hyprlang::FLOAT* const* refractionStrength  = nullptr;
     Hyprlang::FLOAT* const* chromaticAberration = nullptr;
     Hyprlang::FLOAT* const* fresnelStrength     = nullptr;
@@ -245,7 +245,7 @@ struct SOverridableConfig {
 struct SPresetValues {
     float   blurStrength       = static_cast<float>(SENTINEL_FLOAT);
     int64_t blurIterations     = SENTINEL_INT;
-    float   noise              = static_cast<float>(SENTINEL_FLOAT);
+    float   noiseStrength      = static_cast<float>(SENTINEL_FLOAT);
     float   refractionStrength = static_cast<float>(SENTINEL_FLOAT);
     float   chromaticAberration = static_cast<float>(SENTINEL_FLOAT);
     float   fresnelStrength    = static_cast<float>(SENTINEL_FLOAT);

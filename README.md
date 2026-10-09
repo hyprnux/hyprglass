@@ -159,7 +159,7 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 |---|---|---|---|---|---|
 | `blur_strength` | float | `2.0` | — | — | Blur radius scale (`value * 12.0` px) |
 | `blur_iterations` | int | `3` | — | — | Gaussian blur passes (1-5) |
-| `noise` | float | `0.0` | — | — | Fine frosted-glass grain; `0` disables noise |
+| `noise_strength` | float | `0.0` | — | — | Frosted grain over the glass, see [Frosted grain](#frosted-grain) (0.0-1.0) |
 | `refraction_strength` | float | `0.6` | — | — | Edge refraction intensity (0.0-1.0) |
 | `refraction_flow` | float | `0.0` | — | — | Where the edge distortion pulls: 0 toward the window center, 1 along the edges (0.0-1.0) |
 | `refraction_spread` | float | `1.0` | — | — | How deep the distortion reaches: 1 across the whole window, 0 only a rim with a flat center (0.0-1.0) |
@@ -254,6 +254,30 @@ layers:namespace_presets = waybar:pane
 - Subsurface item glass ignores it
 
 **Cost:** one monitor-sized framebuffer per monitor showing x-ray glass (twice that with HDR), freed once the monitor has drawn 600 frames with no x-ray glass on it (about 10 s of activity at 60 Hz).
+
+#### Frosted grain
+
+`noise_strength` adds a fine, still grain to the glass so the blur reads as frosted glass: `0` none, `1` strong. `0.12` is about as strong as Hyprland's default `decoration:blur:noise`.
+
+**On the fly:**
+```bash
+hyprctl keyword plugin:hyprglass:noise_strength 0.3
+```
+
+**Lua:**
+```lua
+hg.config({ noise_strength = 0.3, light = { noise_strength = 0.15 } })
+hg.preset("frosted", { inherits = "subtle", noise_strength = 0.5 })
+```
+
+**Legacy .conf:**
+```ini
+noise_strength = 0.3
+light:noise_strength = 0.15
+preset = name:frosted, inherits:subtle, noise_strength:0.5
+```
+
+- The built-in `clear` preset turns the grain off, as it does the blur
 
 ### Layer surfaces
 
