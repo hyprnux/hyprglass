@@ -334,9 +334,9 @@ static void parseLayerNamespaceFilters() {
             g_pGlobalState->layerNamespaceMaskModes[ns] = *mode;
     });
 
-    g_pGlobalState->layerNamespaceAlphaCoverages.clear();
-    parseKeyValuePairs(config.layersNamespaceAlphaCoverages, '=', [&](const std::string& ns, const std::string& val) {
-        try { g_pGlobalState->layerNamespaceAlphaCoverages.emplace(ns, std::stof(val)); } catch (...) {}
+    g_pGlobalState->layerNamespaceMaskFeathers.clear();
+    parseKeyValuePairs(config.layersNamespaceMaskFeathers, '=', [&](const std::string& ns, const std::string& val) {
+        try { g_pGlobalState->layerNamespaceMaskFeathers.emplace(ns, std::stof(val)); } catch (...) {}
     });
 }
 

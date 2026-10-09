@@ -68,14 +68,14 @@ struct SGlobalState {
     std::unordered_set<std::string> layerNamespaceExclude;
     // Per-namespace preset overrides (namespace → preset name)
     std::unordered_map<std::string, std::string> layerNamespacePresets;
-    // Per-namespace mask alpha threshold (namespace → threshold, default 0.001)
+    // Per-namespace mask alpha threshold (namespace → threshold, overrides layers:mask_threshold)
     std::unordered_map<std::string, float> layerNamespaceMaskThresholds;
     // Per-namespace live resample override (namespace → enabled)
     std::unordered_map<std::string, bool> layerNamespaceLiveResample;
     // Per-namespace mask mode override (namespace → mode)
     std::unordered_map<std::string, ELayerMaskMode> layerNamespaceMaskModes;
     // Per-namespace mask_feather override (namespace → feather)
-    std::unordered_map<std::string, float> layerNamespaceAlphaCoverages;
+    std::unordered_map<std::string, float> layerNamespaceMaskFeathers;
 
     // Per-monitor generation counter, incremented when the scene behind layers
     // changes on that monitor. Layer surfaces compare to their cached value to

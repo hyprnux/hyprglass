@@ -505,7 +505,8 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
 
     switch (maskSource) {
         case EMaskSource::ALPHA_THRESHOLD: {
-            float maskThreshold = 0.001f;
+            const auto& cfg     = g_pGlobalState->config;
+            float maskThreshold = cfg.layersMaskThreshold ? static_cast<float>(**cfg.layersMaskThreshold) : 0.001f;
             auto threshIt = g_pGlobalState->layerNamespaceMaskThresholds.find(layerSurface->m_namespace);
             if (threshIt != g_pGlobalState->layerNamespaceMaskThresholds.end())
                 maskThreshold = threshIt->second;
@@ -517,10 +518,9 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
             maskInfo.alphaThreshold = maskThreshold * std::clamp(alpha, 0.0f, 1.0f);
 
             // Region mode leaves coverage at 0: the app's region alone decides where glass goes.
-            const auto& cfg = g_pGlobalState->config;
-            float coverage  = cfg.layersAlphaCoverage ? static_cast<float>(**cfg.layersAlphaCoverage) : 0.0f;
-            auto coverageIt = g_pGlobalState->layerNamespaceAlphaCoverages.find(layerSurface->m_namespace);
-            if (coverageIt != g_pGlobalState->layerNamespaceAlphaCoverages.end())
+            float coverage  = cfg.layersMaskFeather ? static_cast<float>(**cfg.layersMaskFeather) : 0.0f;
+            auto coverageIt = g_pGlobalState->layerNamespaceMaskFeathers.find(layerSurface->m_namespace);
+            if (coverageIt != g_pGlobalState->layerNamespaceMaskFeathers.end())
                 coverage = coverageIt->second;
             // Capped so full-alpha content still gets full-strength glass.
             coverage          = std::clamp(coverage, 0.0f, std::max(0.0f, 1.0f - maskThreshold));

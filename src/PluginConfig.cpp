@@ -71,6 +71,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_EXCLUDE_NAMESPACES, Config::STRING{});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_PRESET, Config::STRING{});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_PRESETS, Config::STRING{});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LAYERS_MASK_THRESHOLD, Config::FLOAT{0.001});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_THRESHOLDS, Config::STRING{});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_LIVE_RESAMPLE, Config::STRING{});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE, Config::INTEGER{1});
@@ -279,6 +280,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.layersExcludeNamespaces = getStringPtr(handle, ConfigKeys::LAYERS_EXCLUDE_NAMESPACES);
     config.layersPreset            = getStringPtr(handle, ConfigKeys::LAYERS_PRESET);
     config.layersNamespacePresets         = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_PRESETS);
+    config.layersMaskThreshold           = getStaticPtr<Hyprlang::FLOAT>(handle, ConfigKeys::LAYERS_MASK_THRESHOLD);
     config.layersNamespaceMaskThresholds = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_THRESHOLDS);
     config.layersNamespaceLiveResample = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_LIVE_RESAMPLE);
     config.layersLiveResample      = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE);
@@ -286,8 +288,8 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.layersForceLiveResample = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_FORCE_LIVE_RESAMPLE);
     config.layersMaskMode           = getStringPtr(handle, ConfigKeys::LAYERS_MASK_MODE);
     config.layersNamespaceMaskModes = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_MODES);
-    config.layersAlphaCoverage           = getStaticPtr<Hyprlang::FLOAT>(handle, ConfigKeys::LAYERS_MASK_FEATHER);
-    config.layersNamespaceAlphaCoverages = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_FEATHERS);
+    config.layersMaskFeather           = getStaticPtr<Hyprlang::FLOAT>(handle, ConfigKeys::LAYERS_MASK_FEATHER);
+    config.layersNamespaceMaskFeathers = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_FEATHERS);
     config.layersManageBlur         = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_MANAGE_BLUR);
 
     config.subsurfacesEnabled = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::SUBSURFACES_ENABLED);
@@ -814,7 +816,7 @@ void commitPendingLayers() {
             if (entry.maskThreshold >= 0.0f)
                 g_pGlobalState->layerNamespaceMaskThresholds[entry.ns] = entry.maskThreshold;
             if (entry.maskFeather >= 0.0f)
-                g_pGlobalState->layerNamespaceAlphaCoverages[entry.ns] = entry.maskFeather;
+                g_pGlobalState->layerNamespaceMaskFeathers[entry.ns] = entry.maskFeather;
             if (entry.liveResample >= 0)
                 g_pGlobalState->layerNamespaceLiveResample[entry.ns] = entry.liveResample != 0;
             if (entry.maskMode)

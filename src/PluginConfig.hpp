@@ -112,6 +112,7 @@ inline constexpr auto LAYERS_NAMESPACES         = "plugin:hyprglass:layers:names
 inline constexpr auto LAYERS_EXCLUDE_NAMESPACES = "plugin:hyprglass:layers:exclude_namespaces";
 inline constexpr auto LAYERS_PRESET             = "plugin:hyprglass:layers:preset";
 inline constexpr auto LAYERS_NAMESPACE_PRESETS          = "plugin:hyprglass:layers:namespace_presets";
+inline constexpr auto LAYERS_MASK_THRESHOLD             = "plugin:hyprglass:layers:mask_threshold";
 inline constexpr auto LAYERS_NAMESPACE_MASK_THRESHOLDS  = "plugin:hyprglass:layers:namespace_mask_thresholds";
 inline constexpr auto LAYERS_NAMESPACE_LIVE_RESAMPLE    = "plugin:hyprglass:layers:namespace_live_resample";
 inline constexpr auto LAYERS_LIVE_RESAMPLE              = "plugin:hyprglass:layers:live_resample";
@@ -352,6 +353,7 @@ struct SPluginConfig {
     StringConfigPtr       layersExcludeNamespaces;
     StringConfigPtr       layersPreset;
     StringConfigPtr       layersNamespacePresets;
+    Hyprlang::FLOAT* const* layersMaskThreshold          = nullptr;
     StringConfigPtr       layersNamespaceMaskThresholds;
     StringConfigPtr       layersNamespaceLiveResample;
     Hyprlang::INT* const* layersLiveResample             = nullptr;
@@ -359,8 +361,8 @@ struct SPluginConfig {
     Hyprlang::INT* const* layersForceLiveResample        = nullptr;
     StringConfigPtr       layersMaskMode;
     StringConfigPtr       layersNamespaceMaskModes;
-    Hyprlang::FLOAT* const* layersAlphaCoverage          = nullptr;
-    StringConfigPtr       layersNamespaceAlphaCoverages;
+    Hyprlang::FLOAT* const* layersMaskFeather            = nullptr;
+    StringConfigPtr       layersNamespaceMaskFeathers;
     Hyprlang::INT* const* layersManageBlur               = nullptr;
 
     Hyprlang::INT* const*   subsurfacesEnabled = nullptr;

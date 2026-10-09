@@ -264,7 +264,7 @@ Where the glass goes on a layer:
 
 `mask_mode` forces one behaviour: `auto` (default), `region` (only where the app requests blur; other layers get no glass) or `alpha` (visible content only).
 
-**Caveat:** Layer shadows count as visible content. Use `mask_threshold` to set an alpha cutoff higher than your shadow opacity.
+**Caveat:** Layer shadows count as visible content. Use `mask_threshold` to set an alpha cutoff higher than your shadow opacity. Set it once for every layer with `layers:mask_threshold`; a per-layer value wins.
 
 **Soft edges:** `mask_feather` fades the glass in over that much alpha above `mask_threshold`, so antialiased rounded corners blend instead of stepping. Content fainter than `mask_threshold + mask_feather` then gets lighter glass: keep `0` (default) for near-transparent bars. Only applies where glass follows visible content, not to the region an app requests.
 
@@ -272,6 +272,7 @@ Where the glass goes on a layer:
 
 ```lua
 hg.config({ layers = { enabled = true } })
+-- hg.config({ layers = { mask_threshold = 0.05 } })  -- cutoff for every layer (hides shadows fainter than 5%)
 
 -- Each call whitelists the namespace and optionally configures it
 hg.layer("waybar", { preset = "subtle", mask_threshold = 0.05, live_resample = false })
@@ -285,7 +286,7 @@ hg.layer("debug-panel", { exclude = true })
 | Field | Type | Description |
 |---|---|---|
 | `preset` | string | Preset override for this layer |
-| `mask_threshold` | float | Alpha threshold (pixels below this are not glassed). Default `0.001` |
+| `mask_threshold` | float | Per-layer override of `layers:mask_threshold` |
 | `live_resample` | bool | Per-layer override of `layers:live_resample` |
 | `mask_mode` | string | `"auto"`, `"region"` or `"alpha"`. See `layers:mask_mode` |
 | `mask_feather` | float | Per-layer override of `layers:mask_feather` |
@@ -300,6 +301,7 @@ hg.layer("debug-panel", { exclude = true })
 | `layers:exclude_namespaces` | string | `""` | Comma-separated namespace blacklist (priority over whitelist) |
 | `layers:preset` | string | `""` | Preset override for all layers |
 | `layers:namespace_presets` | string | `""` | Per-namespace preset (`ns:preset` pairs, comma-separated) |
+| `layers:mask_threshold` | float | `0.001` | Alpha threshold for all layers: pixels below it get no glass. Per-namespace values win |
 | `layers:namespace_mask_thresholds` | string | `""` | Per-namespace alpha threshold (`ns=value` pairs, comma-separated) |
 | `layers:namespace_live_resample` | string | `""` | Per-namespace live resample override (`ns=0/1` pairs, comma-separated) |
 | `layers:live_resample` | bool | `true` (`1` in .conf) | Re-render layer glass when content behind it changes (e.g. a playing video). GPU cost scales with background activity; static scenes stay free. Overridable per layer |
