@@ -31,6 +31,7 @@ bool CShaderManager::compileGlassShader() {
     const auto program = glassShader->program();
 
     glassUniforms.refractionStrength  = glGetUniformLocation(program, "refractionStrength");
+    glassUniforms.noiseStrength       = glGetUniformLocation(program, "noiseStrength");
     glassUniforms.chromaticAberration = glGetUniformLocation(program, "chromaticAberration");
     glassUniforms.fresnelStrength     = glGetUniformLocation(program, "fresnelStrength");
     glassUniforms.specularStrength    = glGetUniformLocation(program, "specularStrength");
