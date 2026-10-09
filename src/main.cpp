@@ -10,6 +10,7 @@
 #include "GlassSubsurfaceState.hpp"
 #include "Globals.hpp"
 #include "ItemHints.hpp"
+#include "LoadGuard.hpp"
 #include "PluginConfig.hpp"
 #include "RenderGuards.hpp"
 #include "SubsurfaceGeometry.hpp"
@@ -644,40 +645,42 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
 
+// Internal linkage on purpose: never shared with another loaded file.
+static bool s_instanceActive = false;
+
+// Read by a later copy's LoadGuard::otherActiveCopyPath() through dlsym.
+APICALL EXPORT bool hyprglass_instance_active() {
+    return s_instanceActive;
+}
+
+// Returning normally keeps Hyprland from reporting a failed load: the copy
+// stays listed, with the reason as its description. addNotification, not V2:
+// V2 passes Hyprland types inside std::any.
+static PLUGIN_DESCRIPTION_INFO pausedDescription(HANDLE handle, const LoadGuard::SVerdict& verdict) {
+    HyprlandAPI::addNotification(handle, std::format("[{}] Paused: {}", PLUGIN_NAME, verdict.message), CHyprColor{1.0, 0.8, 0.2, 1.0}, 10000);
+    return {std::string(PLUGIN_NAME), std::format("Paused ({}): {}", LoadGuard::reasonCode(verdict.reason), verdict.message), std::string(PLUGIN_AUTHOR),
+            std::string(PLUGIN_VERSION)};
+}
+
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
-    PHANDLE = handle;
-
-    const std::string HASH        = __hyprland_api_get_hash();
-    const std::string CLIENT_HASH = __hyprland_api_get_client_hash();
-
-    // Only compare the ABI suffix (e.g. "_aq_0.12_hu_0.13_hg_0.5_hc_0.1_hlg_0.6"),
-    // not the leading commit hash. The commit hash changes with every git commit
-    // but the ABI components determine actual binary compatibility.
-    auto abiSuffix = [](const std::string& hash) -> std::string_view {
-        auto pos = hash.find("_aq_");
-        return pos != std::string::npos ? std::string_view{hash}.substr(pos) : std::string_view{hash};
-    };
-
-    if (abiSuffix(HASH) != abiSuffix(CLIENT_HASH)) {
-        // Last-resort escape hatch for exotic setups: HYPRGLASS_SKIP_VERSION_CHECK
-        // (set in Hyprland's own environment) downgrades the hard failure to a
-        // warning. Unsupported — a real ABI mismatch can crash Hyprland.
-        const char* skipEnv  = std::getenv("HYPRGLASS_SKIP_VERSION_CHECK");
-        const bool  skip     = skipEnv && *skipEnv && std::string_view{skipEnv} != "0";
-        if (!skip) {
-            HyprlandAPI::addNotification(PHANDLE,
-                std::format("[{}] Version mismatch! (plugin: {}, running: {})", PLUGIN_NAME, HASH, CLIENT_HASH),
-                CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
-            throw std::runtime_error("Version mismatch");
-        }
-        HyprlandAPI::addNotificationV2(PHANDLE, {
-            {"text", std::format("[{}] Version mismatch ignored (HYPRGLASS_SKIP_VERSION_CHECK) — ABI differences may crash Hyprland", PLUGIN_NAME)},
-            {"time", (uint64_t)8000},
-            {"color", CHyprColor{1.0, 0.8, 0.2, 1.0}},
-        });
+    // Nothing that depends on Hyprland's internal layout may run before this.
+    const auto verdict = LoadGuard::checkCompatibility(handle);
+    if (verdict.reason != LoadGuard::EPauseReason::None) {
+        if (!LoadGuard::skipRequested())
+            return pausedDescription(handle, verdict);
+        HyprlandAPI::addNotification(handle,
+                                     std::format("[{}] {}: check skipped (HYPRGLASS_SKIP_VERSION_CHECK), Hyprland may crash", PLUGIN_NAME, verdict.message),
+                                     CHyprColor{1.0, 0.8, 0.2, 1.0}, 10000);
     }
 
-    g_pGlobalState = std::make_unique<SGlobalState>();
+    if (const auto otherPath = LoadGuard::otherActiveCopyPath())
+        return pausedDescription(handle, {.reason = LoadGuard::EPauseReason::Duplicate, .message = std::format("already loaded from {}", *otherPath)});
+
+    PHANDLE          = handle;
+    s_instanceActive = true;
+
+    g_pGlobalState               = std::make_unique<SGlobalState>();
+    g_pGlobalState->versionCheck = LoadGuard::checkResult(verdict);
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.open.listen([&](PHLWINDOW w) { onNewWindow(w); }));
 
@@ -844,8 +847,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
-    if (!g_pGlobalState)
+    if (!s_instanceActive || !g_pGlobalState)
         return;
+    s_instanceActive = false;
 
     // Withdraws the global and clears every callback into this plugin before
     // anything else runs, since the helper library itself is never unloaded.

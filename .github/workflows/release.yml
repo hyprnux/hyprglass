@@ -141,6 +141,13 @@ jobs:
             exit 1
           fi
 
+          # Without a release tag in the headers, the binary can't tell which
+          # Hyprland it was built for and skips its version check.
+          if ! grep -Eq '^#define GIT_TAG +"v[0-9]+\.[0-9]+\.[0-9]+"' /usr/include/hyprland/src/version.h; then
+            echo "::error::The Hyprland headers carry no release tag."
+            exit 1
+          fi
+
           echo "version=${HYPRLAND_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Built against Hyprland ${HYPRLAND_VERSION}"
 

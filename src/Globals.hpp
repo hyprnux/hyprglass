@@ -156,6 +156,9 @@ struct SGlobalState {
     CFunctionHook* renderPassAddHook             = nullptr;
     bool           renderPassAddSymbolFound      = false; // for the failure notification text
     bool           subsurfaceHookFailureNotified = false;
+
+    // `versionCheck` in `hyprctl hyprglass status`: match, unknown or skipped
+    std::string_view versionCheck = "unknown";
 };
 
 using Render::GL::g_pHyprOpenGL;

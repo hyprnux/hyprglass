@@ -21,12 +21,13 @@ HYPRGLASS_VERSION := dev
 endif
 CXXFLAGS += -DHYPRGLASS_VERSION='"$(HYPRGLASS_VERSION)"'
 
-ifeq ($(basename $(CXX)),g++)
+# Keeps two loaded copies from sharing their globals. GCC only, whatever CXX calls it: clang has no such flag.
+ifneq ($(shell $(CXX) --version 2>/dev/null | grep -c 'Free Software Foundation'),0)
 	CXXFLAGS += --no-gnu-unique
 endif
 
 TARGET = hyprglass.so
-SOURCES = src/main.cpp src/GlassDecoration.cpp src/GlassPassElement.cpp src/GlassRenderer.cpp src/GlassLayerSurface.cpp src/GlassLayerPassElement.cpp src/GlassLayerCompositeElement.cpp src/BackgroundDamageObserver.cpp src/PluginConfig.cpp src/ShaderManager.cpp src/Diagnostics.cpp src/GlassSubsurfaceState.cpp src/GlassSubsurfacePassElement.cpp src/GlassSubsurfaceCompositeElement.cpp src/ItemHints.cpp
+SOURCES = src/main.cpp src/LoadGuard.cpp src/GlassDecoration.cpp src/GlassPassElement.cpp src/GlassRenderer.cpp src/GlassLayerSurface.cpp src/GlassLayerPassElement.cpp src/GlassLayerCompositeElement.cpp src/BackgroundDamageObserver.cpp src/PluginConfig.cpp src/ShaderManager.cpp src/Diagnostics.cpp src/GlassSubsurfaceState.cpp src/GlassSubsurfacePassElement.cpp src/GlassSubsurfaceCompositeElement.cpp src/ItemHints.cpp
 OBJ = $(SOURCES:.cpp=.o)
 HEADERS = $(wildcard src/*.hpp)
 
