@@ -333,6 +333,11 @@ static void parseLayerNamespaceFilters() {
         if (auto mode = parseLayerMaskMode(val))
             g_pGlobalState->layerNamespaceMaskModes[ns] = *mode;
     });
+
+    g_pGlobalState->layerNamespaceMaskFeathers.clear();
+    parseKeyValuePairs(config.layersNamespaceMaskFeathers, '=', [&](const std::string& ns, const std::string& val) {
+        try { g_pGlobalState->layerNamespaceMaskFeathers.emplace(ns, std::stof(val)); } catch (...) {}
+    });
 }
 
 static bool shouldGlassLayer(PHLLS layerSurface) {

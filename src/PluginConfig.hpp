@@ -112,6 +112,7 @@ inline constexpr auto LAYERS_NAMESPACES         = "plugin:hyprglass:layers:names
 inline constexpr auto LAYERS_EXCLUDE_NAMESPACES = "plugin:hyprglass:layers:exclude_namespaces";
 inline constexpr auto LAYERS_PRESET             = "plugin:hyprglass:layers:preset";
 inline constexpr auto LAYERS_NAMESPACE_PRESETS          = "plugin:hyprglass:layers:namespace_presets";
+inline constexpr auto LAYERS_MASK_THRESHOLD             = "plugin:hyprglass:layers:mask_threshold";
 inline constexpr auto LAYERS_NAMESPACE_MASK_THRESHOLDS  = "plugin:hyprglass:layers:namespace_mask_thresholds";
 inline constexpr auto LAYERS_NAMESPACE_LIVE_RESAMPLE    = "plugin:hyprglass:layers:namespace_live_resample";
 inline constexpr auto LAYERS_LIVE_RESAMPLE              = "plugin:hyprglass:layers:live_resample";
@@ -119,6 +120,9 @@ inline constexpr auto LAYERS_LIVE_RESAMPLE_FPS          = "plugin:hyprglass:laye
 inline constexpr auto LAYERS_FORCE_LIVE_RESAMPLE        = "plugin:hyprglass:layers:force_live_resample";
 inline constexpr auto LAYERS_MASK_MODE                  = "plugin:hyprglass:layers:mask_mode";
 inline constexpr auto LAYERS_NAMESPACE_MASK_MODES       = "plugin:hyprglass:layers:namespace_mask_modes";
+// Alpha mask only: alpha range above mask_threshold over which layer glass fades in; 0 keeps the hard mask.
+inline constexpr auto LAYERS_MASK_FEATHER               = "plugin:hyprglass:layers:mask_feather";
+inline constexpr auto LAYERS_NAMESPACE_MASK_FEATHERS    = "plugin:hyprglass:layers:namespace_mask_feathers";
 inline constexpr auto LAYERS_MANAGE_BLUR                = "plugin:hyprglass:layers:manage_blur";
 
 // Subsurface item glass support (see GlassSubsurfaceState).
@@ -349,6 +353,7 @@ struct SPluginConfig {
     StringConfigPtr       layersExcludeNamespaces;
     StringConfigPtr       layersPreset;
     StringConfigPtr       layersNamespacePresets;
+    Hyprlang::FLOAT* const* layersMaskThreshold          = nullptr;
     StringConfigPtr       layersNamespaceMaskThresholds;
     StringConfigPtr       layersNamespaceLiveResample;
     Hyprlang::INT* const* layersLiveResample             = nullptr;
@@ -356,6 +361,8 @@ struct SPluginConfig {
     Hyprlang::INT* const* layersForceLiveResample        = nullptr;
     StringConfigPtr       layersMaskMode;
     StringConfigPtr       layersNamespaceMaskModes;
+    Hyprlang::FLOAT* const* layersMaskFeather            = nullptr;
+    StringConfigPtr       layersNamespaceMaskFeathers;
     Hyprlang::INT* const* layersManageBlur               = nullptr;
 
     Hyprlang::INT* const*   subsurfacesEnabled = nullptr;

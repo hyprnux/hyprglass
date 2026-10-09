@@ -46,8 +46,10 @@ struct SFoldedBlur {
 // the input is returned unchanged.
 [[nodiscard]] SFoldedBlur foldBlurPasses(float radius, int iterations) noexcept;
 
-// Must match the `regionRects[16]` array size declared in Shaders.hpp.
-inline constexpr int MAX_REGION_RECTS = 16;
+// Must match the `regionRects[64]` array size declared in Shaders.hpp. 64 lets a client trace a
+// rounded shape to within a pixel or two; at 16 a capsule's curve steps by several pixels, and
+// anything the client draws just outside the shape (a glow, a shadow) falls inside the steps.
+inline constexpr int MAX_REGION_RECTS = 64;
 
 // Box-local pixel rect uploaded to the shader's regionRects uniform array.
 struct SRegionRect {
@@ -64,6 +66,9 @@ struct SMaskInfo {
     Vector2D uvOffset; // mapping from glass box UV → full surface UV
     Vector2D uvScale;
     float    alphaThreshold = 0.001f;
+    // Alpha mask only: glass fades in over this alpha range above alphaThreshold, so
+    // antialiased edges fade instead of cutting off. 0 = hard mask.
+    float    coverage       = 0.0f;
 
     // 0 = alpha-threshold mask, 1 = ext-background-effect-v1 protocol region
     int                                        maskMode        = 0;

@@ -76,9 +76,10 @@ uniform int useMask;
 uniform vec2 maskUVOffset;
 uniform vec2 maskUVScale;
 uniform float maskAlphaThreshold;
+uniform float maskCoverage;    // alpha mask: glass fades in over this alpha range above the threshold (0 = hard mask)
 uniform int maskMode;          // 0 = alpha threshold, 1 = protocol region
-uniform int regionRectCount;   // 0..16
-uniform vec4 regionRects[16];  // box-local pixels: xy = offset from box top-left, zw = size
+uniform int regionRectCount;   // 0..64
+uniform vec4 regionRects[64];  // box-local pixels: xy = offset from box top-left, zw = size
 
 // Subsurface item glass only: the rounded-box SDF (getCornerSDF below) is
 // evaluated over this sub-rect of the drawn box instead of the full box —
@@ -246,6 +247,7 @@ void main() {
     // Discard fully transparent fragments so glass only covers visible content.
     // For windows, hasMask is false and this block is skipped entirely.
     vec4 surfacePixel = vec4(0.0);
+    float maskRamp = 1.0;
     bool hasMask = (useMask == 1);
     if (hasMask) {
         vec2 maskUV = uv * maskUVScale + maskUVOffset;
@@ -263,8 +265,16 @@ void main() {
                 }
             }
             if (!insideRegion) { fragColor = surfacePixel; return; } // premultiplied, output as-is
-        } else if (surfacePixel.a < maskAlphaThreshold) {
-            discard;
+        } else {
+            if (surfacePixel.a < maskAlphaThreshold)
+                discard;
+            // Antialiased edges get proportionally less glass, so rounded corners fade
+            // out instead of ending on a hard, stepped edge. Not smoothstep(): it is undefined
+            // when threshold + coverage rounds to threshold in float.
+            if (maskCoverage > 0.0) {
+                float t = clamp((surfacePixel.a - maskAlphaThreshold) / maskCoverage, 0.0, 1.0);
+                maskRamp = t * t * (3.0 - 2.0 * t);
+            }
         }
     }
 
@@ -477,7 +487,7 @@ void main() {
     // float framebuffers (FP16 under wide-gamut cm) store unbounded values and
     // the glass re-samples its own output: unclamped color diverges over frames
     color = clamp(color, 0.0, 1.0);
-    float glassA = clamp(glassOpacity * cornerAlpha, 0.0, 1.0);
+    float glassA = clamp(glassOpacity * cornerAlpha * maskRamp, 0.0, 1.0);
 
     if (hasMask) {
         // Layers only: composite the rendered surface over the glass effect

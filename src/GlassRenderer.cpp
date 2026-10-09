@@ -539,6 +539,7 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
             static_cast<float>(mask->uvScale.x),
             static_cast<float>(mask->uvScale.y));
         glUniform1f(uniforms.maskAlphaThreshold, mask->alphaThreshold);
+        glUniform1f(uniforms.maskCoverage, mask->coverage);
         glUniform1i(uniforms.maskMode, mask->maskMode);
         glUniform1i(uniforms.regionRectCount, mask->regionRectCount);
         if (mask->regionRectCount > 0)
@@ -551,6 +552,7 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
     } else {
         glUniform1i(uniforms.useMask, 0);
         glUniform1f(uniforms.maskAlphaThreshold, 0.001f);
+        glUniform1f(uniforms.maskCoverage, 0.0f);
         glUniform1i(uniforms.maskMode, 0);
         glUniform1i(uniforms.regionRectCount, 0);
         // Windows, and layers outside PROTOCOL_REGION, always sample the same
