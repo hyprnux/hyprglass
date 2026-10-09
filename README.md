@@ -179,6 +179,7 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 | `tint_color` | color | `0x8899aa22` | — | — | Glass tint RRGGBBAA hex. Alpha = tint strength |
 | `lens_distortion` | float | `0.5` | — | — | Center dome magnification (0.0-1.0) |
 | `self_sample` | float | `0.0` | — | — | Mixes the window's own content into the glass behind it (0.0-1.0). Windows only |
+| `xray` | int | `0` | — | — | `1` hides the windows under the glass: only the wallpaper shows through. See [X-ray](#x-ray) |
 | `brightness` | float | — | `0.82` | `1.12` | Brightness multiplier |
 | `contrast` | float | — | `0.90` | `0.92` | Contrast around midpoint |
 | `saturation` | float | — | `0.80` | `0.85` | Desaturation (0 = grayscale, 1 = full) |
@@ -219,6 +220,39 @@ hg.preset("aura", { inherits = "glass", self_sample = 1.0, blur_strength = 2.5 }
 self_sample = 0.6
 preset = name:aura, inherits:glass, self_sample:1.0, blur_strength:2.5
 ```
+
+#### X-ray
+
+With `xray = 1` the glass shows the wallpaper (and background/bottom layers) and never the windows under it, however light the blur. Same idea as Hyprland's `decoration:blur:xray`. Turn it on everywhere, or only where a preset applies:
+
+**On the fly:**
+```bash
+hyprctl keyword plugin:hyprglass:xray 1
+```
+
+**Lua:**
+```lua
+hg.config({ xray = true })                                   -- every glass
+hg.preset("pane", { inherits = "glass", xray = true })       -- or only this preset
+hl.window_rule({ match = { class = "foot" }, tag = "+hyprglass_preset_pane" })
+hg.layer("waybar", { preset = "pane" })
+```
+
+**Legacy .conf:**
+```ini
+xray = 1
+preset = name:pane, inherits:glass, xray:1
+windowrule = tag +hyprglass_preset_pane, class:foot
+layers:namespace_presets = waybar:pane
+```
+
+- Background and bottom layers never use it: they already show only what is under them
+- No effect with `render:xp_mode`, which draws no wallpaper
+- Layer glass samples the live frame while the session is locked
+- Glass over a fullscreen window or on a special workspace shows the wallpaper without the fullscreen window or the special workspace dim
+- Subsurface item glass ignores it
+
+**Cost:** one monitor-sized framebuffer per monitor showing x-ray glass (twice that with HDR), freed once the monitor has drawn 600 frames with no x-ray glass on it (about 10 s of activity at 60 Hz).
 
 ### Layer surfaces
 
@@ -507,8 +541,8 @@ hyprctl -j hyprglass stats       # same, as JSON
 hyprglass stats
   stage timers: off (plugin:hyprglass:debug:timers = 0)
 
-  monitor        frames  win_draws  opaque_skip  win_hit  win_miss  win_defer  win_disc  layer_draws  layer_hit  layer_miss  layer_defer  sub_draws  sub_hit  sub_miss  sub_defer  blur_pass  sampled_mpx  glass_mpx
-  eDP-1            7212       3401         5122     3120       240         41         0         1560       1420          92            3        410      380        22          8       5520        41.30      18.77
+  monitor        frames  win_draws  opaque_skip  win_hit  win_miss  win_defer  win_disc  layer_draws  layer_hit  layer_miss  layer_defer  sub_draws  sub_hit  sub_miss  sub_defer  xray_copy  xray_defer  xray_evict  blur_pass  sampled_mpx  glass_mpx
+  eDP-1            7212       3401         5122     3120       240         41         0         1560       1420          92            3        410      380        22          8          0           0           0       5520        41.30      18.77
   eDP-1          per frame: 0.47 win draws, 0.22 layer draws, 0.06 sub draws, 0.77 blur passes, 0.006 sampled mpx, 0.003 glass mpx
 ```
 

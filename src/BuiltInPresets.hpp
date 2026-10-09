@@ -49,6 +49,7 @@ namespace GlobalDefaults {
     inline constexpr float   BEVEL_SHADOW         = 0.0f;
     inline constexpr float   SPECULAR_ANGLE       = 0.0f;
     inline constexpr float   SELF_SAMPLE          = 0.0f;
+    inline constexpr int64_t XRAY                 = 0;
 } // namespace GlobalDefaults
 
 // ── Built-in presets ─────────────────────────────────────────────────────────

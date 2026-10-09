@@ -121,6 +121,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::BEVEL_ANGLE, Config::FLOAT{GlobalDefaults::BEVEL_ANGLE});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::BEVEL_SHADOW, Config::FLOAT{GlobalDefaults::BEVEL_SHADOW});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::SELF_SAMPLE, Config::FLOAT{GlobalDefaults::SELF_SAMPLE});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::XRAY, Config::INTEGER{GlobalDefaults::XRAY});
 
     // Dark theme overrides — all sentinel (inherit from global)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BLUR_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
@@ -152,6 +153,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BEVEL_ANGLE, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BEVEL_SHADOW, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_SELF_SAMPLE, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::DARK_XRAY, Config::INTEGER{SENTINEL_INT});
 
     // Light theme overrides — all sentinel (inherit from global)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BLUR_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
@@ -183,6 +185,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BEVEL_ANGLE, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BEVEL_SHADOW, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_SELF_SAMPLE, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::LIGHT_XRAY, Config::INTEGER{SENTINEL_INT});
 
     // Legacy config keyword plus Lua-config callbacks for custom presets and layers.
     HyprlandAPI::addConfigKeyword(handle, ConfigKeys::PRESET_KEYWORD, handlePresetKeyword, Hyprlang::SHandlerOptions{});
@@ -203,6 +206,11 @@ static StringConfigPtr getStringPtr(HANDLE /*handle*/, const char* key) {
     return {.dataptr = value.dataptr, .type = value.type};
 }
 
+static IntegerConfigPtr getIntegerPtr(HANDLE /*handle*/, const char* key) {
+    const auto value = Config::mgr()->getConfigValue(key);
+    return {.dataptr = value.dataptr, .type = value.type};
+}
+
 static void initOverridablePointers(HANDLE handle, SOverridableConfig& layer,
                                     const char* blurStrength, const char* blurIterations,
                                     const char* refractionStrength, const char* chromaticAberration,
@@ -219,7 +227,7 @@ static void initOverridablePointers(HANDLE handle, SOverridableConfig& layer,
                                     const char* bevelSize, const char* fresnelColor,
                                     const char* bevelColor, const char* bevelTint,
                                     const char* bevelAngle, const char* bevelShadow,
-                                    const char* selfSample) {
+                                    const char* selfSample, const char* xray) {
     layer.blurStrength        = getStaticPtr<Hyprlang::FLOAT>(handle, blurStrength);
     layer.blurIterations      = getStaticPtr<Hyprlang::INT>(handle, blurIterations);
     layer.refractionStrength  = getStaticPtr<Hyprlang::FLOAT>(handle, refractionStrength);
@@ -249,6 +257,7 @@ static void initOverridablePointers(HANDLE handle, SOverridableConfig& layer,
     layer.bevelAngle          = getStaticPtr<Hyprlang::FLOAT>(handle, bevelAngle);
     layer.bevelShadow         = getStaticPtr<Hyprlang::FLOAT>(handle, bevelShadow);
     layer.selfSample          = getStaticPtr<Hyprlang::FLOAT>(handle, selfSample);
+    layer.xray                = getStaticPtr<Hyprlang::INT>(handle, xray);
 }
 
 void initConfigPointers(HANDLE handle, SPluginConfig& config) {
@@ -256,6 +265,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.manageWindowBlur  = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::MANAGE_WINDOW_BLUR);
     config.skipOpaqueWindows = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::SKIP_OPAQUE_WINDOWS);
     config.blurFold          = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::BLUR_FOLD);
+    config.xpMode            = getIntegerPtr(handle, "render:xp_mode");
     config.defaultTheme  = getStringPtr(handle, ConfigKeys::DEFAULT_THEME);
     config.defaultPreset = getStringPtr(handle, ConfigKeys::DEFAULT_PRESET);
 
@@ -300,7 +310,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
         ConfigKeys::BEVEL_SIZE, ConfigKeys::FRESNEL_COLOR,
         ConfigKeys::BEVEL_COLOR, ConfigKeys::BEVEL_TINT,
         ConfigKeys::BEVEL_ANGLE, ConfigKeys::BEVEL_SHADOW,
-        ConfigKeys::SELF_SAMPLE);
+        ConfigKeys::SELF_SAMPLE, ConfigKeys::XRAY);
 
     initOverridablePointers(handle, config.dark,
         ConfigKeys::DARK_BLUR_STRENGTH, ConfigKeys::DARK_BLUR_ITERATIONS,
@@ -318,7 +328,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
         ConfigKeys::DARK_BEVEL_SIZE, ConfigKeys::DARK_FRESNEL_COLOR,
         ConfigKeys::DARK_BEVEL_COLOR, ConfigKeys::DARK_BEVEL_TINT,
         ConfigKeys::DARK_BEVEL_ANGLE, ConfigKeys::DARK_BEVEL_SHADOW,
-        ConfigKeys::DARK_SELF_SAMPLE);
+        ConfigKeys::DARK_SELF_SAMPLE, ConfigKeys::DARK_XRAY);
 
     initOverridablePointers(handle, config.light,
         ConfigKeys::LIGHT_BLUR_STRENGTH, ConfigKeys::LIGHT_BLUR_ITERATIONS,
@@ -336,7 +346,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
         ConfigKeys::LIGHT_BEVEL_SIZE, ConfigKeys::LIGHT_FRESNEL_COLOR,
         ConfigKeys::LIGHT_BEVEL_COLOR, ConfigKeys::LIGHT_BEVEL_TINT,
         ConfigKeys::LIGHT_BEVEL_ANGLE, ConfigKeys::LIGHT_BEVEL_SHADOW,
-        ConfigKeys::LIGHT_SELF_SAMPLE);
+        ConfigKeys::LIGHT_SELF_SAMPLE, ConfigKeys::LIGHT_XRAY);
 }
 
 // ── Preset keyword parsing ───────────────────────────────────────────────────
@@ -401,6 +411,7 @@ static bool setPresetIntField(SPresetValues& values, std::string_view key, std::
     if (key == "tint_color")      { values.tintColor = parsed; return true; }
     if (key == "fresnel_color")   { values.fresnelColor = parsed; return true; }
     if (key == "bevel_color")     { values.bevelColor = parsed; return true; }
+    if (key == "xray")            { values.xray = parsed; return true; }
     return false;
 }
 
@@ -441,6 +452,7 @@ static void mergePresetValues(SPresetValues& target, const SPresetValues& overri
     mergeFloat(target.bevelAngle, overrides.bevelAngle);
     mergeFloat(target.bevelShadow, overrides.bevelShadow);
     mergeFloat(target.selfSample, overrides.selfSample);
+    mergeInt(target.xray, overrides.xray);
 }
 
 Hyprlang::CParseResult handlePresetKeyword(const char* /*command*/, const char* value) {
@@ -666,13 +678,21 @@ static int handleLuaConfig(lua_State* L) {
 
 // ── Lua preset handler (table + string) ─────────────────────────────────────
 
+// Booleans read as 0/1, so a flag like xray takes `true` as hyprglass.config() does.
+static std::optional<std::string> luaPresetValue(lua_State* L, int index) {
+    if (lua_isboolean(L, index))
+        return lua_toboolean(L, index) ? "1" : "0";
+    if (lua_isnumber(L, index))
+        return std::to_string(lua_tonumber(L, index));
+    return std::nullopt;
+}
+
 static void readPresetValuesFromTable(lua_State* L, int tableIdx, SPresetValues& values) {
     lua_pushnil(L);
     while (lua_next(L, tableIdx) != 0) {
-        if (lua_isstring(L, -2) && lua_isnumber(L, -1)) {
-            const char* key = lua_tostring(L, -2);
-            std::string valStr = std::to_string(lua_tonumber(L, -1));
-            setPresetField(values, key, valStr);
+        if (lua_isstring(L, -2)) {
+            if (const auto value = luaPresetValue(L, -1))
+                setPresetField(values, lua_tostring(L, -2), *value);
         }
         lua_pop(L, 1);
     }
@@ -706,9 +726,8 @@ static int handleLuaPreset(lua_State* L) {
                 readPresetValuesFromTable(L, lua_gettop(L), preset.dark);
             } else if (strcmp(key, "light") == 0 && lua_istable(L, -1)) {
                 readPresetValuesFromTable(L, lua_gettop(L), preset.light);
-            } else if (lua_isnumber(L, -1)) {
-                std::string valStr = std::to_string(lua_tonumber(L, -1));
-                setPresetField(preset.shared, key, valStr);
+            } else if (const auto value = luaPresetValue(L, -1)) {
+                setPresetField(preset.shared, key, *value);
             }
             lua_pop(L, 1);
         }

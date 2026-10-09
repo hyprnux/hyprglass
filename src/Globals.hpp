@@ -152,6 +152,20 @@ struct SGlobalState {
 
     // Pending re-enable of Hyprland shadows after a config reload (see main.cpp)
     UP<SEventLoopDoLaterLock> shadowFixLock;
+    // X-ray: per-monitor copy of the frame as it stood before any window was
+    // drawn, kept by CGlassSnapshotElement (see GlassSnapshotElement.hpp).
+    struct SBackgroundSnapshot {
+        SP<Render::IFramebuffer> framebuffer;
+        // Framebuffer pixels that still hold this monitor's current background:
+        // cut by each frame's damage at RENDER_BEGIN, refilled by each copy.
+        CRegion valid;
+        // Counted per monitor, so frames rendered on another monitor never age
+        // this one's snapshot.
+        uint64_t monitorFrames    = 0;
+        uint64_t lastRequestFrame = 0;
+        uint64_t queuedFrame      = 0;
+    };
+    std::unordered_map<MONITORID, SBackgroundSnapshot> backgroundSnapshots;
 
     // renderLayer hook
     CFunctionHook* renderLayerHook = nullptr;

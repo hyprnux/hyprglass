@@ -5,6 +5,7 @@
 #include "GlassLayerPassElement.hpp"
 #include "GlassLayerSurface.hpp"
 #include "GlassRenderer.hpp"
+#include "GlassSnapshotElement.hpp"
 #include "GlassSubsurfaceCompositeElement.hpp"
 #include "GlassSubsurfacePassElement.hpp"
 #include "GlassSubsurfaceState.hpp"
@@ -53,13 +54,14 @@ static void clearLayerGlassOnClose(PHLLS layerSurface) {
         g_pHyprRenderer->damageMonitor(monitor);
 }
 
-static void clearSubsurfaceFramebufferForMonitor(PHLMONITOR monitor) {
+static void onMonitorGone(PHLMONITOR monitor) {
     if (!g_pGlobalState || !monitor)
         return;
 
-    // The monitor is gone, so its temp FBO can never be reused: drop it
-    // instead of keeping a dead entry around indefinitely.
+    // The monitor is gone, so its framebuffers can never be reused: drop them
+    // instead of keeping dead entries around indefinitely.
     g_pGlobalState->subsurfaceTempFramebuffers.erase(monitor->m_id);
+    g_pGlobalState->backgroundSnapshots.erase(monitor->m_id);
 }
 
 static void onNewWindow(PHLWINDOW window) {
@@ -244,8 +246,12 @@ static void onRenderStage(eRenderStage stage) {
             // swept here instead — once per monitor frame, far cheaper than
             // the CRenderPass::add hook this state is populated from.
             std::erase_if(g_pGlobalState->subsurfaceGlass, [](const auto& pair) { return pair.first.expired(); });
+            beginXraySnapshotFrame();
             break;
-        case RENDER_PRE_WINDOWS: g_pGlobalState->dedupe.resetEpoch(); break;
+        case RENDER_PRE_WINDOWS:
+            g_pGlobalState->dedupe.resetEpoch();
+            queueXraySnapshot();
+            break;
         case RENDER_PRE_WINDOW: beginWindowRender(); break;
         case RENDER_POST_WINDOW: endWindowRender(); break;
         // defensive: both stages are past the last renderWindow of the frame, so
@@ -454,8 +460,14 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PH
             return;
         }
 
+        // Requested here, while the pass is built: a pre-surface element that
+        // simplify() discards still keeps the snapshot alive.
+        const bool xray = it->second->resolveXray();
+        if (xray)
+            requestXraySnapshot(monitor);
+
         // Pre-surface: sample+blur background, redirect currentFB → temp FBO
-        CGlassLayerPassElement::SGlassLayerPassData preData{it->second, alpha};
+        CGlassLayerPassElement::SGlassLayerPassData preData{it->second, alpha, xray};
         g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassLayerPassElement>(preData));
 
         const bool manageBlur = config.layersManageBlur && **config.layersManageBlur;
@@ -759,8 +771,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.layer.closed.listen([&](PHLLS layerSurface) { clearLayerGlassOnClose(layerSurface); }));
 
-    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.destroyMon.listen(
-        [&](PHLMONITOR monitor) { clearSubsurfaceFramebufferForMonitor(monitor); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) { onMonitorGone(monitor); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.destroyMon.listen([](PHLMONITOR monitor) { onMonitorGone(monitor); }));
 
     // Z-order / visibility changes invalidate layer glass caches on the affected monitor only.
     // Per-monitor to avoid triggering re-samples on idle monitors (feedback loop).
@@ -931,6 +943,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassLayerCompositeElement");
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassSubsurfacePassElement");
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassSubsurfaceCompositeElement");
+    g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassSnapshotElement");
+    g_pGlobalState->backgroundSnapshots.clear();
 
     Diagnostics::shutdown();
 

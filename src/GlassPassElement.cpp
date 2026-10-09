@@ -1,6 +1,7 @@
 #include "GlassPassElement.hpp"
 #include "Diagnostics.hpp"
 #include "GlassDecoration.hpp"
+#include "GlassSnapshotElement.hpp"
 #include "Globals.hpp"
 #include "PluginConfig.hpp"
 #include "WindowGeometry.hpp"
@@ -26,7 +27,7 @@ std::vector<UP<IPassElement>> CGlassPassElement::draw() {
     if (!m_data.decoration->isCurrentGlassPass(m_data.frameSerial, m_data.queueIndex))
         return {};
 
-    m_data.decoration->renderPass(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.alpha);
+    m_data.decoration->renderPass(g_pHyprRenderer->m_renderData.pMonitor.lock(), m_data.alpha, m_data.xray);
 
     return {};
 }
@@ -88,7 +89,14 @@ bool CGlassPassElement::needsLiveBlur() {
     // needs a fresh sample this frame — a cache hit needs neither (see the
     // "Cache hit" case in renderPass()). Transformed like renderPass()'s own
     // box so the two calls agree on 90/270-degree-rotated monitors too.
-    return m_data.decoration->wantsBackgroundResample(monitor, WindowGeometry::applyMonitorTransform(*box, monitor));
+    const CBox transformBox = WindowGeometry::applyMonitorTransform(*box, monitor);
+    if (!m_data.decoration->wantsBackgroundResample(monitor, transformBox, m_data.xray))
+        return false;
+
+    // An x-ray snapshot that already covers the box is sampled instead of the
+    // frame. One that does not needs this hint: it un-occludes the background
+    // under opaque windows so the snapshot copy picks it up this frame.
+    return !(m_data.xray && xraySnapshotCovering(monitor, g_pHyprRenderer->m_renderData.currentFB, transformBox));
 }
 
 bool CGlassPassElement::needsPrecomputeBlur() {
