@@ -1,4 +1,5 @@
 #include "LoadGuard.hpp"
+#include "BuildChannel.hpp"
 #include "Globals.hpp"
 
 #include <hyprland/src/plugins/PluginSystem.hpp>
@@ -13,11 +14,11 @@ SVerdict checkCompatibility(HANDLE handle) {
     const SVersionInfo running = HyprlandAPI::getHyprlandVersion(handle);
 
     SVerdict verdict;
-    verdict.identity = HyprlandIdentity::compare(GIT_TAG, GIT_COMMIT_HASH, running.tag, running.hash);
+    verdict.identity = HyprlandIdentity::compare(GIT_TAG, GIT_COMMIT_HASH, running.tag, running.hash, BUILT_FOR_HYPRLAND_GIT);
     if (verdict.identity == HyprlandIdentity::EVerdict::Mismatch) {
         verdict.reason  = EPauseReason::HyprlandVersion;
-        verdict.message = std::format("built for Hyprland {}, running {}", HyprlandIdentity::describe(GIT_TAG, GIT_COMMIT_HASH),
-                                      HyprlandIdentity::describe(running.tag, running.hash));
+        verdict.message = std::format("built for Hyprland {}, running {}", HyprlandIdentity::describe(GIT_TAG, GIT_COMMIT_HASH, BUILT_FOR_HYPRLAND_GIT),
+                                      HyprlandIdentity::describe(running.tag, running.hash, BUILT_FOR_HYPRLAND_GIT));
         return verdict;
     }
 

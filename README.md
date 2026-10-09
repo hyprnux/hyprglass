@@ -619,7 +619,7 @@ hyprctl plugin load /path/to/hyprglass.so
 
 With a pre-built release, download the one made for your Hyprland. While paused, `plugin:hyprglass:*` lines in a .conf config show up in `hyprctl configerrors`; a Lua config guarded by `if hl.plugin.hyprglass then` is skipped.
 
-A Nix build of hyprland-git reports itself as the release it follows, so a hyprglass built for that release isn't paused there.
+A Nix build of hyprland-git reports itself as the release it follows, so a hyprglass built for that release isn't paused there. A hyprglass built from `main` runs only on the Hyprland commit it was built against.
 
 ### "Paused: built with aquamarine 0.15 -> 0.16"
 

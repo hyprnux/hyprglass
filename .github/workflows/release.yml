@@ -151,6 +151,15 @@ jobs:
           echo "version=${HYPRLAND_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Built against Hyprland ${HYPRLAND_VERSION}"
 
+      - name: Check the build channel
+        if: steps.version-bump.outputs.skip != 'true'
+        run: |
+          # Left true, a release loads only on the Hyprland commit it was built against.
+          if grep -Eq 'BUILT_FOR_HYPRLAND_GIT *= *true' src/BuildChannel.hpp 2>/dev/null; then
+            echo "::error::${GITHUB_REF_NAME} is a stable line: set BUILT_FOR_HYPRLAND_GIT to false in src/BuildChannel.hpp."
+            exit 1
+          fi
+
       - name: Build plugin
         if: steps.version-bump.outputs.skip != 'true'
         env:
@@ -368,8 +377,15 @@ jobs:
             git checkout -f -B forward-merge "$STABLE"
             git clean -fdq
             PROBLEM="it conflicts with main"
-          elif [[ "$MAIN_BUILDS" == true ]] && ! make; then
-            PROBLEM="main no longer builds against hyprland-git after it"
+          else
+            # The stable line's BUILT_FOR_HYPRLAND_GIT = false must not reach main.
+            if git cat-file -e HEAD^1:src/BuildChannel.hpp 2>/dev/null && ! git diff --quiet HEAD^1 HEAD -- src/BuildChannel.hpp; then
+              git checkout HEAD^1 -- src/BuildChannel.hpp
+              git commit --amend --no-edit
+            fi
+            if [[ "$MAIN_BUILDS" == true ]] && ! make; then
+              PROBLEM="main no longer builds against hyprland-git after it"
+            fi
           fi
 
           if [[ -z "$PROBLEM" ]]; then

@@ -104,5 +104,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check the build channel
+        if: github.base_ref == 'main' || github.ref_name == 'main'
+        run: |
+          if ! grep -Eq 'BUILT_FOR_HYPRLAND_GIT *= *true' src/BuildChannel.hpp; then
+            echo "::error::main follows hyprland-git: BUILT_FOR_HYPRLAND_GIT must stay true in src/BuildChannel.hpp."
+            exit 1
+          fi
+
       - name: Build plugin
         run: make

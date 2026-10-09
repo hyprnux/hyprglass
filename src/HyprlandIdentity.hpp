@@ -59,24 +59,29 @@ enum class EVerdict {
 
 // Same commit, else same release line when both are releases, else
 // different commits. Nix builds of hyprland-git report "v" + VERSION as
-// their tag, so they look like releases here.
-[[nodiscard]] constexpr EVerdict compare(std::string_view builtTag, std::string_view builtHash, std::string_view runningTag, std::string_view runningHash) noexcept {
+// their tag, so they look like releases here: commitOnly skips the release
+// line for a build whose Hyprland API changes between commits, and a running
+// Hyprland without a commit is then never the one built against.
+[[nodiscard]] constexpr EVerdict compare(std::string_view builtTag, std::string_view builtHash, std::string_view runningTag, std::string_view runningHash,
+                                         bool commitOnly = false) noexcept {
     if (isCommitHash(builtHash) && builtHash == runningHash)
         return EVerdict::Match;
     const auto builtLine   = releaseLine(builtTag);
     const auto runningLine = releaseLine(runningTag);
-    if (builtLine && runningLine)
+    if (!commitOnly && builtLine && runningLine)
         return *builtLine == *runningLine ? EVerdict::Match : EVerdict::Mismatch;
-    if (isCommitHash(builtHash) && isCommitHash(runningHash))
+    if (isCommitHash(builtHash) && (commitOnly || isCommitHash(runningHash)))
         return EVerdict::Mismatch;
     return EVerdict::Unknown;
 }
 
 // "0.56" for a release, else the commit's first 12 characters.
-[[nodiscard]] inline std::string describe(std::string_view tag, std::string_view hash) {
+[[nodiscard]] inline std::string describe(std::string_view tag, std::string_view hash, bool commitOnly = false) {
+    if (commitOnly && isCommitHash(hash))
+        return std::string(hash.substr(0, 12));
     if (const auto line = releaseLine(tag))
         return std::to_string(line->major) + "." + std::to_string(line->minor);
-    return std::string(hash.substr(0, 12));
+    return hash.empty() ? std::string("unknown") : std::string(hash.substr(0, 12));
 }
 
 // "<commit>_aq_0.15_hu_0.14_hg_0.5_hc_0.1_hlg_0.6" -> "_aq_0.15_…": the

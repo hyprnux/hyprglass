@@ -109,7 +109,7 @@ jobs:
           Hyprland [v${VERSION}](https://github.com/hyprwm/Hyprland/releases/tag/v${VERSION}) is out and \`${BRANCH}\` does not exist yet.
 
           1. Pick the \`main\` commit that builds against Hyprland ${VERSION} (\`main\` follows hyprland-git).
-          2. Create \`${BRANCH}\` from it, set \`.hyprland-version\` to \`${VERSION}\` with a \`build:\` commit, and push: the release workflow publishes the build and pins it for hyprpm.
+          2. Create \`${BRANCH}\` from it. In one \`build:\` commit, set \`.hyprland-version\` to \`${VERSION}\` and \`BUILT_FOR_HYPRLAND_GIT\` to \`false\` in \`src/BuildChannel.hpp\` (the release refuses to run otherwise), and push: the release workflow publishes the build and pins it for hyprpm.
           3. From then on, fixes and features target \`${BRANCH}\`; the previous line is frozen.
           EOF
           )"
