@@ -58,7 +58,8 @@ SSampleMap sampleMapFor(const CBox& box, int downscale) {
     return map;
 }
 
-bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage) {
+bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage,
+                         const PHLMONITOR& monitor) {
     if (!source)
         return false;
 
@@ -72,7 +73,14 @@ bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source
     if (x2 <= x1 || y2 <= y1)
         return true;
 
-    return CRegion(CBox{x1, y1, x2 - x1, y2 - y1}).subtract(damage).empty();
+    // Render damage is in the rotated monitor space while the blit reads unrotated
+    // framebuffer pixels: transform it like Hyprland does for the output damage.
+    CRegion framebufferDamage = damage.copy();
+    if (monitor)
+        framebufferDamage.transform(Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform)),
+                                    monitor->m_transformedSize.x, monitor->m_transformedSize.y);
+
+    return CRegion(CBox{x1, y1, x2 - x1, y2 - y1}).subtract(framebufferDamage).empty();
 }
 
 SFoldedBlur foldBlurPasses(float radius, int iterations) noexcept {

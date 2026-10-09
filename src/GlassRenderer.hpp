@@ -103,8 +103,10 @@ struct SSampleMap {
 
 // True when every pixel sampleBackground() would read for `box` lies inside
 // `damage`. The only coverage predicate. `box` is in post-transform framebuffer
-// pixels like `damage`, not the logical space boundingBox() pads in.
-[[nodiscard]] bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage);
+// pixels, not the logical space boundingBox() pads in; `damage` is in render
+// space like m_renderData.damage, and is transformed by `monitor` to match.
+[[nodiscard]] bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage,
+                                       const PHLMONITOR& monitor);
 
 void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IFramebuffer> sourceFramebuffer,
                        CBox box, Vector2D& outPaddingRatio, int downscale = 1);
