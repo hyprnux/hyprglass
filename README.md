@@ -33,7 +33,7 @@ hyprpm then stays on that branch through `hyprpm update`. Repeat this with the n
 
 ### Pre-built release
 
-Grab `hyprglass.so` from [Releases](https://github.com/hyprnux/hyprglass/releases/latest). Each release targets a specific Hyprland API version — check the release notes to confirm it matches yours.
+Grab `hyprglass.so` from [Releases](https://github.com/hyprnux/hyprglass/releases/latest). Each release targets a specific Hyprland API version — check the release notes to confirm it matches yours. If it doesn't match, hyprglass stays paused instead of crashing Hyprland (see [Troubleshooting](#troubleshooting)).
 
 ```bash
 hyprctl plugin load /path/to/hyprglass.so
@@ -159,6 +159,7 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 |---|---|---|---|---|---|
 | `blur_strength` | float | `2.0` | — | — | Blur radius scale (`value * 12.0` px) |
 | `blur_iterations` | int | `3` | — | — | Gaussian blur passes (1-5) |
+| `noise_strength` | float | `0.0` | — | — | Frosted grain over the glass, see [Frosted grain](#frosted-grain) (0.0-1.0) |
 | `refraction_strength` | float | `0.6` | — | — | Edge refraction intensity (0.0-1.0) |
 | `refraction_flow` | float | `0.0` | — | — | Where the edge distortion pulls: 0 toward the window center, 1 along the edges (0.0-1.0) |
 | `refraction_spread` | float | `1.0` | — | — | How deep the distortion reaches: 1 across the whole window, 0 only a rim with a flat center (0.0-1.0) |
@@ -179,6 +180,7 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 | `tint_color` | color | `0x8899aa22` | — | — | Glass tint RRGGBBAA hex. Alpha = tint strength |
 | `lens_distortion` | float | `0.5` | — | — | Center dome magnification (0.0-1.0) |
 | `self_sample` | float | `0.0` | — | — | Mixes the window's own content into the glass behind it (0.0-1.0). Windows only |
+| `xray` | int | `0` | — | — | `1` hides the windows under the glass: only the wallpaper shows through. See [X-ray](#x-ray) |
 | `brightness` | float | — | `0.82` | `1.12` | Brightness multiplier |
 | `contrast` | float | — | `0.90` | `0.92` | Contrast around midpoint |
 | `saturation` | float | — | `0.80` | `0.85` | Desaturation (0 = grayscale, 1 = full) |
@@ -220,6 +222,63 @@ self_sample = 0.6
 preset = name:aura, inherits:glass, self_sample:1.0, blur_strength:2.5
 ```
 
+#### X-ray
+
+With `xray = 1` the glass shows the wallpaper (and background/bottom layers) and never the windows under it, however light the blur. Same idea as Hyprland's `decoration:blur:xray`. Turn it on everywhere, or only where a preset applies:
+
+**On the fly:**
+```bash
+hyprctl keyword plugin:hyprglass:xray 1
+```
+
+**Lua:**
+```lua
+hg.config({ xray = true })                                   -- every glass
+hg.preset("pane", { inherits = "glass", xray = true })       -- or only this preset
+hl.window_rule({ match = { class = "foot" }, tag = "+hyprglass_preset_pane" })
+hg.layer("waybar", { preset = "pane" })
+```
+
+**Legacy .conf:**
+```ini
+xray = 1
+preset = name:pane, inherits:glass, xray:1
+windowrule = tag +hyprglass_preset_pane, class:foot
+layers:namespace_presets = waybar:pane
+```
+
+- Background and bottom layers never use it: they already show only what is under them
+- No effect with `render:xp_mode`, which draws no wallpaper
+- Layer glass samples the live frame while the session is locked
+- Glass over a fullscreen window or on a special workspace shows the wallpaper without the fullscreen window or the special workspace dim
+- Subsurface item glass ignores it
+
+**Cost:** one monitor-sized framebuffer per monitor showing x-ray glass (twice that with HDR), freed once the monitor has drawn 600 frames with no x-ray glass on it (about 10 s of activity at 60 Hz).
+
+#### Frosted grain
+
+`noise_strength` adds a fine, still grain to the glass so the blur reads as frosted glass: `0` none, `1` strong. `0.12` is about as strong as Hyprland's default `decoration:blur:noise`.
+
+**On the fly:**
+```bash
+hyprctl keyword plugin:hyprglass:noise_strength 0.3
+```
+
+**Lua:**
+```lua
+hg.config({ noise_strength = 0.3, light = { noise_strength = 0.15 } })
+hg.preset("frosted", { inherits = "subtle", noise_strength = 0.5 })
+```
+
+**Legacy .conf:**
+```ini
+noise_strength = 0.3
+light:noise_strength = 0.15
+preset = name:frosted, inherits:subtle, noise_strength:0.5
+```
+
+- The built-in `clear` preset turns the grain off, as it does the blur
+
 ### Layer surfaces
 
 The glass effect can be applied to layer surfaces (bars, docks, widgets). **Disabled by default.**
@@ -230,27 +289,32 @@ Where the glass goes on a layer:
 
 `mask_mode` forces one behaviour: `auto` (default), `region` (only where the app requests blur; other layers get no glass) or `alpha` (visible content only).
 
-**Caveat:** Layer shadows count as visible content. Use `mask_threshold` to set an alpha cutoff higher than your shadow opacity.
+**Caveat:** Layer shadows count as visible content. Use `mask_threshold` to set an alpha cutoff higher than your shadow opacity. Set it once for every layer with `layers:mask_threshold`; a per-layer value wins.
+
+**Soft edges:** `mask_feather` fades the glass in over that much alpha above `mask_threshold`, so antialiased rounded corners blend instead of stepping. Content fainter than `mask_threshold + mask_feather` then gets lighter glass: keep `0` (default) for near-transparent bars. Only applies where glass follows visible content, not to the region an app requests.
 
 #### Lua config
 
 ```lua
 hg.config({ layers = { enabled = true } })
+-- hg.config({ layers = { mask_threshold = 0.05 } })  -- cutoff for every layer (hides shadows fainter than 5%)
 
 -- Each call whitelists the namespace and optionally configures it
 hg.layer("waybar", { preset = "subtle", mask_threshold = 0.05, live_resample = false })
 hg.layer("swaync")
 hg.layer("quickshell:bezel", { preset = "ui", mask_threshold = 0.3 })
 hg.layer("quickshell:bar", { mask_mode = "region" })
+hg.layer("dock", { mask_feather = 0.45 })
 hg.layer("debug-panel", { exclude = true })
 ```
 
 | Field | Type | Description |
 |---|---|---|
 | `preset` | string | Preset override for this layer |
-| `mask_threshold` | float | Alpha threshold (pixels below this are not glassed). Default `0.001` |
+| `mask_threshold` | float | Per-layer override of `layers:mask_threshold` |
 | `live_resample` | bool | Per-layer override of `layers:live_resample` |
 | `mask_mode` | string | `"auto"`, `"region"` or `"alpha"`. See `layers:mask_mode` |
+| `mask_feather` | float | Per-layer override of `layers:mask_feather` |
 | `exclude` | bool | Blacklist this namespace instead of whitelisting it |
 
 #### Legacy .conf config
@@ -262,6 +326,7 @@ hg.layer("debug-panel", { exclude = true })
 | `layers:exclude_namespaces` | string | `""` | Comma-separated namespace blacklist (priority over whitelist) |
 | `layers:preset` | string | `""` | Preset override for all layers |
 | `layers:namespace_presets` | string | `""` | Per-namespace preset (`ns:preset` pairs, comma-separated) |
+| `layers:mask_threshold` | float | `0.001` | Alpha threshold for all layers: pixels below it get no glass. Per-namespace values win |
 | `layers:namespace_mask_thresholds` | string | `""` | Per-namespace alpha threshold (`ns=value` pairs, comma-separated) |
 | `layers:namespace_live_resample` | string | `""` | Per-namespace live resample override (`ns=0/1` pairs, comma-separated) |
 | `layers:live_resample` | bool | `true` (`1` in .conf) | Re-render layer glass when content behind it changes (e.g. a playing video). GPU cost scales with background activity; static scenes stay free. Overridable per layer |
@@ -269,6 +334,8 @@ hg.layer("debug-panel", { exclude = true })
 | `layers:force_live_resample` | bool | `false` (`0` in .conf) | Experimental: re-render layer glass every frame regardless of changes, ignoring `live_resample_fps`. Heavy GPU/battery cost |
 | `layers:mask_mode` | string | `auto` | Where the glass goes: `auto` = where the app requests blur, else where content is visible; `region` = only where the app requests blur; `alpha` = only where content is visible |
 | `layers:namespace_mask_modes` | string | `""` | Per-namespace `mask_mode` (`ns=mode` pairs, comma-separated) |
+| `layers:mask_feather` | float | `0` | Soft edges: glass fades in over this much alpha above `mask_threshold` (e.g. `0.45` for a rounded dock). `0` = hard edge. Ignored where the app requests a blur region |
+| `layers:namespace_mask_feathers` | string | `""` | Per-namespace `mask_feather` (`ns=value` pairs, comma-separated) |
 | `layers:manage_blur` | bool | `true` (`1` in .conf) | Replace Hyprland's own blur with glass on glassed layers (`layerrule = ignorealpha` then has no effect, use `mask_threshold`). Set to `0` to keep Hyprland's blur |
 
 > Layer support hooks into Hyprland's internal render pipeline. This is version-sensitive and may break across Hyprland updates.
@@ -452,6 +519,7 @@ hyprctl -j hyprglass status      # same, as JSON
 
 ```
 hyprglass 0.9.1: active
+  version check: match
   shaders: ready
   windows: on   layers: hook missing   subsurfaces: off
   hyprglass_item_v1 protocol: active
@@ -459,7 +527,7 @@ hyprglass 0.9.1: active
 
 ```json
 {
-  "schema": 1, "version": "0.9.1", "active": true, "shaders": "ready", "itemProtocol": true,
+  "schema": 1, "version": "0.9.1", "versionCheck": "match", "active": true, "shaders": "ready", "itemProtocol": true,
   "features": {
     "windows": {"enabled": true, "active": true, "reason": null},
     "layers": {"enabled": true, "active": false, "reason": "hook_missing"},
@@ -472,12 +540,22 @@ hyprglass 0.9.1: active
 |---|---|
 | `schema` | Raised when a field is removed, renamed or changes meaning. New fields and new `shaders` or `reason` values can appear without a raise: treat any non-null `reason` as inactive. |
 | `version` | Same as `hyprctl plugin list`. |
+| `versionCheck` | `match` (built for this Hyprland), `unknown` (Hyprland or hyprglass was built without a release tag or commit: only Hyprland's libraries were checked) or `skipped` (`HYPRGLASS_SKIP_VERSION_CHECK`). |
 | `active` | `true` when at least one feature is active. |
 | `shaders` | `ready`, `pending` (compiled at the first glass draw) or `failed` (retried at the next draw). |
 | `itemProtocol` | `hyprglass_item_v1` is offered to clients. |
 | `features.*.enabled` | The setting: `enabled`, `layers:enabled`, `subsurfaces:enabled`. |
 | `features.*.active` | The feature draws glass. `windows` is active with `enabled = 0` while a window tagged `hyprglass_enabled` is open. |
 | `features.*.reason` | `null` when active, else `disabled`, `hook_missing` (after a Hyprland update, or another plugin hooked it first: reinstall or report it), `shaders_failed`, or for `subsurfaces`, `window_glass_off` (items only draw on windows that have glass). |
+
+A paused hyprglass (see [Troubleshooting](#troubleshooting)) draws nothing and has no `hyprctl hyprglass` command: `hyprctl hyprglass status` answers `unknown request`. `hyprctl plugin list` (or `hyprctl -j plugin list`) gives the reason as its description, `Paused (<reason>): <message>`, where `<reason>` is `hyprland_version`, `dependencies` or `duplicate`:
+
+```
+Plugin hyprglass by Hyprnux:
+	Handle: 7f3a2c000000
+	Version: 0.10.0
+	Description: Paused (hyprland_version): built for Hyprland 0.56, running 0.57
+```
 
 ## Performance diagnostics
 
@@ -496,8 +574,8 @@ hyprctl -j hyprglass stats       # same, as JSON
 hyprglass stats
   stage timers: off (plugin:hyprglass:debug:timers = 0)
 
-  monitor        frames  win_draws  opaque_skip  win_hit  win_miss  win_defer  win_disc  layer_draws  layer_hit  layer_miss  layer_defer  sub_draws  sub_hit  sub_miss  sub_defer  blur_pass  sampled_mpx  glass_mpx
-  eDP-1            7212       3401         5122     3120       240         41         0         1560       1420          92            3        410      380        22          8       5520        41.30      18.77
+  monitor        frames  win_draws  opaque_skip  win_hit  win_miss  win_defer  win_disc  layer_draws  layer_hit  layer_miss  layer_defer  sub_draws  sub_hit  sub_miss  sub_defer  xray_copy  xray_defer  xray_evict  blur_pass  sampled_mpx  glass_mpx
+  eDP-1            7212       3401         5122     3120       240         41         0         1560       1420          92            3        410      380        22          8          0           0           0       5520        41.30      18.77
   eDP-1          per frame: 0.47 win draws, 0.22 layer draws, 0.06 sub draws, 0.77 blur passes, 0.006 sampled mpx, 0.003 glass mpx
 ```
 
@@ -520,7 +598,7 @@ hyprglass items
 
 ## Notes
 
-- The plugin requires Hyprland shadows to be present in the render pipeline. It **auto-enables them** at load time if disabled — shadow visual values (range, color…) can be zero, only the decoration's presence matters.
+- Window glass requires Hyprland shadows to be present in the render pipeline. While any window has glass (`enabled = 1`, or a window tagged `hyprglass_enabled`), the plugin **turns `decoration:shadow:enabled` back on** after every config load and whenever a window gets glass, with .conf and Lua configs alike — shadow visual values (range, color…) can be zero, only the decoration's presence matters.
 - If glass edges look stale while a window is dragged, raise `decoration:blur:size` or `decoration:blur:passes`. They matter even with Hyprland's blur disabled.
 - Glass **replaces Hyprland's blur** on glassed windows: the plugin sets the `noblur` window property on them so their translucency composites against the glass instead of Hyprland's blur (whose `new_optimizations` cache is captured before plugin decorations render, hiding the glass on static windows — the "effect only shows while dragging" symptom). Disable with `manage_window_blur = 0`. The property is withdrawn when glass is disabled for a window or the plugin unloads.
 - Layer surface glass uses a function hook on `renderLayer`, which is a private Hyprland internal. The hook may break on Hyprland updates that change this function's signature.
@@ -529,11 +607,54 @@ hyprglass items
 
 `hyprctl plugin list` shows the hyprglass version you are running: include it in bug reports. A build from a checkout without its tags reports `dev`.
 
-### "Version mismatch" on hyprland-git or a self-built Hyprland
+### "Paused: built for Hyprland 0.56, running 0.57"
 
-The plugin compares its build-time Hyprland ABI signature against the running compositor. The comparison uses the dependency ABI suffix (`_aq_…_hu_…`), not the exact commit hash, so a plugin built against matching headers loads fine on git builds. If it still fails, the reported hashes (shown in the error notification) tell you which dependency versions differ — rebuild the plugin against the headers of the Hyprland you are actually running.
+hyprglass stays loaded but does nothing when the running Hyprland isn't the one it was built for: another release line (0.56 vs 0.57), or another commit when either side is hyprland-git. Rebuild it for the running Hyprland, then reload it:
 
-As a last resort, setting `HYPRGLASS_SKIP_VERSION_CHECK=1` downgrades the failure to a warning. The variable must be present in **Hyprland's own environment**: export it from your session manager (uwsm, greetd, …) or set it early in your Hyprland config via the `env` keyword. This is unsupported — a real ABI mismatch can crash Hyprland.
+```bash
+hyprpm update                                  # hyprpm
+hyprctl plugin unload /path/to/hyprglass.so    # manual build: unload, make, load
+hyprctl plugin load /path/to/hyprglass.so
+```
+
+With a pre-built release, download the one made for your Hyprland. While paused, `plugin:hyprglass:*` lines in a .conf config show up in `hyprctl configerrors`; a Lua config guarded by `if hl.plugin.hyprglass then` is skipped.
+
+A Nix build of hyprland-git reports itself as the release it follows, so a hyprglass built for that release isn't paused there.
+
+### "Paused: built with aquamarine 0.15 -> 0.16"
+
+Same fix: one of Hyprland's libraries changed version since hyprglass was built.
+
+### "Paused: already loaded from …"
+
+Two copies of hyprglass are loaded, e.g. a distribution package and your own build or hyprpm's, or one file through two paths (a symlink). The first keeps working and this one does nothing. Load only one: remove the extra `hl.plugin.load(...)` / `plugin =` line, or `hyprpm disable hyprglass`. After removing the other copy, reload this one (`hyprctl plugin unload <path>` then `hyprctl plugin load <path>`) or restart Hyprland.
+
+### Skipping the check
+
+`HYPRGLASS_SKIP_VERSION_CHECK=1` loads hyprglass despite the version checks above, not despite another copy. It must be in **Hyprland's own environment**: export it from your session manager (uwsm, greetd, …) or set it early in your Hyprland config with the `env` keyword. This is unsupported: a real mismatch can crash Hyprland.
+
+### Hyprland never finishes starting with the plugin in hyprland.lua
+
+When `hyprland.lua` loads a plugin, Hyprland runs the whole file once more during startup, before it is ready. A top-level `hyprctl` call, or any `io.popen`/`os.execute` that waits on a command, blocks there: nothing answers `hyprctl` yet. Under uwsm the start then times out and `WAYLAND_DISPLAY` is never exported.
+
+Run such commands once Hyprland is up:
+
+```lua
+hl.on("hyprland.start", function()
+    os.execute("my-startup-script &")
+end)
+```
+
+To check whether it is the cause, load the plugin from a config that contains only your `hl.monitor(...)` lines and `hl.plugin.load(...)`. To look at a hang, give the start more time first:
+
+```bash
+mkdir -p ~/.config/systemd/user/wayland-wm@.service.d
+printf '[Service]\nTimeoutStartSec=300\n' > ~/.config/systemd/user/wayland-wm@.service.d/timeout.conf
+systemctl --user daemon-reload
+
+# undo it afterwards
+systemctl --user revert wayland-wm@.service
+```
 
 ### Build fails inside Hyprland's own headers ("cannot convert 'PHLLS' … to 'bool' … explicit conversion function was not considered")
 

@@ -128,7 +128,7 @@ void CGlassSubsurfaceState::sampleAndRedirect(PHLMONITOR monitor, const CBox& tr
     const bool backgroundChanged = !m_hasCachedSample || currentGeneration != m_lastSceneGeneration || movedOrResized;
 
     const bool sampleCovered = !backgroundChanged ||
-        GlassRenderer::sampleRegionCovered(transformBox, source, g_pHyprRenderer->m_renderData.damage);
+        GlassRenderer::sampleRegionCovered(transformBox, source, g_pHyprRenderer->m_renderData.damage, monitor);
 
     if (!sampleCovered) {
         // The work buffer is cleared outside this frame's damage: sampling now

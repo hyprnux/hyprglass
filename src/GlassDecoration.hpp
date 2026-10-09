@@ -25,7 +25,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
     [[nodiscard]] std::string                getDisplayName() override;
 
     [[nodiscard]] PHLWINDOW getOwner();
-    void                    renderPass(PHLMONITOR monitor, const float& alpha);
+    void                    renderPass(PHLMONITOR monitor, const float& alpha, bool xray);
     void                    onFullscreenStateChanged();
 
     // Content below committed damage in our sample region — resample next frame.
@@ -38,7 +38,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // this frame. Called identically from CGlassPassElement::needsLiveBlur()
     // (draw()-time) and from renderPass() itself — safe to call twice, no GL
     // calls. transformBox is monitor-local physical pixels (see callers).
-    [[nodiscard]] bool wantsBackgroundResample(PHLMONITOR monitor, const CBox& transformBox) const;
+    [[nodiscard]] bool wantsBackgroundResample(PHLMONITOR monitor, const CBox& transformBox, bool xray) const;
 
     // Owner test without the shared_ptr copy getOwner() hands out.
     [[nodiscard]] bool  ownsWindow(const PHLWINDOW& window) const { return m_window == window; }
@@ -69,6 +69,9 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // Window background cache state.
     bool m_hasCachedSample = false;
     bool m_backgroundDirty = false;
+    // The cached sample came from the x-ray snapshot: switching x-ray on or off
+    // must not reuse a sample of the other.
+    bool m_cachedFromSnapshot = false;
     std::chrono::steady_clock::time_point m_lastDirtyMark{};
 
     // Scene generation at the last real sample, plus the monitor it was
@@ -88,6 +91,10 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // glass is invisible on static windows (#46).
     bool m_noBlurApplied = false;
 
+    // Glass can start without a config reload (tags, hyprctl keyword), and
+    // each start rechecks that Hyprland shadows are on.
+    bool m_glassWasEnabled = false;
+
     float m_lastSelfSample = 0.0f;
 
     // Frame serial the last glass element was queued for, and its index in that
@@ -103,7 +110,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // many duplicate copies happened to render, not on the scene.
     uint64_t m_lastFoldedFrameSerial = 0;
 
-    void               queueGlassPass(float alpha);
+    void               queueGlassPass(float alpha, bool xray);
     [[nodiscard]] bool isCurrentGlassPass(uint64_t serial, uint32_t index) const {
         return serial == 0 || (serial == m_glassFrameSerial && index == m_glassQueueIndex);
     }
@@ -123,6 +130,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
     };
 
     [[nodiscard]] EEnabledResolution resolveEnabled() const;
+    [[nodiscard]] bool               resolveXray() const;
     [[nodiscard]] bool               resolveThemeIsDark() const;
     [[nodiscard]] std::string        resolvePresetName() const;
 

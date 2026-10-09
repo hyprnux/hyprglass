@@ -71,6 +71,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_EXCLUDE_NAMESPACES, Config::STRING{});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_PRESET, Config::STRING{});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_PRESETS, Config::STRING{});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LAYERS_MASK_THRESHOLD, Config::FLOAT{0.001});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_THRESHOLDS, Config::STRING{});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_LIVE_RESAMPLE, Config::STRING{});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE, Config::INTEGER{1});
@@ -78,6 +79,8 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_FORCE_LIVE_RESAMPLE, Config::INTEGER{0});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_MASK_MODE, Config::STRING{"auto"});
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_MODES, Config::STRING{});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LAYERS_MASK_FEATHER, Config::FLOAT{0.0});
+    addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_FEATHERS, Config::STRING{});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LAYERS_MANAGE_BLUR, Config::INTEGER{1});
 
     // Subsurface item glass
@@ -94,6 +97,7 @@ void registerConfig(HANDLE handle) {
     // sentinel for theme-sensitive settings (fallback to hardcoded theme defaults)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::BLUR_STRENGTH, Config::FLOAT{GlobalDefaults::BLUR_STRENGTH});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::BLUR_ITERATIONS, Config::INTEGER{GlobalDefaults::BLUR_ITERATIONS});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::NOISE_STRENGTH, Config::FLOAT{GlobalDefaults::NOISE_STRENGTH});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::REFRACTION_STRENGTH, Config::FLOAT{GlobalDefaults::REFRACTION_STRENGTH});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::CHROMATIC_ABERRATION, Config::FLOAT{GlobalDefaults::CHROMATIC_ABERRATION});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::FRESNEL_STRENGTH, Config::FLOAT{GlobalDefaults::FRESNEL_STRENGTH});
@@ -121,10 +125,12 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::BEVEL_ANGLE, Config::FLOAT{GlobalDefaults::BEVEL_ANGLE});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::BEVEL_SHADOW, Config::FLOAT{GlobalDefaults::BEVEL_SHADOW});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::SELF_SAMPLE, Config::FLOAT{GlobalDefaults::SELF_SAMPLE});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::XRAY, Config::INTEGER{GlobalDefaults::XRAY});
 
     // Dark theme overrides — all sentinel (inherit from global)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BLUR_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::DARK_BLUR_ITERATIONS, Config::INTEGER{SENTINEL_INT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_NOISE_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_REFRACTION_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_CHROMATIC_ABERRATION, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_FRESNEL_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
@@ -152,10 +158,12 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BEVEL_ANGLE, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_BEVEL_SHADOW, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::DARK_SELF_SAMPLE, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::DARK_XRAY, Config::INTEGER{SENTINEL_INT});
 
     // Light theme overrides — all sentinel (inherit from global)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BLUR_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::LIGHT_BLUR_ITERATIONS, Config::INTEGER{SENTINEL_INT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_NOISE_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_REFRACTION_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_CHROMATIC_ABERRATION, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_FRESNEL_STRENGTH, Config::FLOAT{SENTINEL_FLOAT});
@@ -183,6 +191,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BEVEL_ANGLE, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_BEVEL_SHADOW, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_SELF_SAMPLE, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Int>(handle, ConfigKeys::LIGHT_XRAY, Config::INTEGER{SENTINEL_INT});
 
     // Legacy config keyword plus Lua-config callbacks for custom presets and layers.
     HyprlandAPI::addConfigKeyword(handle, ConfigKeys::PRESET_KEYWORD, handlePresetKeyword, Hyprlang::SHandlerOptions{});
@@ -203,8 +212,14 @@ static StringConfigPtr getStringPtr(HANDLE /*handle*/, const char* key) {
     return {.dataptr = value.dataptr, .type = value.type};
 }
 
+static IntegerConfigPtr getIntegerPtr(HANDLE /*handle*/, const char* key) {
+    const auto value = Config::mgr()->getConfigValue(key);
+    return {.dataptr = value.dataptr, .type = value.type};
+}
+
 static void initOverridablePointers(HANDLE handle, SOverridableConfig& layer,
                                     const char* blurStrength, const char* blurIterations,
+                                    const char* noiseStrength,
                                     const char* refractionStrength, const char* chromaticAberration,
                                     const char* fresnelStrength, const char* specularStrength,
                                     const char* specularAngle,
@@ -219,9 +234,10 @@ static void initOverridablePointers(HANDLE handle, SOverridableConfig& layer,
                                     const char* bevelSize, const char* fresnelColor,
                                     const char* bevelColor, const char* bevelTint,
                                     const char* bevelAngle, const char* bevelShadow,
-                                    const char* selfSample) {
+                                    const char* selfSample, const char* xray) {
     layer.blurStrength        = getStaticPtr<Hyprlang::FLOAT>(handle, blurStrength);
     layer.blurIterations      = getStaticPtr<Hyprlang::INT>(handle, blurIterations);
+    layer.noiseStrength       = getStaticPtr<Hyprlang::FLOAT>(handle, noiseStrength);
     layer.refractionStrength  = getStaticPtr<Hyprlang::FLOAT>(handle, refractionStrength);
     layer.chromaticAberration = getStaticPtr<Hyprlang::FLOAT>(handle, chromaticAberration);
     layer.fresnelStrength     = getStaticPtr<Hyprlang::FLOAT>(handle, fresnelStrength);
@@ -249,6 +265,7 @@ static void initOverridablePointers(HANDLE handle, SOverridableConfig& layer,
     layer.bevelAngle          = getStaticPtr<Hyprlang::FLOAT>(handle, bevelAngle);
     layer.bevelShadow         = getStaticPtr<Hyprlang::FLOAT>(handle, bevelShadow);
     layer.selfSample          = getStaticPtr<Hyprlang::FLOAT>(handle, selfSample);
+    layer.xray                = getStaticPtr<Hyprlang::INT>(handle, xray);
 }
 
 void initConfigPointers(HANDLE handle, SPluginConfig& config) {
@@ -256,6 +273,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.manageWindowBlur  = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::MANAGE_WINDOW_BLUR);
     config.skipOpaqueWindows = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::SKIP_OPAQUE_WINDOWS);
     config.blurFold          = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::BLUR_FOLD);
+    config.xpMode            = getIntegerPtr(handle, "render:xp_mode");
     config.defaultTheme  = getStringPtr(handle, ConfigKeys::DEFAULT_THEME);
     config.defaultPreset = getStringPtr(handle, ConfigKeys::DEFAULT_PRESET);
 
@@ -267,6 +285,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.layersExcludeNamespaces = getStringPtr(handle, ConfigKeys::LAYERS_EXCLUDE_NAMESPACES);
     config.layersPreset            = getStringPtr(handle, ConfigKeys::LAYERS_PRESET);
     config.layersNamespacePresets         = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_PRESETS);
+    config.layersMaskThreshold           = getStaticPtr<Hyprlang::FLOAT>(handle, ConfigKeys::LAYERS_MASK_THRESHOLD);
     config.layersNamespaceMaskThresholds = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_THRESHOLDS);
     config.layersNamespaceLiveResample = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_LIVE_RESAMPLE);
     config.layersLiveResample      = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE);
@@ -274,6 +293,8 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.layersForceLiveResample = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_FORCE_LIVE_RESAMPLE);
     config.layersMaskMode           = getStringPtr(handle, ConfigKeys::LAYERS_MASK_MODE);
     config.layersNamespaceMaskModes = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_MODES);
+    config.layersMaskFeather           = getStaticPtr<Hyprlang::FLOAT>(handle, ConfigKeys::LAYERS_MASK_FEATHER);
+    config.layersNamespaceMaskFeathers = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_FEATHERS);
     config.layersManageBlur         = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_MANAGE_BLUR);
 
     config.subsurfacesEnabled = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::SUBSURFACES_ENABLED);
@@ -285,7 +306,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.windowsLiveResampleFps = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE_FPS);
 
     initOverridablePointers(handle, config.global,
-        ConfigKeys::BLUR_STRENGTH, ConfigKeys::BLUR_ITERATIONS,
+        ConfigKeys::BLUR_STRENGTH, ConfigKeys::BLUR_ITERATIONS, ConfigKeys::NOISE_STRENGTH,
         ConfigKeys::REFRACTION_STRENGTH, ConfigKeys::CHROMATIC_ABERRATION,
         ConfigKeys::FRESNEL_STRENGTH, ConfigKeys::SPECULAR_STRENGTH,
         ConfigKeys::SPECULAR_ANGLE,
@@ -300,10 +321,10 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
         ConfigKeys::BEVEL_SIZE, ConfigKeys::FRESNEL_COLOR,
         ConfigKeys::BEVEL_COLOR, ConfigKeys::BEVEL_TINT,
         ConfigKeys::BEVEL_ANGLE, ConfigKeys::BEVEL_SHADOW,
-        ConfigKeys::SELF_SAMPLE);
+        ConfigKeys::SELF_SAMPLE, ConfigKeys::XRAY);
 
     initOverridablePointers(handle, config.dark,
-        ConfigKeys::DARK_BLUR_STRENGTH, ConfigKeys::DARK_BLUR_ITERATIONS,
+        ConfigKeys::DARK_BLUR_STRENGTH, ConfigKeys::DARK_BLUR_ITERATIONS, ConfigKeys::DARK_NOISE_STRENGTH,
         ConfigKeys::DARK_REFRACTION_STRENGTH, ConfigKeys::DARK_CHROMATIC_ABERRATION,
         ConfigKeys::DARK_FRESNEL_STRENGTH, ConfigKeys::DARK_SPECULAR_STRENGTH,
         ConfigKeys::DARK_SPECULAR_ANGLE,
@@ -318,10 +339,10 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
         ConfigKeys::DARK_BEVEL_SIZE, ConfigKeys::DARK_FRESNEL_COLOR,
         ConfigKeys::DARK_BEVEL_COLOR, ConfigKeys::DARK_BEVEL_TINT,
         ConfigKeys::DARK_BEVEL_ANGLE, ConfigKeys::DARK_BEVEL_SHADOW,
-        ConfigKeys::DARK_SELF_SAMPLE);
+        ConfigKeys::DARK_SELF_SAMPLE, ConfigKeys::DARK_XRAY);
 
     initOverridablePointers(handle, config.light,
-        ConfigKeys::LIGHT_BLUR_STRENGTH, ConfigKeys::LIGHT_BLUR_ITERATIONS,
+        ConfigKeys::LIGHT_BLUR_STRENGTH, ConfigKeys::LIGHT_BLUR_ITERATIONS, ConfigKeys::LIGHT_NOISE_STRENGTH,
         ConfigKeys::LIGHT_REFRACTION_STRENGTH, ConfigKeys::LIGHT_CHROMATIC_ABERRATION,
         ConfigKeys::LIGHT_FRESNEL_STRENGTH, ConfigKeys::LIGHT_SPECULAR_STRENGTH,
         ConfigKeys::LIGHT_SPECULAR_ANGLE,
@@ -336,7 +357,7 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
         ConfigKeys::LIGHT_BEVEL_SIZE, ConfigKeys::LIGHT_FRESNEL_COLOR,
         ConfigKeys::LIGHT_BEVEL_COLOR, ConfigKeys::LIGHT_BEVEL_TINT,
         ConfigKeys::LIGHT_BEVEL_ANGLE, ConfigKeys::LIGHT_BEVEL_SHADOW,
-        ConfigKeys::LIGHT_SELF_SAMPLE);
+        ConfigKeys::LIGHT_SELF_SAMPLE, ConfigKeys::LIGHT_XRAY);
 }
 
 // ── Preset keyword parsing ───────────────────────────────────────────────────
@@ -356,6 +377,7 @@ static bool setPresetFloatField(SPresetValues& values, std::string_view key, std
     if (ec != std::errc{}) return false;
 
     if (key == "blur_strength")        { values.blurStrength = parsed; return true; }
+    if (key == "noise_strength")       { values.noiseStrength = parsed; return true; }
     if (key == "refraction_strength")  { values.refractionStrength = parsed; return true; }
     if (key == "chromatic_aberration") { values.chromaticAberration = parsed; return true; }
     if (key == "fresnel_strength")     { values.fresnelStrength = parsed; return true; }
@@ -401,6 +423,7 @@ static bool setPresetIntField(SPresetValues& values, std::string_view key, std::
     if (key == "tint_color")      { values.tintColor = parsed; return true; }
     if (key == "fresnel_color")   { values.fresnelColor = parsed; return true; }
     if (key == "bevel_color")     { values.bevelColor = parsed; return true; }
+    if (key == "xray")            { values.xray = parsed; return true; }
     return false;
 }
 
@@ -414,6 +437,7 @@ static void mergePresetValues(SPresetValues& target, const SPresetValues& overri
 
     mergeFloat(target.blurStrength, overrides.blurStrength);
     mergeInt(target.blurIterations, overrides.blurIterations);
+    mergeFloat(target.noiseStrength, overrides.noiseStrength);
     mergeFloat(target.refractionStrength, overrides.refractionStrength);
     mergeFloat(target.chromaticAberration, overrides.chromaticAberration);
     mergeFloat(target.fresnelStrength, overrides.fresnelStrength);
@@ -441,6 +465,7 @@ static void mergePresetValues(SPresetValues& target, const SPresetValues& overri
     mergeFloat(target.bevelAngle, overrides.bevelAngle);
     mergeFloat(target.bevelShadow, overrides.bevelShadow);
     mergeFloat(target.selfSample, overrides.selfSample);
+    mergeInt(target.xray, overrides.xray);
 }
 
 Hyprlang::CParseResult handlePresetKeyword(const char* /*command*/, const char* value) {
@@ -666,13 +691,21 @@ static int handleLuaConfig(lua_State* L) {
 
 // ── Lua preset handler (table + string) ─────────────────────────────────────
 
+// Booleans read as 0/1, so a flag like xray takes `true` as hyprglass.config() does.
+static std::optional<std::string> luaPresetValue(lua_State* L, int index) {
+    if (lua_isboolean(L, index))
+        return lua_toboolean(L, index) ? "1" : "0";
+    if (lua_isnumber(L, index))
+        return std::to_string(lua_tonumber(L, index));
+    return std::nullopt;
+}
+
 static void readPresetValuesFromTable(lua_State* L, int tableIdx, SPresetValues& values) {
     lua_pushnil(L);
     while (lua_next(L, tableIdx) != 0) {
-        if (lua_isstring(L, -2) && lua_isnumber(L, -1)) {
-            const char* key = lua_tostring(L, -2);
-            std::string valStr = std::to_string(lua_tonumber(L, -1));
-            setPresetField(values, key, valStr);
+        if (lua_isstring(L, -2)) {
+            if (const auto value = luaPresetValue(L, -1))
+                setPresetField(values, lua_tostring(L, -2), *value);
         }
         lua_pop(L, 1);
     }
@@ -706,9 +739,8 @@ static int handleLuaPreset(lua_State* L) {
                 readPresetValuesFromTable(L, lua_gettop(L), preset.dark);
             } else if (strcmp(key, "light") == 0 && lua_istable(L, -1)) {
                 readPresetValuesFromTable(L, lua_gettop(L), preset.light);
-            } else if (lua_isnumber(L, -1)) {
-                std::string valStr = std::to_string(lua_tonumber(L, -1));
-                setPresetField(preset.shared, key, valStr);
+            } else if (const auto value = luaPresetValue(L, -1)) {
+                setPresetField(preset.shared, key, *value);
             }
             lua_pop(L, 1);
         }
@@ -724,6 +756,7 @@ struct SPendingLayer {
     std::string                   ns;
     std::string                   preset;
     float                         maskThreshold = -1.0f;
+    float                         maskFeather   = -1.0f;
     bool                          exclude       = false;
     int                           liveResample  = -1; // -1 = not set
     std::optional<ELayerMaskMode> maskMode;
@@ -752,6 +785,11 @@ static int handleLuaLayer(lua_State* L) {
         lua_getfield(L, 2, "mask_threshold");
         if (lua_isnumber(L, -1))
             entry.maskThreshold = static_cast<float>(lua_tonumber(L, -1));
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "mask_feather");
+        if (lua_isnumber(L, -1))
+            entry.maskFeather = static_cast<float>(lua_tonumber(L, -1));
         lua_pop(L, 1);
 
         lua_getfield(L, 2, "live_resample");
@@ -784,6 +822,8 @@ void commitPendingLayers() {
                 g_pGlobalState->layerNamespacePresets[entry.ns] = entry.preset;
             if (entry.maskThreshold >= 0.0f)
                 g_pGlobalState->layerNamespaceMaskThresholds[entry.ns] = entry.maskThreshold;
+            if (entry.maskFeather >= 0.0f)
+                g_pGlobalState->layerNamespaceMaskFeathers[entry.ns] = entry.maskFeather;
             if (entry.liveResample >= 0)
                 g_pGlobalState->layerNamespaceLiveResample[entry.ns] = entry.liveResample != 0;
             if (entry.maskMode)

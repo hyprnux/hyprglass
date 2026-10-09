@@ -58,7 +58,8 @@ SSampleMap sampleMapFor(const CBox& box, int downscale) {
     return map;
 }
 
-bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage) {
+bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage,
+                         const PHLMONITOR& monitor) {
     if (!source)
         return false;
 
@@ -72,7 +73,14 @@ bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source
     if (x2 <= x1 || y2 <= y1)
         return true;
 
-    return CRegion(CBox{x1, y1, x2 - x1, y2 - y1}).subtract(damage).empty();
+    // Render damage is in the rotated monitor space while the blit reads unrotated
+    // framebuffer pixels: transform it like Hyprland does for the output damage.
+    CRegion framebufferDamage = damage.copy();
+    if (monitor)
+        framebufferDamage.transform(Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform)),
+                                    monitor->m_transformedSize.x, monitor->m_transformedSize.y);
+
+    return CRegion(CBox{x1, y1, x2 - x1, y2 - y1}).subtract(framebufferDamage).empty();
 }
 
 SFoldedBlur foldBlurPasses(float radius, int iterations) noexcept {
@@ -469,6 +477,7 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
     glUniform1f(uniforms.lensMaxPx, lensDistortionValue * minDimensionPx * 0.006f);
 
     glUniform1f(uniforms.refractionStrength,  resolvePresetFloat(resolveContext, &SPresetValues::refractionStrength, &SOverridableConfig::refractionStrength));
+    glUniform1f(uniforms.noiseStrength,       resolvePresetFloat(resolveContext, &SPresetValues::noiseStrength, &SOverridableConfig::noiseStrength));
     glUniform1f(uniforms.chromaticAberration, resolvePresetFloat(resolveContext, &SPresetValues::chromaticAberration, &SOverridableConfig::chromaticAberration));
     glUniform1f(uniforms.fresnelStrength,     resolvePresetFloat(resolveContext, &SPresetValues::fresnelStrength, &SOverridableConfig::fresnelStrength));
     glUniform1f(uniforms.specularStrength,    resolvePresetFloat(resolveContext, &SPresetValues::specularStrength, &SOverridableConfig::specularStrength));
@@ -531,6 +540,7 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
             static_cast<float>(mask->uvScale.x),
             static_cast<float>(mask->uvScale.y));
         glUniform1f(uniforms.maskAlphaThreshold, mask->alphaThreshold);
+        glUniform1f(uniforms.maskCoverage, mask->coverage);
         glUniform1i(uniforms.maskMode, mask->maskMode);
         glUniform1i(uniforms.regionRectCount, mask->regionRectCount);
         if (mask->regionRectCount > 0)
@@ -543,6 +553,7 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
     } else {
         glUniform1i(uniforms.useMask, 0);
         glUniform1f(uniforms.maskAlphaThreshold, 0.001f);
+        glUniform1f(uniforms.maskCoverage, 0.0f);
         glUniform1i(uniforms.maskMode, 0);
         glUniform1i(uniforms.regionRectCount, 0);
         // Windows, and layers outside PROTOCOL_REGION, always sample the same
