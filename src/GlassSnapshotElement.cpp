@@ -159,8 +159,8 @@ std::vector<UP<IPassElement>> CGlassSnapshotElement::draw(Render::CRenderContext
         Diagnostics::recordStateDesync("scissor on before the x-ray copy");
     }
 
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, *sourceId);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, *snapshotId);
+    g_pHyprOpenGL->bindFramebuffer(GL_READ_FRAMEBUFFER, *sourceId);
+    g_pHyprOpenGL->bindFramebuffer(GL_DRAW_FRAMEBUFFER, *snapshotId);
     for (const auto& rect : copied.getRects())
         glBlitFramebuffer(rect.x1, rect.y1, rect.x2, rect.y2, rect.x1, rect.y1, rect.x2, rect.y2, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 

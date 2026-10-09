@@ -39,7 +39,6 @@
 #include <dlfcn.h>
 #include <optional>
 #include <sstream>
-#include <cassert>
 
 static void clearLayerGlassOnClose(PHLLS layerSurface) {
     if (!g_pGlobalState || !layerSurface)
@@ -185,6 +184,10 @@ static bool isRedundantCopy(const PHLWINDOW& window, const PHLMONITOR& monitor) 
 }
 
 static void beginWindowRender(Render::CRenderContext& ctx) {
+    // Before any early return: snapshots and foreign renders queue their glass
+    // into the pass they render, and before the dedupe redirect below.
+    g_pGlobalState->dedupe.windowPass = &g_pHyprRenderer->currentPass(ctx);
+
     // the real monitor pass only: overview/screencopy framebuffers and snapshots
     // render the window once and have no scene behind to sample
     if (ctx.m_data.projectionType != Render::RPT_MONITOR || ctx.m_renderingSnapshot)
@@ -210,8 +213,7 @@ static void beginWindowRender(Render::CRenderContext& ctx) {
             dedupe.sawFullscreen = true;
         // renderWindow queues its surfaces, shadow and border through
         // addPassElement, so redirecting the pass for its duration drops that
-        // whole copy. Popups bypass it (g_pHyprRenderer.currentPass(ctx).add) and still land under
-        // the fullscreen window. Our own glass is skipped in queueGlassPass.
+        // whole copy, popups included. Our own glass is skipped in queueGlassPass.
         else if (!dedupe.guard && isRedundantCopy(window, monitor)) {
             dedupe.sink.clear();
             dedupe.guard = g_pHyprRenderer->redirectPass(ctx, &dedupe.sink);
@@ -224,6 +226,7 @@ static void beginWindowRender(Render::CRenderContext& ctx) {
 
 static void endWindowRender() {
     auto& dedupe = g_pGlobalState->dedupe;
+    dedupe.windowPass = nullptr;
     if (!dedupe.guard)
         return;
 
@@ -257,9 +260,9 @@ static void onRenderStage(const Event::SRenderStageEvent event) {
                 queueXraySnapshot(event.context->get());
             break;
         case RENDER_PRE_WINDOW:
-          assert(event.context);
-          beginWindowRender(event.context->get());
-          break;
+            if (event.context)
+                beginWindowRender(event.context->get());
+            break;
         case RENDER_POST_WINDOW: endWindowRender(); break;
         // defensive: both stages are past the last renderWindow of the frame, so
         // a leaked guard is released and the sink drops its buffer references
@@ -557,6 +560,17 @@ static void hkRenderPassAdd(Render::CRenderPass* pass, UP<IPassElement>&& el) {
     // registered, so there is nothing further to look up.
     const auto& config = g_pGlobalState->config;
     if (!(config.subsurfacesEnabled && **config.subsurfacesEnabled)) {
+        callOriginalRenderPassAdd(pass, std::move(el));
+        return;
+    }
+
+    // Snapshots (closing-window/layer fade captures) start transparent/black —
+    // sampling one as a background would bake that into the snapshot, same
+    // reasoning as hkRenderLayer. A foreign render (overview/screencopy replay,
+    // or one with its own render modifier already set) must not create or
+    // touch any of our per-surface state either. The hook gets no ctx, but the
+    // renderer's context is the only one, snapshots included.
+    if (RenderGuards::shouldSkipGlass(g_pHyprRenderer->context())) {
         callOriginalRenderPassAdd(pass, std::move(el));
         return;
     }
@@ -940,6 +954,14 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // drop the redirect and the sink's elements while the plugin is still mapped
     g_pGlobalState->dedupe.reset();
 
+    // Outside a render the context pass is empty: defence in depth only.
+    auto& pass = g_pHyprRenderer->context().m_pass;
+    pass.removeAllOfType("CGlassPassElement");
+    pass.removeAllOfType("CGlassLayerPassElement");
+    pass.removeAllOfType("CGlassLayerCompositeElement");
+    pass.removeAllOfType("CGlassSubsurfacePassElement");
+    pass.removeAllOfType("CGlassSubsurfaceCompositeElement");
+    pass.removeAllOfType("CGlassSnapshotElement");
     g_pGlobalState->backgroundSnapshots.clear();
 
     Diagnostics::shutdown();

@@ -192,7 +192,7 @@ void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMO
     m_savedCurrentFB = source;
 
     ctx.m_data.currentFB = sharedFB;
-    glBindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(sharedFB.get())->getFBID());
+    g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(sharedFB.get())->getFBID());
 
     CBox clearBox = transformBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
 
@@ -211,7 +211,7 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
                                                  const CBox& transformBox, CRegion& transformedRegion, float alpha) {
     if (m_savedCurrentFB) {
         ctx.m_data.currentFB = m_savedCurrentFB;
-        glBindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_savedCurrentFB.get())->getFBID());
+        g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_savedCurrentFB.get())->getFBID());
         m_savedCurrentFB.reset();
     }
 

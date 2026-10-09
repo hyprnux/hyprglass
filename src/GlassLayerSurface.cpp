@@ -420,7 +420,7 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
     m_savedCurrentFB = source;
 
     ctx.m_data.currentFB = m_surfaceTempFramebuffer;
-    glBindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_surfaceTempFramebuffer.get())->getFBID());
+    g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_surfaceTempFramebuffer.get())->getFBID());
 
     // Unpadded: the composite quad only ever reads transformBox (rawBox, never
     // padded), so the SAMPLE_PADDING_PX-expanded part of a padded clear is never
@@ -444,7 +444,7 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
     // Restore the original currentFB before compositing
     if (m_savedCurrentFB) {
         ctx.m_data.currentFB = m_savedCurrentFB;
-        glBindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_savedCurrentFB.get())->getFBID());
+        g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_savedCurrentFB.get())->getFBID());
         m_savedCurrentFB.reset();
     }
 

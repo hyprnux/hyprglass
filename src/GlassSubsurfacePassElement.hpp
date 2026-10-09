@@ -35,4 +35,6 @@ class CGlassSubsurfacePassElement : public IPassElement {
 
   private:
     SData m_data;
+    // set once draw() redirected currentFB, which then differs from mainFB
+    bool m_redirected = false;
 };

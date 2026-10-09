@@ -202,10 +202,12 @@ void CGlassDecoration::queueGlassPass(Render::CRenderContext& ctx, float alpha, 
         data.queueIndex  = m_glassQueueIndex;
     }
 
-    // currentPass, never addPassElement: draw() runs inside Hyprland's own
-    // per-window redirect for transformed windows (motion blur), whose pass
-    // renders into a work buffer cleared to transparent — nothing to sample.
-    g_pHyprRenderer->currentPass(ctx).add(makeUnique<CGlassPassElement>(data));
+    // The pass current at RENDER_PRE_WINDOW, not the one current now: draw() runs inside
+    // Hyprland's redirect for transformed windows (wobble, motion blur), whose nested
+    // pass renders into a work buffer cleared to transparent, so there is nothing to
+    // sample. A plugin's own redirect around renderWindow still receives it.
+    const auto windowPass = g_pGlobalState->dedupe.windowPass;
+    (windowPass ? *windowPass : g_pHyprRenderer->currentPass(ctx)).add(makeUnique<CGlassPassElement>(data));
 }
 
 void CGlassDecoration::draw(Render::CRenderContext& ctx, PHLMONITOR monitor, float const& alpha, const Render::SWindowRenderPresentation&) {
@@ -502,6 +504,14 @@ eDecorationType CGlassDecoration::getDecorationType() {
 // PHLWINDOW argument is ignored on purpose: a third-party replay passes its own
 // handle, while our state is keyed on the owner we were constructed with.
 void CGlassDecoration::updateWindow(PHLWINDOW) {
+    // A plugin may replay this mid-render under substituted geometry. The render
+    // context is active exactly between begin() and finishRender(). Above the
+    // m_last* store, so the next real update bumps.
+    if (g_pHyprRenderer->context().active())
+        return;
+
+    damageEntire();
+
     if (!g_pGlobalState || resolveEnabled() != EEnabledResolution::Enabled)
         return;
 
@@ -529,7 +539,6 @@ void CGlassDecoration::updateWindow(PHLWINDOW) {
         !workspace->m_alpha->isBeingAnimated() && !(ownWindow->m_state & Desktop::View::WINDOW_STATE_PINNED))
         return;
 
-    damageEntire();
     g_pGlobalState->bumpSceneGeneration(monitor);
 }
 

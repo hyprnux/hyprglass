@@ -171,13 +171,13 @@ void sampleBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sam
     // would otherwise leave uninitialized GPU memory (pink artifacts) outside
     // the blit; a full-rect blit overwrites every texel, so the clear is redundant.
     if (destinationClamped) {
-        glBindFramebuffer(GL_FRAMEBUFFER, fbId(sampleFramebuffer));
+        g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, fbId(sampleFramebuffer));
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT);
     }
 
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbId(sourceFramebuffer));
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbId(sampleFramebuffer));
+    g_pHyprOpenGL->bindFramebuffer(GL_READ_FRAMEBUFFER, fbId(sourceFramebuffer));
+    g_pHyprOpenGL->bindFramebuffer(GL_DRAW_FRAMEBUFFER, fbId(sampleFramebuffer));
     glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1,
                       dstX0, dstY0, dstX1, dstY1,
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
@@ -306,7 +306,7 @@ void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& samp
             // The texture path tracks no buffer of its own, and the window's real draw
             // may be discarded as occluded, releasing the buffer we just read.
             if (surface->m_current.buffer && !surface->m_current.buffer->isSynchronous())
-                ctx.m_usedAsyncBuffers.emplace_back(surface, surface->m_current.buffer);
+                Render::addSurfaceBufferUse(ctx.m_usedAsyncBuffers, surface, surface->m_current.buffer);
         },
         nullptr);
 }
@@ -361,18 +361,18 @@ void blurBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer> sample
     glUniform1f(blurUniforms.radius, radius);
     glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
     g_pHyprOpenGL->setViewport(0, 0, width, height);
-    glActiveTexture(GL_TEXTURE0);
+    g_pHyprOpenGL->setActiveTexture(GL_TEXTURE0);
 
     // Ping-pong at full resolution: sampleFramebuffer ↔ blurTempFramebuffer
     for (int iteration = 0; iteration < iterations; iteration++) {
         // Horizontal pass: sampleFramebuffer → blurTempFramebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, fbId(blurTempFramebuffer));
+        g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, fbId(blurTempFramebuffer));
         sampleFramebuffer->getTexture()->bind();
         glUniform2f(blurUniforms.direction, 1.0f / width, 0.0f);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         // Vertical pass: blurTempFramebuffer → sampleFramebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, fbId(sampleFramebuffer));
+        g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, fbId(sampleFramebuffer));
         blurTempFramebuffer->getTexture()->bind();
         glUniform2f(blurUniforms.direction, 0.0f, 1.0f / height);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -383,7 +383,7 @@ void blurBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer> sample
     // sizes are wrong here on 90°/270° monitors, where m_transformedSize is
     // swapped relative to the framebuffer's native orientation (#41).
     g_pHyprRenderer->blend(true); // Hyprland's state at every element boundary
-    glBindFramebuffer(GL_FRAMEBUFFER, fbId(callerFramebuffer));
+    g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, fbId(callerFramebuffer));
     glBindVertexArray(0);
     g_pHyprOpenGL->setViewport(0, 0,
         static_cast<int>(callerFramebuffer->m_size.x),
@@ -415,17 +415,17 @@ void applyGlassEffect(Render::CRenderContext& ctx,
 
     glMatrix.transpose();
 
-    glBindFramebuffer(GL_FRAMEBUFFER, fbId(targetFramebuffer));
-    glActiveTexture(GL_TEXTURE0);
+    g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, fbId(targetFramebuffer));
+    g_pHyprOpenGL->setActiveTexture(GL_TEXTURE0);
     texture->bind();
 
     // Layers only: bind the temp FBO texture (rendered surface) on texture unit 1.
     // The shader samples it to mask glass to visible content and composite surface on top.
     // Windows pass mask=nullptr so this block is skipped.
     if (mask && mask->textureId != 0) {
-        glActiveTexture(GL_TEXTURE1);
+        g_pHyprOpenGL->setActiveTexture(GL_TEXTURE1);
         glBindTexture(mask->target, mask->textureId);
-        glActiveTexture(GL_TEXTURE0);
+        g_pHyprOpenGL->setActiveTexture(GL_TEXTURE0);
     }
 
     auto shader = g_pHyprOpenGL->useShader(shaderManager.glassShader);

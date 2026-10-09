@@ -135,6 +135,9 @@ struct SGlobalState {
         Render::CRenderPass                  sink;
         UP<Hyprutils::Utils::CScopeGuard>    guard;
         std::vector<Desktop::View::CWindow*> dropped; // identity only, never dereferenced
+        // currentPass() at RENDER_PRE_WINDOW, before Hyprland redirects a transformed
+        // window into its own pass: window glass goes here (see queueGlassPass)
+        Render::CRenderPass*                 windowPass    = nullptr;
         bool                                 sawFullscreen = false;
 
         // one workspace pass
@@ -149,6 +152,7 @@ struct SGlobalState {
         void reset() {
             resetEpoch();
             dropped.clear();
+            windowPass = nullptr;
         }
     } dedupe;
 

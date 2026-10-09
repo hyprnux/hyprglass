@@ -8,8 +8,8 @@ CGlassSubsurfaceCompositeElement::CGlassSubsurfaceCompositeElement(SData data)
     : m_data(std::move(data)) {}
 
 std::vector<UP<IPassElement>> CGlassSubsurfaceCompositeElement::draw(Render::CRenderContext& ctx) {
-    if (RenderGuards::shouldSkipGlass(ctx))
-        return {};
+    // No foreign-render guard: the pre-surface redirect itself makes currentFB differ
+    // from mainFB. compositeAndRestore() restores first, then bails if nothing was redirected.
 
     // CRegion::getExtents() is non-const, so compositeAndRestore() takes the
     // region by mutable reference — m_data.transformedRegion is this element's

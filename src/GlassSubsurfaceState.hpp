@@ -51,6 +51,7 @@ class CGlassSubsurfaceState {
                               const CBox& transformBox, CRegion& transformedRegion, float alpha);
 
     [[nodiscard]] bool alive() const { return !m_surface.expired(); }
+    [[nodiscard]] bool redirectedThisFrame() const { return m_redirectedThisFrame; }
 
     // Diagnostic accessors for `hyprctl hyprglass items` (Diagnostics.cpp). All
     // reflect values already computed by the most recent compositeAndRestore()

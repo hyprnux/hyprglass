@@ -15,14 +15,18 @@ std::vector<UP<IPassElement>> CGlassSubsurfacePassElement::draw(Render::CRenderC
     if (currentDebugMode() == EDebugMode::HINTS_ONLY)
         return {};
 
-    if (m_data.state)
+    if (m_data.state) {
         m_data.state->sampleAndRedirect(ctx, m_data.monitor.lock(), m_data.transformBox, m_data.alpha);
+        m_redirected = m_data.state->redirectedThisFrame();
+    }
 
     return {};
 }
 
 std::optional<CBox> CGlassSubsurfacePassElement::boundingBox(Render::CRenderContext& ctx) {
-    if (RenderGuards::shouldSkipGlass(ctx))
+    // Hyprland asks again after draw() for an animated blur provider: our own
+    // redirect must not read as a foreign render, or it damages the whole monitor.
+    if (!m_redirected && RenderGuards::shouldSkipGlass(ctx))
         return std::nullopt;
 
     return SubsurfaceGeometry::toPaddedLogicalBox(m_data.itemLogicalBox, m_data.monitor.lock(), GlassRenderer::SAMPLE_PADDING_PX);
