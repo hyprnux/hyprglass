@@ -252,7 +252,7 @@ void main() {
     vec2 uv = v_texcoord;
 
     // Layers only: sample the temp FBO to get the rendered surface pixel.
-    // Discard fully transparent fragments so glass only covers visible content.
+    // Glass only covers visible content: layer pixels under the mask threshold get none.
     // For windows, hasMask is false and this block is skipped entirely.
     vec4 surfacePixel = vec4(0.0);
     float maskRamp = 1.0;
@@ -274,8 +274,9 @@ void main() {
             }
             if (!insideRegion) { fragColor = surfacePixel; return; } // premultiplied, output as-is
         } else {
-            if (surfacePixel.a < maskAlphaThreshold)
-                discard;
+            // Below the threshold the content gets no glass but is still drawn
+            // (shadows, faint fills), like outside a region.
+            if (surfacePixel.a < maskAlphaThreshold) { fragColor = surfacePixel; return; } // premultiplied, output as-is
             // Antialiased edges get proportionally less glass, so rounded corners fade
             // out instead of ending on a hard, stepped edge. Not smoothstep(): it is undefined
             // when threshold + coverage rounds to threshold in float.
