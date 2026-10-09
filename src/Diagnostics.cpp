@@ -294,12 +294,14 @@ std::string formatStats(IPC::Socket1::eOutputFormat format) {
                 "\"windowCacheHits\": {}, \"windowCacheMisses\": {}, \"windowDeferredResamples\": {}, \"windowPassDiscarded\": {}, "
                 "\"layerGlassDraws\": {}, \"layerCacheHits\": {}, \"layerCacheMisses\": {}, \"layerDeferredResamples\": {}, "
                 "\"subsurfaceGlassDraws\": {}, \"subsurfaceCacheHits\": {}, \"subsurfaceCacheMisses\": {}, \"subsurfaceDeferredResamples\": {}, "
+                "\"xrayCopies\": {}, \"xrayDeferredResamples\": {}, \"xrayEvictions\": {}, "
                 "\"blurPasses\": {}, "
                 "\"sampledMegapixels\": {:.3f}, \"glassMegapixels\": {:.3f}, \"stageTimersAvgMicroseconds\": {{",
                 escapeJSONStrings(monitorLabel(id)), counters.frames, counters.windowGlassDraws, counters.windowOpaqueSkipped,
                 counters.windowCacheHits, counters.windowCacheMisses, counters.windowDeferredResamples, counters.windowPassDiscarded,
                 counters.layerGlassDraws, counters.layerCacheHits, counters.layerCacheMisses, counters.layerDeferredResamples,
                 counters.subsurfaceGlassDraws, counters.subsurfaceCacheHits, counters.subsurfaceCacheMisses, counters.subsurfaceDeferredResamples,
+                counters.xrayCopies, counters.xrayDeferredResamples, counters.xrayEvictions,
                 counters.blurPasses, counters.sampledMegapixels, counters.glassMegapixels);
 
             const auto& stageNanoseconds = stageNanosecondsFor(id);
@@ -330,17 +332,19 @@ std::string formatStats(IPC::Socket1::eOutputFormat format) {
         out += "  (no frames recorded yet)\n";
 
     out += std::format(
-        "\n  {:<14} {:>8} {:>10} {:>12} {:>9} {:>9} {:>10} {:>9} {:>12} {:>10} {:>10} {:>11} {:>10} {:>12} {:>11} {:>11} {:>10} {:>12} {:>11}\n",
+        "\n  {:<14} {:>8} {:>10} {:>12} {:>9} {:>9} {:>10} {:>9} {:>12} {:>10} {:>10} {:>11} {:>10} {:>12} {:>11} {:>11} {:>10} {:>11} {:>11} {:>10} {:>12} {:>11}\n",
         "monitor", "frames", "win_draws", "opaque_skip", "win_hit", "win_miss", "win_defer", "win_disc", "layer_draws", "layer_hit",
-        "layer_miss", "layer_defer", "sub_draws", "sub_hit", "sub_miss", "sub_defer", "blur_pass", "sampled_mpx", "glass_mpx");
+        "layer_miss", "layer_defer", "sub_draws", "sub_hit", "sub_miss", "sub_defer", "xray_copy", "xray_defer", "xray_evict", "blur_pass",
+        "sampled_mpx", "glass_mpx");
 
     for (const auto& [id, counters] : s_counters) {
         out += std::format(
-            "  {:<14} {:>8} {:>10} {:>12} {:>9} {:>9} {:>10} {:>9} {:>12} {:>10} {:>10} {:>11} {:>10} {:>12} {:>11} {:>11} {:>10} {:>12.2f} {:>11.2f}\n",
+            "  {:<14} {:>8} {:>10} {:>12} {:>9} {:>9} {:>10} {:>9} {:>12} {:>10} {:>10} {:>11} {:>10} {:>12} {:>11} {:>11} {:>10} {:>11} {:>11} {:>10} {:>12.2f} {:>11.2f}\n",
             monitorLabel(id), counters.frames, counters.windowGlassDraws, counters.windowOpaqueSkipped, counters.windowCacheHits,
             counters.windowCacheMisses, counters.windowDeferredResamples, counters.windowPassDiscarded, counters.layerGlassDraws,
             counters.layerCacheHits, counters.layerCacheMisses, counters.layerDeferredResamples,
             counters.subsurfaceGlassDraws, counters.subsurfaceCacheHits, counters.subsurfaceCacheMisses, counters.subsurfaceDeferredResamples,
+            counters.xrayCopies, counters.xrayDeferredResamples, counters.xrayEvictions,
             counters.blurPasses, counters.sampledMegapixels, counters.glassMegapixels);
 
         if (counters.frames > 0) {
@@ -420,9 +424,9 @@ std::string formatStatus(IPC::Socket1::eOutputFormat format) {
             return std::format("{{\"enabled\": {}, \"active\": {}, \"reason\": {}}}", status.enabled ? "true" : "false", status.active() ? "true" : "false",
                                status.active() ? std::string("null") : std::format("\"{}\"", status.reason));
         };
-        return std::format("{{\n  \"schema\": {}, \"version\": \"{}\", \"active\": {}, \"shaders\": \"{}\", \"itemProtocol\": {},\n"
+        return std::format("{{\n  \"schema\": {}, \"version\": \"{}\", \"versionCheck\": \"{}\", \"active\": {}, \"shaders\": \"{}\", \"itemProtocol\": {},\n"
                            "  \"features\": {{\n    \"windows\": {},\n    \"layers\": {},\n    \"subsurfaces\": {}\n  }}\n}}\n",
-                           STATUS_SCHEMA, escapeJSONStrings(std::string(PLUGIN_VERSION)), active ? "true" : "false", shaders,
+                           STATUS_SCHEMA, escapeJSONStrings(std::string(PLUGIN_VERSION)), g_pGlobalState->versionCheck, active ? "true" : "false", shaders,
                            protocolActive ? "true" : "false", featureJson(windows), featureJson(layers), featureJson(subsurfaces));
     }
 
@@ -437,6 +441,7 @@ std::string formatStatus(IPC::Socket1::eOutputFormat format) {
     };
 
     std::string out = std::format("hyprglass {}: {}\n", PLUGIN_VERSION, active ? "active" : "inactive");
+    out += std::format("  version check: {}\n", g_pGlobalState->versionCheck);
     out += std::format("  shaders: {}\n", shaders);
     out += std::format("  windows: {}   layers: {}   subsurfaces: {}\n", featureText(windows), featureText(layers), featureText(subsurfaces));
     out += std::format("  hyprglass_item_v1 protocol: {}\n", protocolActive ? "active" : "inactive");
@@ -505,6 +510,18 @@ void recordSubsurfaceCacheMiss(MONITORID monitor) {
 
 void recordSubsurfaceDeferredResample(MONITORID monitor) {
     countersFor(monitor).subsurfaceDeferredResamples++;
+}
+
+void recordXrayCopy(MONITORID monitor) {
+    countersFor(monitor).xrayCopies++;
+}
+
+void recordXrayDeferredResample(MONITORID monitor) {
+    countersFor(monitor).xrayDeferredResamples++;
+}
+
+void recordXrayEvict(MONITORID monitor) {
+    countersFor(monitor).xrayEvictions++;
 }
 
 void recordBlurPasses(MONITORID monitor, uint64_t passes) {

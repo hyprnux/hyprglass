@@ -23,7 +23,7 @@ precision highp float;
  * 3. Edge raw-texture blend for vivid color pickup
  * 4. Subtle center dome lens magnification
  * 5. Frosted tint (brightness boost + desaturation)
- * 6. Configurable color tint overlay
+ * 6. Configurable color tint overlay, then frosted grain
  * 7. Bevel (thin lit line at the edge)
  * 8. Fresnel edge glow (white or tinted by the background)
  * 9. Specular highlight (top)
@@ -37,6 +37,7 @@ uniform vec4 radii;            // per-corner radius: top-left, top-right, bottom
 uniform vec2 uvPadding;
 
 uniform float refractionStrength;
+uniform float noiseStrength;
 uniform float chromaticAberration;
 uniform float fresnelStrength;
 uniform float specularStrength;
@@ -76,9 +77,10 @@ uniform int useMask;
 uniform vec2 maskUVOffset;
 uniform vec2 maskUVScale;
 uniform float maskAlphaThreshold;
+uniform float maskCoverage;    // alpha mask: glass fades in over this alpha range above the threshold (0 = hard mask)
 uniform int maskMode;          // 0 = alpha threshold, 1 = protocol region
-uniform int regionRectCount;   // 0..16
-uniform vec4 regionRects[16];  // box-local pixels: xy = offset from box top-left, zw = size
+uniform int regionRectCount;   // 0..64
+uniform vec4 regionRects[64];  // box-local pixels: xy = offset from box top-left, zw = size
 
 // Subsurface item glass only: the rounded-box SDF (getCornerSDF below) is
 // evaluated over this sub-rect of the drawn box instead of the full box —
@@ -117,6 +119,13 @@ vec2 toTexUV(vec2 wuv) {
 vec4 sampleBlurred(vec2 wuv) {
     vec2 tuv = toTexUV(toSampleBoxUV(wuv));
     return texture(tex, clamp(tuv, 0.001, 0.999));
+}
+
+// hash12 from "Hash without Sine" (Dave Hoskins), tuned for integer pixel coordinates
+float pixelHash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
 }
 
 // ============================================================================
@@ -243,9 +252,10 @@ void main() {
     vec2 uv = v_texcoord;
 
     // Layers only: sample the temp FBO to get the rendered surface pixel.
-    // Discard fully transparent fragments so glass only covers visible content.
+    // Glass only covers visible content: layer pixels under the mask threshold get none.
     // For windows, hasMask is false and this block is skipped entirely.
     vec4 surfacePixel = vec4(0.0);
+    float maskRamp = 1.0;
     bool hasMask = (useMask == 1);
     if (hasMask) {
         vec2 maskUV = uv * maskUVScale + maskUVOffset;
@@ -263,8 +273,17 @@ void main() {
                 }
             }
             if (!insideRegion) { fragColor = surfacePixel; return; } // premultiplied, output as-is
-        } else if (surfacePixel.a < maskAlphaThreshold) {
-            discard;
+        } else {
+            // Below the threshold the content gets no glass but is still drawn
+            // (shadows, faint fills), like outside a region.
+            if (surfacePixel.a < maskAlphaThreshold) { fragColor = surfacePixel; return; } // premultiplied, output as-is
+            // Antialiased edges get proportionally less glass, so rounded corners fade
+            // out instead of ending on a hard, stepped edge. Not smoothstep(): it is undefined
+            // when threshold + coverage rounds to threshold in float.
+            if (maskCoverage > 0.0) {
+                float t = clamp((surfacePixel.a - maskAlphaThreshold) / maskCoverage, 0.0, 1.0);
+                maskRamp = t * t * (3.0 - 2.0 * t);
+            }
         }
     }
 
@@ -410,6 +429,17 @@ void main() {
     // ========================================
     color = mix(color, tintColor, tintAlpha);
 
+    // grain-free copy for the rim tints, so the grain does not speckle their hue
+    vec3 tintSource = color;
+
+    // ========================================
+    // FROSTED GRAIN
+    // Hashed on box-local pixels so the grain moves with the glass and keeps
+    // its size on any window; after the tint so the tint does not fade it.
+    // ========================================
+    if (noiseStrength > 0.001)
+        color += (pixelHash(floor(uv * fullSize)) - 0.5) * noiseStrength * 0.1;
+
     // ========================================
     // BEVEL — thin lit line hugging the edge, brightest on the side facing the light
     // ========================================
@@ -425,13 +455,15 @@ void main() {
         vec3 bevelLight = vec3(1.0);
         if (bevelColorAlpha > 0.001) bevelLight = mix(vec3(1.0), bevelColor, bevelColorAlpha);   // a dark colour gives a dark line
         if (bevelTint > 0.001) {
-            float maxC = max(max(color.r, color.g), color.b);
-            bevelLight = mix(bevelLight, maxC > 0.001 ? color / maxC : vec3(1.0), bevelTint);
+            float maxC = max(max(tintSource.r, tintSource.g), tintSource.b);
+            bevelLight = mix(bevelLight, maxC > 0.001 ? tintSource / maxC : vec3(1.0), bevelTint);
         }
 
-        color = mix(color, bevelLight, ring * facing * bevelStrength);
-        if (bevelShadow > 0.001)
-            color = mix(color, vec3(0.0), ring * (1.0 - facing) * bevelShadow);
+        // the fresnel tint below reads the bevelled colour, so bevel the copy too
+        float bevelLit = ring * facing * bevelStrength;
+        float bevelDark = bevelShadow > 0.001 ? ring * (1.0 - facing) * bevelShadow : 0.0;
+        color = mix(mix(color, bevelLight, bevelLit), vec3(0.0), bevelDark);
+        tintSource = mix(mix(tintSource, bevelLight, bevelLit), vec3(0.0), bevelDark);
     }
 
     // ========================================
@@ -443,8 +475,8 @@ void main() {
         if (fresnelColorAlpha > 0.001) fresnelLight = mix(vec3(1.0), fresnelColor, fresnelColorAlpha);   // chosen colour, then the tint below
         if (fresnelTint > 0.001) {
             // rim light in the background's own hue, at full brightness so the gain matches white
-            float maxC = max(max(color.r, color.g), color.b);
-            fresnelLight = mix(fresnelLight, maxC > 0.001 ? color / maxC : vec3(1.0), fresnelTint);
+            float maxC = max(max(tintSource.r, tintSource.g), tintSource.b);
+            fresnelLight = mix(fresnelLight, maxC > 0.001 ? tintSource / maxC : vec3(1.0), fresnelTint);
         }
         color += fresnelLight * fresnel;
     }
@@ -477,7 +509,7 @@ void main() {
     // float framebuffers (FP16 under wide-gamut cm) store unbounded values and
     // the glass re-samples its own output: unclamped color diverges over frames
     color = clamp(color, 0.0, 1.0);
-    float glassA = clamp(glassOpacity * cornerAlpha, 0.0, 1.0);
+    float glassA = clamp(glassOpacity * cornerAlpha * maskRamp, 0.0, 1.0);
 
     if (hasMask) {
         // Layers only: composite the rendered surface over the glass effect

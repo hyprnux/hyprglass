@@ -4,6 +4,7 @@
 #include "PluginConfig.hpp"
 #include "ShaderManager.hpp"
 
+#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
@@ -67,12 +68,14 @@ struct SGlobalState {
     std::unordered_set<std::string> layerNamespaceExclude;
     // Per-namespace preset overrides (namespace → preset name)
     std::unordered_map<std::string, std::string> layerNamespacePresets;
-    // Per-namespace mask alpha threshold (namespace → threshold, default 0.001)
+    // Per-namespace mask alpha threshold (namespace → threshold, overrides layers:mask_threshold)
     std::unordered_map<std::string, float> layerNamespaceMaskThresholds;
     // Per-namespace live resample override (namespace → enabled)
     std::unordered_map<std::string, bool> layerNamespaceLiveResample;
     // Per-namespace mask mode override (namespace → mode)
     std::unordered_map<std::string, ELayerMaskMode> layerNamespaceMaskModes;
+    // Per-namespace mask_feather override (namespace → feather)
+    std::unordered_map<std::string, float> layerNamespaceMaskFeathers;
 
     // Per-monitor generation counter, incremented when the scene behind layers
     // changes on that monitor. Layer surfaces compare to their cached value to
@@ -149,6 +152,23 @@ struct SGlobalState {
         }
     } dedupe;
 
+    // Pending re-enable of Hyprland shadows after a config reload (see main.cpp)
+    UP<SEventLoopDoLaterLock> shadowFixLock;
+    // X-ray: per-monitor copy of the frame as it stood before any window was
+    // drawn, kept by CGlassSnapshotElement (see GlassSnapshotElement.hpp).
+    struct SBackgroundSnapshot {
+        SP<Render::IFramebuffer> framebuffer;
+        // Framebuffer pixels that still hold this monitor's current background:
+        // cut by each frame's damage at RENDER_BEGIN, refilled by each copy.
+        CRegion valid;
+        // Counted per monitor, so frames rendered on another monitor never age
+        // this one's snapshot.
+        uint64_t monitorFrames    = 0;
+        uint64_t lastRequestFrame = 0;
+        uint64_t queuedFrame      = 0;
+    };
+    std::unordered_map<MONITORID, SBackgroundSnapshot> backgroundSnapshots;
+
     // renderLayer hook
     CFunctionHook* renderLayerHook = nullptr;
 
@@ -156,6 +176,9 @@ struct SGlobalState {
     CFunctionHook* renderPassAddHook             = nullptr;
     bool           renderPassAddSymbolFound      = false; // for the failure notification text
     bool           subsurfaceHookFailureNotified = false;
+
+    // `versionCheck` in `hyprctl hyprglass status`: match, unknown or skipped
+    std::string_view versionCheck = "unknown";
 };
 
 using Render::GL::g_pHyprOpenGL;
@@ -165,6 +188,9 @@ inline std::unique_ptr<SGlobalState> g_pGlobalState;
 
 // Decoration registered for this window, or nullptr. Borrowed, never owned.
 CGlassDecoration* glassDecorationFor(const PHLWINDOW& window);
+
+// Turns Hyprland shadows back on if window glass is in use and they are off.
+void scheduleShadowsForWindowGlass();
 
 inline constexpr std::string_view PLUGIN_NAME        = "hyprglass";
 inline constexpr std::string_view PLUGIN_DESCRIPTION = "Apple-style Liquid Glass effect";

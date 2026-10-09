@@ -31,6 +31,7 @@ bool CShaderManager::compileGlassShader() {
     const auto program = glassShader->program();
 
     glassUniforms.refractionStrength  = glGetUniformLocation(program, "refractionStrength");
+    glassUniforms.noiseStrength       = glGetUniformLocation(program, "noiseStrength");
     glassUniforms.chromaticAberration = glGetUniformLocation(program, "chromaticAberration");
     glassUniforms.fresnelStrength     = glGetUniformLocation(program, "fresnelStrength");
     glassUniforms.specularStrength    = glGetUniformLocation(program, "specularStrength");
@@ -68,6 +69,7 @@ bool CShaderManager::compileGlassShader() {
     glassUniforms.maskUVOffset        = glGetUniformLocation(program, "maskUVOffset");
     glassUniforms.maskUVScale         = glGetUniformLocation(program, "maskUVScale");
     glassUniforms.maskAlphaThreshold  = glGetUniformLocation(program, "maskAlphaThreshold");
+    glassUniforms.maskCoverage        = glGetUniformLocation(program, "maskCoverage");
     glassUniforms.maskMode            = glGetUniformLocation(program, "maskMode");
     glassUniforms.regionRectCount     = glGetUniformLocation(program, "regionRectCount");
     glassUniforms.regionRects         = glGetUniformLocation(program, "regionRects[0]");

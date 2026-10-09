@@ -2,6 +2,7 @@
 #include "BuiltInPresets.hpp"
 #include "Diagnostics.hpp"
 #include "GlassRenderer.hpp"
+#include "GlassSnapshotElement.hpp"
 #include "Globals.hpp"
 #include "LayerGeometry.hpp"
 #include "WorkspaceAnimation.hpp"
@@ -9,6 +10,8 @@
 #include <algorithm>
 #include <cmath>
 #include <GLES3/gl32.h>
+#include <hyprland/src/managers/SessionLockManager.hpp>
+#include <hyprland/src/protocols/LayerShell.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprutils/math/Misc.hpp>
@@ -45,6 +48,43 @@ bool CGlassLayerSurface::resolveThemeIsDark() const {
     } catch (...) {}
 
     return true;
+}
+
+bool CGlassLayerSurface::resolveXray() const {
+    // A background or bottom layer would sample its own previous output from
+    // the snapshot, and live sampling already shows nothing but what is under it.
+    const auto layerSurface = m_layerSurface.lock();
+    if (!layerSurface || layerSurface->m_layer <= ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM || !xrayHasBackground())
+        return false;
+
+    // Without a workspace no window is drawn and no snapshot is ever taken.
+    const auto monitor = layerSurface->m_monitor.lock();
+    if (!monitor || !monitor->m_activeWorkspace)
+        return false;
+
+    // The lockscreen pass renders layers with no snapshot copy before them, so a
+    // resample there would defer every frame until unlock.
+    if (g_pSessionLockManager && g_pSessionLockManager->isSessionLocked())
+        return false;
+
+    const bool            isDark = resolveThemeIsDark();
+    const std::string     preset = resolvePresetName();
+    const SResolveContext ctx    = {preset, isDark, g_pGlobalState->config, g_pGlobalState->customPresets};
+    return resolvePresetInt(ctx, &SPresetValues::xray, &SOverridableConfig::xray, GlobalDefaults::XRAY) > 0;
+}
+
+bool CGlassLayerSurface::xraySnapshotCovers(PHLMONITOR monitor) const {
+    const auto layerSurface = m_layerSurface.lock();
+    if (!layerSurface || !monitor)
+        return false;
+
+    const auto layerBox = LayerGeometry::computeLayerBox(layerSurface, monitor);
+    if (!layerBox)
+        return false;
+
+    // The full layer box: sampleAndRedirect() samples it or the blur region
+    // inside it, so covering it covers both.
+    return static_cast<bool>(xraySnapshotCovering(monitor, g_pHyprRenderer->m_renderData.currentFB, transformedLayerBox(*layerBox, monitor)));
 }
 
 std::string CGlassLayerSurface::resolvePresetName() const {
@@ -238,7 +278,7 @@ void CGlassLayerSurface::markBackgroundDirty() {
     damageSampleRegion();
 }
 
-void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
+void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha, bool xray) {
     auto& shaderManager = g_pGlobalState->shaderManager;
     shaderManager.initializeIfNeeded();
 
@@ -299,11 +339,15 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
     const bool forceLive = config.layersForceLiveResample && **config.layersForceLiveResample;
     const bool backgroundChanged = !m_hasCachedSample ||
                                    currentGeneration != m_lastSceneGeneration ||
-                                   isAnimating || m_backgroundDirty || forceLive || regionBoxChanged;
+                                   isAnimating || m_backgroundDirty || forceLive || regionBoxChanged ||
+                                   xray != m_cachedFromSnapshot;
 
+    // X-ray never samples the live frame: it holds the windows it hides.
     const CBox sampleBox     = regionSampleBox.value_or(transformBox);
+    const auto snapshot      = (xray && backgroundChanged) ? xraySnapshotCovering(monitor, source, sampleBox) : nullptr;
     const bool sampleCovered = !backgroundChanged ||
-                               GlassRenderer::sampleRegionCovered(sampleBox, source, g_pHyprRenderer->m_renderData.damage);
+                               (xray ? static_cast<bool>(snapshot) :
+                                       GlassRenderer::sampleRegionCovered(sampleBox, source, g_pHyprRenderer->m_renderData.damage, monitor));
 
     if (!layerSurface->mapped()) {
         // During fade-out, re-sampling captures stale pixels. Reuse cached sample.
@@ -316,7 +360,9 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
         m_backgroundDirty = true;
         damageSampleRegion();
         Diagnostics::recordLayerDeferredResample(monitorId);
-        if (!m_hasCachedSample)
+        if (xray)
+            Diagnostics::recordXrayDeferredResample(monitorId);
+        if (!m_hasCachedSample || (xray && !m_cachedFromSnapshot))
             return;
     } else if (backgroundChanged) {
         Diagnostics::recordLayerCacheMiss(monitorId);
@@ -328,7 +374,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
         float blurStrength   = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
         int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-        GlassRenderer::sampleBackground(m_sampleFramebuffer, source, regionSampleBox.value_or(transformBox), m_samplePaddingRatio, downscale);
+        GlassRenderer::sampleBackground(m_sampleFramebuffer, xray ? snapshot : source, sampleBox, m_samplePaddingRatio, downscale);
 
         float blurRadius     = blurStrength * 12.0f / downscale;
         int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
@@ -342,6 +388,7 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
         GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source);
 
         m_hasCachedSample      = true;
+        m_cachedFromSnapshot   = xray;
         m_lastSceneGeneration  = currentGeneration;
         m_backgroundDirty      = false;
     } else {
@@ -458,7 +505,8 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
 
     switch (maskSource) {
         case EMaskSource::ALPHA_THRESHOLD: {
-            float maskThreshold = 0.001f;
+            const auto& cfg     = g_pGlobalState->config;
+            float maskThreshold = cfg.layersMaskThreshold ? static_cast<float>(**cfg.layersMaskThreshold) : 0.001f;
             auto threshIt = g_pGlobalState->layerNamespaceMaskThresholds.find(layerSurface->m_namespace);
             if (threshIt != g_pGlobalState->layerNamespaceMaskThresholds.end())
                 maskThreshold = threshIt->second;
@@ -468,6 +516,15 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
             // makes the mask fall below threshold early and the glass blinks off.
             maskInfo.maskMode       = 0;
             maskInfo.alphaThreshold = maskThreshold * std::clamp(alpha, 0.0f, 1.0f);
+
+            // Region mode leaves coverage at 0: the app's region alone decides where glass goes.
+            float coverage  = cfg.layersMaskFeather ? static_cast<float>(**cfg.layersMaskFeather) : 0.0f;
+            auto coverageIt = g_pGlobalState->layerNamespaceMaskFeathers.find(layerSurface->m_namespace);
+            if (coverageIt != g_pGlobalState->layerNamespaceMaskFeathers.end())
+                coverage = coverageIt->second;
+            // Capped so full-alpha content still gets full-strength glass.
+            coverage          = std::clamp(coverage, 0.0f, std::max(0.0f, 1.0f - maskThreshold));
+            maskInfo.coverage = coverage * std::clamp(alpha, 0.0f, 1.0f);
             break;
         }
         case EMaskSource::PROTOCOL_REGION: {

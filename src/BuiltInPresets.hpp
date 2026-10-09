@@ -29,6 +29,7 @@ inline constexpr SThemeDefaults LIGHT_THEME_DEFAULTS = {1.12f, 0.92f, 0.85f, 0.1
 namespace GlobalDefaults {
     inline constexpr float   BLUR_STRENGTH        = 2.0f;
     inline constexpr int64_t BLUR_ITERATIONS      = 3;
+    inline constexpr float   NOISE_STRENGTH       = 0.0f;
     inline constexpr float   REFRACTION_STRENGTH  = 0.6f;
     inline constexpr float   CHROMATIC_ABERRATION = 0.5f;
     inline constexpr float   FRESNEL_STRENGTH     = 0.6f;
@@ -49,6 +50,7 @@ namespace GlobalDefaults {
     inline constexpr float   BEVEL_SHADOW         = 0.0f;
     inline constexpr float   SPECULAR_ANGLE       = 0.0f;
     inline constexpr float   SELF_SAMPLE          = 0.0f;
+    inline constexpr int64_t XRAY                 = 0;
 } // namespace GlobalDefaults
 
 // ── Built-in presets ─────────────────────────────────────────────────────────
@@ -108,6 +110,7 @@ inline SCustomPreset makeClear() {
     p.name = "clear";
 
     p.shared.blurStrength        = 0.0f;
+    p.shared.noiseStrength       = 0.0f;
     p.shared.refractionStrength  = 0.3f;
     p.shared.chromaticAberration = 0.2f;
     p.shared.fresnelStrength     = 0.3f;

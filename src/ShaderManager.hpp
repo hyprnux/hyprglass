@@ -6,6 +6,7 @@
 
 struct SGlassUniforms {
     GLint refractionStrength = -1;
+    GLint noiseStrength = -1;
     GLint chromaticAberration = -1;
     GLint fresnelStrength = -1;
     GLint specularStrength = -1;
@@ -45,6 +46,7 @@ struct SGlassUniforms {
     GLint maskUVOffset = -1;
     GLint maskUVScale = -1;
     GLint maskAlphaThreshold = -1;
+    GLint maskCoverage = -1;
     GLint maskMode = -1;
     GLint regionRectCount = -1;
     GLint regionRects = -1;

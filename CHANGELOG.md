@@ -1,4 +1,35 @@
 
+## [v0.10.0](https://github.com/Hyprnux/hyprglass/compare/v0.9.1...v0.10.0) - 2026-10-09
+
+### Bug Fixes
+
+* faint parts of bars and panels, like shadows, no longer disappear
+* steady, even grain on every window and theme ([#67](https://github.com/Hyprnux/hyprglass/issues/67))
+* window glass works even with shadows turned off
+* faster Hyprland startup with hyprglass loaded ([#88](https://github.com/Hyprnux/hyprglass/issues/88))
+* loading hyprglass twice no longer makes the two copies clash
+* glass works on rotated and flipped screens
+
+### CI/CD
+
+* releases are only built against a released Hyprland version
+
+### Documentation
+
+* what to do when Hyprland hangs at startup ([#88](https://github.com/Hyprnux/hyprglass/issues/88))
+
+### Features
+
+* set the layer mask threshold once for all layers ([#52](https://github.com/Hyprnux/hyprglass/issues/52))
+* optional grain on the glass for a frosted look ([#67](https://github.com/Hyprnux/hyprglass/issues/67))
+* soft glass edges can be set per layer ([#58](https://github.com/Hyprnux/hyprglass/issues/58))
+* glass follows rounded shapes requested by apps more closely
+* layer glass follows the soft edges of rounded panels ([#58](https://github.com/Hyprnux/hyprglass/issues/58))
+* x-ray can be set per preset and hides every window behind the glass ([#68](https://github.com/Hyprnux/hyprglass/issues/68))
+* add xray option to hide windows under the glass ([#68](https://github.com/Hyprnux/hyprglass/issues/68))
+* hyprglass pauses instead of crashing on a Hyprland it was not built for
+
+
 ## [v0.9.1](https://github.com/Hyprnux/hyprglass/compare/v0.9.0...v0.9.1) - 2026-10-03
 
 ### Bug Fixes
@@ -6,6 +37,10 @@
 * hyprglass loads on glibc 2.41+ instead of failing with "cannot enable executable stack" ([#86](https://github.com/Hyprnux/hyprglass/issues/86))
 * hyprctl hyprglass status tells whether glass is actually drawn, not just loaded
 * hyprctl plugin list shows the installed hyprglass version instead of 1.0.0
+
+### Chores
+
+* **release:** v0.9.1 [skip ci]
 
 ### Documentation
 

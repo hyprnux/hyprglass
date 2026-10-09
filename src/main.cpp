@@ -5,11 +5,13 @@
 #include "GlassLayerPassElement.hpp"
 #include "GlassLayerSurface.hpp"
 #include "GlassRenderer.hpp"
+#include "GlassSnapshotElement.hpp"
 #include "GlassSubsurfaceCompositeElement.hpp"
 #include "GlassSubsurfacePassElement.hpp"
 #include "GlassSubsurfaceState.hpp"
 #include "Globals.hpp"
 #include "ItemHints.hpp"
+#include "LoadGuard.hpp"
 #include "PluginConfig.hpp"
 #include "RenderGuards.hpp"
 #include "SubsurfaceGeometry.hpp"
@@ -28,11 +30,13 @@
 #include <hyprland/src/render/pass/SurfacePassElement.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/supplementary/propRefresher/PropRefresher.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 
 #include <algorithm>
 #include <cstdlib>
+#include <dlfcn.h>
 #include <optional>
 #include <sstream>
 
@@ -51,13 +55,14 @@ static void clearLayerGlassOnClose(PHLLS layerSurface) {
         g_pHyprRenderer->damageMonitor(monitor);
 }
 
-static void clearSubsurfaceFramebufferForMonitor(PHLMONITOR monitor) {
+static void onMonitorGone(PHLMONITOR monitor) {
     if (!g_pGlobalState || !monitor)
         return;
 
-    // The monitor is gone, so its temp FBO can never be reused: drop it
-    // instead of keeping a dead entry around indefinitely.
+    // The monitor is gone, so its framebuffers can never be reused: drop them
+    // instead of keeping dead entries around indefinitely.
     g_pGlobalState->subsurfaceTempFramebuffers.erase(monitor->m_id);
+    g_pGlobalState->backgroundSnapshots.erase(monitor->m_id);
 }
 
 static void onNewWindow(PHLWINDOW window) {
@@ -242,8 +247,12 @@ static void onRenderStage(eRenderStage stage) {
             // swept here instead — once per monitor frame, far cheaper than
             // the CRenderPass::add hook this state is populated from.
             std::erase_if(g_pGlobalState->subsurfaceGlass, [](const auto& pair) { return pair.first.expired(); });
+            beginXraySnapshotFrame();
             break;
-        case RENDER_PRE_WINDOWS: g_pGlobalState->dedupe.resetEpoch(); break;
+        case RENDER_PRE_WINDOWS:
+            g_pGlobalState->dedupe.resetEpoch();
+            queueXraySnapshot();
+            break;
         case RENDER_PRE_WINDOW: beginWindowRender(); break;
         case RENDER_POST_WINDOW: endWindowRender(); break;
         // defensive: both stages are past the last renderWindow of the frame, so
@@ -324,6 +333,11 @@ static void parseLayerNamespaceFilters() {
     parseKeyValuePairs(config.layersNamespaceMaskModes, '=', [&](const std::string& ns, const std::string& val) {
         if (auto mode = parseLayerMaskMode(val))
             g_pGlobalState->layerNamespaceMaskModes[ns] = *mode;
+    });
+
+    g_pGlobalState->layerNamespaceMaskFeathers.clear();
+    parseKeyValuePairs(config.layersNamespaceMaskFeathers, '=', [&](const std::string& ns, const std::string& val) {
+        try { g_pGlobalState->layerNamespaceMaskFeathers.emplace(ns, std::stof(val)); } catch (...) {}
     });
 }
 
@@ -452,8 +466,14 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, PHLLS layerSurface, PH
             return;
         }
 
+        // Requested here, while the pass is built: a pre-surface element that
+        // simplify() discards still keeps the snapshot alive.
+        const bool xray = it->second->resolveXray();
+        if (xray)
+            requestXraySnapshot(monitor);
+
         // Pre-surface: sample+blur background, redirect currentFB → temp FBO
-        CGlassLayerPassElement::SGlassLayerPassData preData{it->second, alpha};
+        CGlassLayerPassElement::SGlassLayerPassData preData{it->second, alpha, xray};
         g_pHyprRenderer->m_renderPass.add(makeUnique<CGlassLayerPassElement>(preData));
 
         const bool manageBlur = config.layersManageBlur && **config.layersManageBlur;
@@ -641,44 +661,115 @@ static void notifySubsurfaceHookFailure() {
     });
 }
 
+// Window glass samples a background Hyprland only composites while the shadow
+// decoration is in the render pipeline: without it, it reads stale or black content.
+static void ensureShadowsForWindowGlass() {
+    if (!g_pGlobalState)
+        return;
+
+    const auto& config = g_pGlobalState->config;
+    // enabled = 0 with hyprglass_enabled tags is a whitelist: it still needs shadows
+    const bool windowGlassInUse = (config.enabled && **config.enabled) ||
+        std::ranges::any_of(g_pGlobalState->decorations, [](const auto& decoration) {
+            auto* glassDecoration = decoration.get();
+            return glassDecoration && glassDecoration->isGlassEnabled();
+        });
+    if (!windowGlassInUse)
+        return;
+
+    const auto shadowEnabled = Config::mgr()->getConfigValue("decoration:shadow:enabled");
+    if (!shadowEnabled.dataptr || !shadowEnabled.type)
+        return;
+
+    if (*shadowEnabled.type == typeid(Hyprlang::INT)) {
+        if (!**reinterpret_cast<Hyprlang::INT* const*>(shadowEnabled.dataptr))
+            HyprlandAPI::invokeHyprctlCommand("keyword", "decoration:shadow:enabled true");
+    } else if (*shadowEnabled.type == typeid(Config::BOOL)) {
+        // Lua config: set the value the way hl.config() does at runtime. hyprctl
+        // eval would do the same but also clears the list hyprctl configerrors shows.
+        auto* const shadow = *reinterpret_cast<Config::BOOL* const*>(shadowEnabled.dataptr);
+        if (!*shadow) {
+            *shadow = true;
+            Config::Supplementary::refresher()->scheduleRefresh(Config::Supplementary::REFRESH_WINDOW_STATES);
+        }
+    }
+}
+
+// Deferred so the keyword never runs inside a config reload or a render pass
+void scheduleShadowsForWindowGlass() {
+    if (g_pGlobalState && g_pEventLoopManager)
+        g_pGlobalState->shadowFixLock = g_pEventLoopManager->doLaterLock([] { ensureShadowsForWindowGlass(); });
+}
+
+// ── Hook target resolution ───────────────────────────────────────────────────
+
+// Hyprland 0.56.2 symbols. Itanium mangling encodes the full signature, so a
+// match is exactly the overload the hooks were written for.
+namespace HookSymbols {
+    inline constexpr auto RENDER_LAYER =
+        "_ZN6Render13IHyprRenderer11renderLayerEN9Hyprutils6Memory14CSharedPointerIN7Desktop4View13CLayerSurfaceEEENS3_IN7Monitor8CMonitorEEERKNSt6chrono10time_"
+        "pointINSB_3_V212steady_clockENSB_8durationIlSt5ratioILl1ELl1000000000EEEEEEbb";
+    inline constexpr auto RENDER_PASS_ADD = "_ZN6Render11CRenderPass3addEON9Hyprutils6Memory14CUniquePointerI12IPassElementEE";
+}
+
+// dlsym first: findFunctionsByName() runs nm on the Hyprland binary, a fork from
+// the compositor that slows down its startup. The dladdr check, against a
+// function the Hyprland executable defines, rejects a same-named symbol from
+// any other loaded object.
+static void* resolveHyprlandFunction(const char* mangledName, const std::string& fallbackSearch, bool (*accept)(const SFunctionMatch&)) {
+    Dl_info hyprland{};
+    Dl_info symbol{};
+    void*   address = dlsym(RTLD_DEFAULT, mangledName);
+    if (address && dladdr(reinterpret_cast<void*>(&HyprlandAPI::findFunctionsByName), &hyprland) && dladdr(address, &symbol) && symbol.dli_fbase == hyprland.dli_fbase)
+        return address;
+
+    for (const auto& match : HyprlandAPI::findFunctionsByName(PHANDLE, fallbackSearch)) {
+        if (accept(match))
+            return match.address;
+    }
+    return nullptr;
+}
+
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
 
+// Internal linkage on purpose: never shared with another loaded file.
+static bool s_instanceActive = false;
+
+// Read by a later copy's LoadGuard::otherActiveCopyPath() through dlsym.
+APICALL EXPORT bool hyprglass_instance_active() {
+    return s_instanceActive;
+}
+
+// Returning normally keeps Hyprland from reporting a failed load: the copy
+// stays listed, with the reason as its description. addNotification, not V2:
+// V2 passes Hyprland types inside std::any.
+static PLUGIN_DESCRIPTION_INFO pausedDescription(HANDLE handle, const LoadGuard::SVerdict& verdict) {
+    HyprlandAPI::addNotification(handle, std::format("[{}] Paused: {}", PLUGIN_NAME, verdict.message), CHyprColor{1.0, 0.8, 0.2, 1.0}, 10000);
+    return {std::string(PLUGIN_NAME), std::format("Paused ({}): {}", LoadGuard::reasonCode(verdict.reason), verdict.message), std::string(PLUGIN_AUTHOR),
+            std::string(PLUGIN_VERSION)};
+}
+
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
-    PHANDLE = handle;
-
-    const std::string HASH        = __hyprland_api_get_hash();
-    const std::string CLIENT_HASH = __hyprland_api_get_client_hash();
-
-    // Only compare the ABI suffix (e.g. "_aq_0.12_hu_0.13_hg_0.5_hc_0.1_hlg_0.6"),
-    // not the leading commit hash. The commit hash changes with every git commit
-    // but the ABI components determine actual binary compatibility.
-    auto abiSuffix = [](const std::string& hash) -> std::string_view {
-        auto pos = hash.find("_aq_");
-        return pos != std::string::npos ? std::string_view{hash}.substr(pos) : std::string_view{hash};
-    };
-
-    if (abiSuffix(HASH) != abiSuffix(CLIENT_HASH)) {
-        // Last-resort escape hatch for exotic setups: HYPRGLASS_SKIP_VERSION_CHECK
-        // (set in Hyprland's own environment) downgrades the hard failure to a
-        // warning. Unsupported — a real ABI mismatch can crash Hyprland.
-        const char* skipEnv  = std::getenv("HYPRGLASS_SKIP_VERSION_CHECK");
-        const bool  skip     = skipEnv && *skipEnv && std::string_view{skipEnv} != "0";
-        if (!skip) {
-            HyprlandAPI::addNotification(PHANDLE,
-                std::format("[{}] Version mismatch! (plugin: {}, running: {})", PLUGIN_NAME, HASH, CLIENT_HASH),
-                CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
-            throw std::runtime_error("Version mismatch");
-        }
-        HyprlandAPI::addNotificationV2(PHANDLE, {
-            {"text", std::format("[{}] Version mismatch ignored (HYPRGLASS_SKIP_VERSION_CHECK) — ABI differences may crash Hyprland", PLUGIN_NAME)},
-            {"time", (uint64_t)8000},
-            {"color", CHyprColor{1.0, 0.8, 0.2, 1.0}},
-        });
+    // Nothing that depends on Hyprland's internal layout may run before this.
+    const auto verdict = LoadGuard::checkCompatibility(handle);
+    if (verdict.reason != LoadGuard::EPauseReason::None) {
+        if (!LoadGuard::skipRequested())
+            return pausedDescription(handle, verdict);
+        HyprlandAPI::addNotification(handle,
+                                     std::format("[{}] {}: check skipped (HYPRGLASS_SKIP_VERSION_CHECK), Hyprland may crash", PLUGIN_NAME, verdict.message),
+                                     CHyprColor{1.0, 0.8, 0.2, 1.0}, 10000);
     }
 
-    g_pGlobalState = std::make_unique<SGlobalState>();
+    if (const auto otherPath = LoadGuard::otherActiveCopyPath())
+        return pausedDescription(handle, {.reason = LoadGuard::EPauseReason::Duplicate, .message = std::format("already loaded from {}", *otherPath)});
+
+    PHANDLE          = handle;
+    s_instanceActive = true;
+
+    g_pGlobalState               = std::make_unique<SGlobalState>();
+    g_pGlobalState->versionCheck = LoadGuard::checkResult(verdict);
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.open.listen([&](PHLWINDOW w) { onNewWindow(w); }));
 
@@ -686,8 +777,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.layer.closed.listen([&](PHLLS layerSurface) { clearLayerGlassOnClose(layerSurface); }));
 
-    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.destroyMon.listen(
-        [&](PHLMONITOR monitor) { clearSubsurfaceFramebufferForMonitor(monitor); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) { onMonitorGone(monitor); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.destroyMon.listen([](PHLMONITOR monitor) { onMonitorGone(monitor); }));
 
     // Z-order / visibility changes invalidate layer glass caches on the affected monitor only.
     // Per-monitor to avoid triggering re-samples on idle monitors (feedback loop).
@@ -751,23 +842,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         parseLayerNamespaceFilters();
         commitPendingLayers(); // merge Lua layer() calls on top of string config
         validateConfig();
-        // config values are only valid here: reloadConfig() is asynchronous
+        // config values are only final here: Hyprland reloads the config after PLUGIN_INIT returns
         refreshSurfaceObserver();
         notifySubsurfaceHookFailure();
+        // every reload restores the user's value
+        scheduleShadowsForWindowGlass();
     }));
 
 
     registerConfig(PHANDLE);
     initConfigPointers(PHANDLE, g_pGlobalState->config);
     Diagnostics::registerHyprCtlCommand(PHANDLE);
-
-    // Shadows must be enabled for the glass effect to sample the correct background.
-    // Force-enable if the user has disabled them.
-    const auto shadowEnabled = Config::mgr()->getConfigValue("decoration:shadow:enabled");
-    auto* const PSHADOWENABLED = reinterpret_cast<Hyprlang::INT* const*>(shadowEnabled.dataptr);
-    if (PSHADOWENABLED && !**PSHADOWENABLED) {
-        HyprlandAPI::invokeHyprctlCommand("keyword", "decoration:shadow:enabled true");
-    }
 
     for (auto& window : Desktop::viewState()->windows()) {
         if (window->isHidden() || !window->mapped())
@@ -776,20 +861,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     // Hook renderLayer for layer surface glass support
-    bool renderLayerFound = false;
-    auto renderLayerMatches = HyprlandAPI::findFunctionsByName(PHANDLE, "renderLayer");
-    for (const auto& match : renderLayerMatches) {
-        // Match the overload: Render::IHyprRenderer::renderLayer(PHLLS, PHLMONITOR, steady_tp, bool, bool)
-        if (match.demangled.contains("renderLayer") && match.demangled.contains("LayerSurface")) {
-            renderLayerFound = true;
-            g_pGlobalState->renderLayerHook = HyprlandAPI::createFunctionHook(PHANDLE, match.address, (void*)hkRenderLayer);
-            // createFunctionHook succeeds even when another plugin already owns the
-            // address; only hook() reports that, and m_original then stays null
-            if (g_pGlobalState->renderLayerHook && !g_pGlobalState->renderLayerHook->hook()) {
-                HyprlandAPI::removeFunctionHook(PHANDLE, g_pGlobalState->renderLayerHook);
-                g_pGlobalState->renderLayerHook = nullptr;
-            }
-            break;
+    // Fallback match for the overload Render::IHyprRenderer::renderLayer(PHLLS, PHLMONITOR, steady_tp, bool, bool)
+    void* const renderLayerAddress = resolveHyprlandFunction(HookSymbols::RENDER_LAYER, "renderLayer", [](const SFunctionMatch& match) {
+        return match.demangled.contains("renderLayer") && match.demangled.contains("LayerSurface");
+    });
+    const bool renderLayerFound = renderLayerAddress != nullptr;
+    if (renderLayerFound) {
+        g_pGlobalState->renderLayerHook = HyprlandAPI::createFunctionHook(PHANDLE, renderLayerAddress, (void*)hkRenderLayer);
+        // createFunctionHook succeeds even when another plugin already owns the
+        // address; only hook() reports that, and m_original then stays null
+        if (g_pGlobalState->renderLayerHook && !g_pGlobalState->renderLayerHook->hook()) {
+            HyprlandAPI::removeFunctionHook(PHANDLE, g_pGlobalState->renderLayerHook);
+            g_pGlobalState->renderLayerHook = nullptr;
         }
     }
 
@@ -804,31 +887,29 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     // Hook CRenderPass::add for subsurface item glass support.
-    // findFunctionsByName() greps the MANGLED symbol table (see
+    // The fallback findFunctionsByName() greps the MANGLED symbol table (see
     // HyprlandAPI::findFunctionsByName, PluginAPI.cpp) — Itanium mangling has no
     // "::", so "CRenderPass::add" would never match there (only in the
     // demangled copy it separately keeps for the match's .demangled field).
     // "CRenderPass3add" is the mangled nested-name substring
     // (_ZN6Render11CRenderPass3addE...) and is confirmed unique in the running
     // binary; the demangled double-check below is what actually verifies it.
-    bool renderPassAddFound = false;
-    auto renderPassAddMatches = HyprlandAPI::findFunctionsByName(PHANDLE, "CRenderPass3add");
-    for (const auto& match : renderPassAddMatches) {
-        if (match.demangled.contains("CRenderPass::add") && match.demangled.contains("IPassElement")) {
-            renderPassAddFound = true;
-            g_pGlobalState->renderPassAddHook = HyprlandAPI::createFunctionHook(PHANDLE, match.address, (void*)hkRenderPassAdd);
-            if (g_pGlobalState->renderPassAddHook && !g_pGlobalState->renderPassAddHook->hook()) {
-                HyprlandAPI::removeFunctionHook(PHANDLE, g_pGlobalState->renderPassAddHook);
-                g_pGlobalState->renderPassAddHook = nullptr;
-            }
-            break;
+    void* const renderPassAddAddress = resolveHyprlandFunction(HookSymbols::RENDER_PASS_ADD, "CRenderPass3add", [](const SFunctionMatch& match) {
+        return match.demangled.contains("CRenderPass::add") && match.demangled.contains("IPassElement");
+    });
+    if (renderPassAddAddress) {
+        g_pGlobalState->renderPassAddHook = HyprlandAPI::createFunctionHook(PHANDLE, renderPassAddAddress, (void*)hkRenderPassAdd);
+        if (g_pGlobalState->renderPassAddHook && !g_pGlobalState->renderPassAddHook->hook()) {
+            HyprlandAPI::removeFunctionHook(PHANDLE, g_pGlobalState->renderPassAddHook);
+            g_pGlobalState->renderPassAddHook = nullptr;
         }
     }
 
     // the failure notification waits for the config: see notifySubsurfaceHookFailure()
-    g_pGlobalState->renderPassAddSymbolFound = renderPassAddFound;
+    g_pGlobalState->renderPassAddSymbolFound = renderPassAddAddress != nullptr;
 
-    HyprlandAPI::reloadConfig();
+    // No reloadConfig(): Hyprland reloads the config after every plugin load.
+    // Until then the values parsed so far are committed here.
     initConfigPointers(PHANDLE, g_pGlobalState->config);
     commitPendingPresets();
     parseLayerNamespaceFilters();
@@ -845,8 +926,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
-    if (!g_pGlobalState)
+    if (!s_instanceActive || !g_pGlobalState)
         return;
+    s_instanceActive = false;
+
+    // a pending callback would run after dlclose
+    g_pGlobalState->shadowFixLock.reset();
 
     // Withdraws the global and clears every callback into this plugin before
     // anything else runs, since the helper library itself is never unloaded.
@@ -864,6 +949,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassLayerCompositeElement");
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassSubsurfacePassElement");
     g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassSubsurfaceCompositeElement");
+    g_pHyprRenderer->m_renderPass.removeAllOfType("CGlassSnapshotElement");
+    g_pGlobalState->backgroundSnapshots.clear();
 
     Diagnostics::shutdown();
 
