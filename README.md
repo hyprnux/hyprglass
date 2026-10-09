@@ -266,6 +266,8 @@ Where the glass goes on a layer:
 
 **Caveat:** Layer shadows count as visible content. Use `mask_threshold` to set an alpha cutoff higher than your shadow opacity.
 
+**Soft edges:** `mask_feather` fades the glass in over that much alpha above `mask_threshold`, so antialiased rounded corners blend instead of stepping. Content fainter than `mask_threshold + mask_feather` then gets lighter glass: keep `0` (default) for near-transparent bars. Only applies where glass follows visible content, not to the region an app requests.
+
 #### Lua config
 
 ```lua
@@ -276,6 +278,7 @@ hg.layer("waybar", { preset = "subtle", mask_threshold = 0.05, live_resample = f
 hg.layer("swaync")
 hg.layer("quickshell:bezel", { preset = "ui", mask_threshold = 0.3 })
 hg.layer("quickshell:bar", { mask_mode = "region" })
+hg.layer("dock", { mask_feather = 0.45 })
 hg.layer("debug-panel", { exclude = true })
 ```
 
@@ -285,6 +288,7 @@ hg.layer("debug-panel", { exclude = true })
 | `mask_threshold` | float | Alpha threshold (pixels below this are not glassed). Default `0.001` |
 | `live_resample` | bool | Per-layer override of `layers:live_resample` |
 | `mask_mode` | string | `"auto"`, `"region"` or `"alpha"`. See `layers:mask_mode` |
+| `mask_feather` | float | Per-layer override of `layers:mask_feather` |
 | `exclude` | bool | Blacklist this namespace instead of whitelisting it |
 
 #### Legacy .conf config
@@ -302,8 +306,9 @@ hg.layer("debug-panel", { exclude = true })
 | `layers:live_resample_fps` | int | `30` | Max re-renders per second per layer for live resample. `0` = uncapped |
 | `layers:force_live_resample` | bool | `false` (`0` in .conf) | Experimental: re-render layer glass every frame regardless of changes, ignoring `live_resample_fps`. Heavy GPU/battery cost |
 | `layers:mask_mode` | string | `auto` | Where the glass goes: `auto` = where the app requests blur, else where content is visible; `region` = only where the app requests blur; `alpha` = only where content is visible |
-| `layers:alpha_coverage` | float | `0.45` | Glass strength follows the surface's alpha up to this value, so antialiased edges (rounded corners) fade out instead of ending on a hard, stepped edge, and a coarse blur region still takes the surface's own outline. `0` = hard mask (previous behaviour) |
 | `layers:namespace_mask_modes` | string | `""` | Per-namespace `mask_mode` (`ns=mode` pairs, comma-separated) |
+| `layers:mask_feather` | float | `0` | Soft edges: glass fades in over this much alpha above `mask_threshold` (e.g. `0.45` for a rounded dock). `0` = hard edge. Ignored where the app requests a blur region |
+| `layers:namespace_mask_feathers` | string | `""` | Per-namespace `mask_feather` (`ns=value` pairs, comma-separated) |
 | `layers:manage_blur` | bool | `true` (`1` in .conf) | Replace Hyprland's own blur with glass on glassed layers (`layerrule = ignorealpha` then has no effect, use `mask_threshold`). Set to `0` to keep Hyprland's blur |
 
 > Layer support hooks into Hyprland's internal render pipeline. This is version-sensitive and may break across Hyprland updates.
