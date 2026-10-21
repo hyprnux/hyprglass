@@ -12,6 +12,8 @@
 #include <hyprland/src/config/values/ConfigValues.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
+#include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 
 extern "C" {
 #include <lauxlib.h>
@@ -34,6 +36,7 @@ static void addConfigValue(HANDLE handle, const char* name, Default defaultValue
 static int handleLuaPreset(lua_State* L);
 static int handleLuaLayer(lua_State* L);
 static int handleLuaConfig(lua_State* L);
+static int handleLuaApply(lua_State* L);
 
 std::optional<ELayerMaskMode> parseLayerMaskMode(std::string_view value) {
     if (value == "auto")   return ELayerMaskMode::AUTO;
@@ -267,6 +270,8 @@ void registerConfig(HANDLE handle) {
     HyprlandAPI::addLuaFunction(handle, "hyprglass", "preset", handleLuaPreset);
     HyprlandAPI::addLuaFunction(handle, "hyprglass", "layer", handleLuaLayer);
     HyprlandAPI::addLuaFunction(handle, "hyprglass", "config", handleLuaConfig);
+    // presets given after the config loaded take effect at once, without a reload
+    HyprlandAPI::addLuaFunction(handle, "hyprglass", "apply", handleLuaApply);
 }
 
 // ── Config pointer initialization ────────────────────────────────────────────
@@ -856,6 +861,33 @@ static int handleLuaPreset(lua_State* L) {
     }
 
     return luaL_error(L, "hyprglass.preset: expected (string) or (name, table)");
+}
+
+// ── Lua apply handler ───────────────────────────────────────────────────────
+// hyprglass.apply(): the presets given since the last reload (hyprglass.preset()
+// from `hyprctl eval`, say), merged into the live ones now -- no config reload,
+// so a settings slider can move the glass smoothly. A reload still rebuilds them
+// all from the config, as before.
+static int handleLuaApply(lua_State*) {
+    if (!g_pGlobalState)
+        return 0;
+    auto& live = g_pGlobalState->customPresets;
+    for (auto& [name, userPreset] : s_pendingPresets) {
+        if (auto it = live.find(name); it != live.end()) {
+            if (!userPreset.inherits.empty())
+                it->second.inherits = userPreset.inherits;
+            mergePresetValues(it->second.shared, userPreset.shared);
+            mergePresetValues(it->second.dark, userPreset.dark);
+            mergePresetValues(it->second.light, userPreset.light);
+        } else
+            live[name] = userPreset;
+    }
+    s_pendingPresets.clear();
+    for (const auto& monitor : State::monitorState()->monitors()) {
+        g_pGlobalState->bumpSceneGeneration(monitor);
+        g_pHyprRenderer->damageMonitor(monitor);
+    }
+    return 0;
 }
 
 // ── Lua layer handler ───────────────────────────────────────────────────────

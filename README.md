@@ -99,6 +99,14 @@ if hl.plugin.hyprglass then
 end
 ```
 
+**Changing presets live**
+
+`hg.preset()` calls made after the config has loaded (from `hyprctl eval`, a settings app) are kept for the next reload; `hg.apply()` merges them into the running glass at once, without reloading Hyprland:
+
+```sh
+hyprctl eval 'hl.plugin.hyprglass.preset("clear", { blur_strength = 2.0 }); hl.plugin.hyprglass.apply()'
+```
+
 **Checking the config**
 
 ```sh
