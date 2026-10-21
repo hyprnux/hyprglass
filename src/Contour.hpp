@@ -28,7 +28,10 @@ inline constexpr float REACH_MAX_PX    = 256.0f;
 // many texels either way (and texels times that stays within the work budget): all of it
 // sets the cost of a rebuild. The resolution divisor (1, 2, 4 or 8 framebuffer px per
 // texel) is the smallest that respects them; the coarsest one is taken whatever the work.
-inline constexpr int  MAX_TEXELS       = 1'000'000;
+// 300'000: a screen-sized layer (a full-screen overlay with a card in it) gets its
+// field at 1/4 resolution, not 1/2 -- a rebuild ~0.8 ms instead of ~8 on an iGPU, with
+// the same look (within 3/255): the field is smoothed, and the cut is the mask's
+inline constexpr int  MAX_TEXELS       = 300'000;
 inline constexpr int  MAX_REACH_TEXELS = 64;
 inline constexpr long MAX_WORK         = 24'000'000;
 inline constexpr int  MAX_DIVISOR      = 8;
@@ -49,7 +52,9 @@ inline constexpr int   SMOOTH_MAX_RADIUS      = 12; // texels each side; the sha
 
 // A client that commits every frame still rebuilds at most this often: the last change
 // of a burst is rebuilt once the interval has passed.
-inline constexpr std::chrono::milliseconds MIN_REBUILD_INTERVAL{33};
+// 16 ms: a layer animating at 60 fps keeps its edge on its outline every frame, now
+// that a rebuild is cheap (at 33 ms the edge trailed the content every other frame)
+inline constexpr std::chrono::milliseconds MIN_REBUILD_INTERVAL{16};
 
 // While the layer fades in, its alpha is too coarse for a clean outline: that field is
 // provisional, and rebuilt once the layer is at least this opaque.
