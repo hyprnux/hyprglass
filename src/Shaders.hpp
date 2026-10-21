@@ -145,6 +145,13 @@ uniform highp sampler2D contourTex; // r: signed distance to the outline in px (
 uniform vec2 contourUVScale;      // box UV -> field UV: the field covers whole texels, the box need not
 uniform float contourReferencePx; // the bezel is a fraction of this, not of the layer's short side
 uniform float contourReachPx;     // where the field stops; the edge effects fade out before it
+
+// The layer's own alpha at a box pixel (the mask texture)
+float maskAlphaAt(vec2 px) {
+    vec2 muv = (px * invFullSize) * maskUVScale + maskUVOffset;
+    if (muv.x < 0.0 || muv.y < 0.0 || muv.x > 1.0 || muv.y > 1.0) return 0.0;
+    return texture(maskTex, muv).a;
+}
 #endif
 
 in vec2 v_texcoord;
@@ -344,6 +351,7 @@ void main() {
     // For windows, hasMask is false and this block is skipped entirely.
     vec4 surfacePixel = vec4(0.0);
     float maskRamp = 1.0;
+    bool aaEdge = false;   // contour: a shape's antialiased border pixel, under the threshold
     bool hasMask = (useMask == 1);
     if (hasMask) {
         vec2 maskUV = uv * maskUVScale + maskUVOffset;
@@ -364,7 +372,21 @@ void main() {
         } else {
             // Below the threshold the content gets no glass but is still drawn
             // (shadows, faint fills), like outside a region.
+#ifdef HYPRGLASS_FEATURE_CONTOUR
+            // An antialiased edge pixel of a shape is fainter than the threshold but
+            // must get its share of glass, or every rounded edge is a pixel staircase:
+            // through if a neighbour 1px away is inside a shape (shadows further out
+            // are not); its share is set below, from the outline
+            if (surfacePixel.a < maskAlphaThreshold) {
+                vec2 pp = uv * fullSize;
+                float nb = max(max(maskAlphaAt(pp + vec2(1.0, 0.0)), maskAlphaAt(pp - vec2(1.0, 0.0))),
+                               max(maskAlphaAt(pp + vec2(0.0, 1.0)), maskAlphaAt(pp - vec2(0.0, 1.0))));
+                if (nb < maskAlphaThreshold || surfacePixel.a < 0.004) { fragColor = surfacePixel; return; }
+                aaEdge = true;
+            }
+#else
             if (surfacePixel.a < maskAlphaThreshold) { fragColor = surfacePixel; return; } // premultiplied, output as-is
+#endif
             // Antialiased edges get proportionally less glass, so rounded corners fade
             // out instead of ending on a hard, stepped edge. Not smoothstep(): it is undefined
             // when threshold + coverage rounds to threshold in float.
@@ -384,6 +406,12 @@ void main() {
     float contourGradLen = length(contourSample.gb);
     // zero where the field is flat (deep inside, or past its reach): no edge there
     vec2  contourOutward = contourGradLen > 0.05 ? contourSample.gb / contourGradLen : vec2(0.0);
+    // On the shape's border, the glass in proportion to this pixel's coverage:
+    // its alpha against the shape's own alpha 2.5px further in
+    if (hasMask && maskMode != 1 && (aaEdge || cornerSdf > -2.5) && contourGradLen > 0.05) {
+        float inA = maskAlphaAt(uv * fullSize - contourOutward * 2.5);
+        maskRamp = inA > 0.004 ? clamp(surfacePixel.a / inA, 0.0, 1.0) : maskRamp;
+    }
 #else
     float cornerSdf    = getCornerSDF(uv);
     float cornerAlpha  = 1.0 - smoothstep(-1.5, 0.5, cornerSdf);
