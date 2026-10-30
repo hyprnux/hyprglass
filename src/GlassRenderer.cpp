@@ -10,6 +10,7 @@
 #include <GLES3/gl32.h>
 #include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/desktop/view/window/WindowEffectsController.hpp>
+#include <hyprland/src/helpers/math/Math.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
@@ -61,8 +62,7 @@ SSampleMap sampleMapFor(const CBox& box, int downscale) {
     return map;
 }
 
-bool damageCoversBox(const CBox& box, const SP<Render::IFramebuffer>& framebuffer, const CRegion& damage,
-                     const PHLMONITOR& monitor) {
+bool damageCoversBox(const CBox& box, const SP<Render::IFramebuffer>& framebuffer, const CRegion& damage) {
     if (!framebuffer)
         return false;
 
@@ -75,23 +75,15 @@ bool damageCoversBox(const CBox& box, const SP<Render::IFramebuffer>& framebuffe
     if (x2 <= x1 || y2 <= y1)
         return true;
 
-    // Render damage is in the rotated monitor space while the box is in unrotated
-    // framebuffer pixels: transform it like Hyprland does for the output damage.
-    CRegion framebufferDamage = damage.copy();
-    if (monitor)
-        framebufferDamage.transform(Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform)),
-                                    monitor->m_transformedSize.x, monitor->m_transformedSize.y);
-
-    return CRegion(CBox{x1, y1, x2 - x1, y2 - y1}).subtract(framebufferDamage).empty();
+    return CRegion(CBox{x1, y1, x2 - x1, y2 - y1}).subtract(damage).empty();
 }
 
-bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage,
-                         const PHLMONITOR& monitor) {
+bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage) {
     // The exact source rect the blit reads.
     const auto map = sampleMapFor(box, 1);
     return damageCoversBox(CBox{static_cast<double>(map.srcX0), static_cast<double>(map.srcY0), static_cast<double>(map.srcX1 - map.srcX0),
                                 static_cast<double>(map.srcY1 - map.srcY0)},
-                           source, damage, monitor);
+                           source, damage);
 }
 
 SFoldedBlur foldBlurPasses(float radius, int iterations) noexcept {
@@ -198,12 +190,6 @@ void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& samp
     if (amount <= 0.0f || !sampleFramebuffer || !window || !monitor)
         return;
 
-    // The sample framebuffer holds already-rotated framebuffer-space pixels, while a
-    // texture drawn under RPT_EXPORT lands axis-aligned: on a 90/270 output the self
-    // image would come out rotated. Skipping keeps those outputs at today's look.
-    if (monitor->m_transform != WL_OUTPUT_TRANSFORM_NORMAL)
-        return;
-
     // Hyprland renders a transformed window through a redirected pass and blits the
     // result; our untransformed copy would not match what the user sees.
     if (window->effects().hasActiveTransformers())
@@ -225,7 +211,7 @@ void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& samp
     auto& renderData = ctx.m_data;
 
     // Leave the caller the state sampleBackground leaves: scissor off, viewport from
-    // the re-bound framebuffer's own size (monitor sizes are wrong here, #41).
+    // the re-bound framebuffer's own size.
     // Declared before the framebuffer/draw-state guards so it runs last.
     // By then currentFB and the GL framebuffer binding have been restored.
     const Hyprutils::Utils::CScopeGuard restoreGLState([&] {
@@ -288,9 +274,15 @@ void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& samp
             const auto& bufferSize = surface->m_current.bufferSize;
             bool        customUV   = false;
             if (viewport.hasSource && bufferSize.x > 0 && bufferSize.y > 0) {
-                const Vector2D uvTopLeft{viewport.source.x / bufferSize.x, viewport.source.y / bufferSize.y};
-                const Vector2D uvBottomRight{(viewport.source.x + viewport.source.width) / bufferSize.x,
-                                             (viewport.source.y + viewport.source.height) / bufferSize.y};
+                // The source is in surface space: the buffer transform and scale come first,
+                // as in IElementRenderer::calculateUVForSurface() for Hyprland's own draw.
+                auto           source      = viewport.source;
+                const Vector2D transformed = surface->m_current.transform % 2 == 1 ? Vector2D{bufferSize.y, bufferSize.x} : bufferSize;
+                source.scale(surface->m_current.scale);
+                source.transform(Math::wlTransformToHyprutils(Math::invertTransform(surface->m_current.transform)), transformed.x, transformed.y);
+
+                const Vector2D uvTopLeft{source.x / bufferSize.x, source.y / bufferSize.y};
+                const Vector2D uvBottomRight{(source.x + source.width) / bufferSize.x, (source.y + source.height) / bufferSize.y};
                 if (uvBottomRight.x > 0.00001 && uvBottomRight.y > 0.00001) {
                     renderData.primarySurfaceUVTopLeft     = uvTopLeft;
                     renderData.primarySurfaceUVBottomRight = uvBottomRight;
@@ -395,9 +387,7 @@ void blurBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer> sample
     }
 
     // Restore caller's GL state without querying (avoids pipeline stalls).
-    // The viewport must match the re-bound framebuffer's own size: monitor
-    // sizes are wrong here on 90°/270° monitors, where m_transformedSize is
-    // swapped relative to the framebuffer's native orientation (#41).
+    // The viewport must match the re-bound framebuffer's own size.
     g_pHyprRenderer->blend(true); // Hyprland's state at every element boundary
     g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, fbId(callerFramebuffer));
     glBindVertexArray(0);
@@ -469,7 +459,7 @@ static constexpr int CONTOUR_TEXTURE_UNIT = 3; // layers only, so never at the s
 
 void applyGlassEffect(Render::CRenderContext& ctx,
                        SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> targetFramebuffer,
-                       CBox& rawBox, CBox& transformedBox,
+                       const CBox& box,
                        float alpha, const std::array<float, 4>& radii, float roundingPower,
                        const Vector2D& paddingRatio, const SResolveContext& resolveContext,
                        const SMaskInfo* mask, float focusLight, const SFrostInput* frost) {
@@ -479,7 +469,7 @@ void applyGlassEffect(Render::CRenderContext& ctx,
     Diagnostics::CScopedStageTimer stageTimer(ctx, Diagnostics::EStage::ApplyGlassEffect);
 
     if (const auto monitor = ctx.m_data.pMonitor.lock())
-        Diagnostics::recordGlassPixels(monitor->m_id, rawBox.w * rawBox.h);
+        Diagnostics::recordGlassPixels(monitor->m_id, box.w * box.h);
 
     const float edgeHeightValue =
         std::min(resolvePresetFloat(resolveContext, &SPresetValues::edgeHeight, &SOverridableConfig::edgeHeight), EDGE_HEIGHT_MAX);
@@ -497,10 +487,8 @@ void applyGlassEffect(Render::CRenderContext& ctx,
     // A variant that failed to compile falls back to the default program: the layer then keeps its rectangle.
     const bool  contoured = wantsContour && (program.features & GLASS_FEATURE_CONTOUR);
 
-    const auto transform = Math::wlTransformToHyprutils(
-        Math::invertTransform(ctx.m_data.pMonitor->m_transform));
-
-    Mat3x3 glMatrix = g_pHyprRenderer->projectBoxToTarget(ctx, rawBox, transform);
+    // No transform: the pass is drawn unrotated, as Hyprland's own elements project their boxes.
+    Mat3x3 glMatrix = g_pHyprRenderer->projectBoxToTarget(ctx, box);
     auto texture    = sampleFramebuffer->getTexture();
 
     glMatrix.transpose();
@@ -535,7 +523,7 @@ void applyGlassEffect(Render::CRenderContext& ctx,
     shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, glMatrix.getMatrix());
     shader->setUniformInt(SHADER_TEX, 0);
 
-    const auto fullSize = Vector2D(transformedBox.width, transformedBox.height);
+    const auto fullSize = Vector2D(box.width, box.height);
     shader->setUniformFloat2(SHADER_FULL_SIZE,
         static_cast<float>(fullSize.x), static_cast<float>(fullSize.y));
 
@@ -708,8 +696,8 @@ void applyGlassEffect(Render::CRenderContext& ctx,
     // Only finalDamage is copied to the screen, and elementDamage (which finalDamage is a
     // subset of) already covers every pixel we're visible at, so scissoring to the damage
     // clips no pixel that would otherwise reach the screen.
-    CBox damageExtents = ctx.m_data.damage.copy().intersect(rawBox).getExtents();
-    g_pHyprOpenGL->scissor(ctx, damageExtents.w > 0 && damageExtents.h > 0 ? damageExtents : rawBox);
+    CBox damageExtents = ctx.m_data.damage.copy().intersect(box).getExtents();
+    g_pHyprOpenGL->scissor(ctx, damageExtents.w > 0 && damageExtents.h > 0 ? damageExtents : box, ctx.m_data.transformDamage);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     g_pHyprOpenGL->scissor(ctx, nullptr);
 }

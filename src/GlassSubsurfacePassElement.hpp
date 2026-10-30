@@ -16,7 +16,7 @@ class CGlassSubsurfacePassElement : public IPassElement {
     struct SData {
         std::shared_ptr<CGlassSubsurfaceState> state;
         CBox                                   itemLogicalBox; // CSurfacePassElement::getTexBox(), monitor-local logical
-        CBox                                   transformBox;   // post-rotation-transform pixel box; see SubsurfaceGeometry.hpp
+        CBox                                   pixelBox;       // monitor-local pixel box, render space; see SubsurfaceGeometry.hpp
         PHLMONITORREF                          monitor;
         float                                  alpha = 1.0f;
     };

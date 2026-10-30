@@ -15,7 +15,7 @@ std::vector<UP<IPassElement>> CGlassSubsurfaceCompositeElement::draw(Render::CRe
     // region by mutable reference — m_data.transformedRegion is this element's
     // own copy (see main.cpp's hkRenderPassAdd), safe to hand out.
     if (m_data.state)
-        m_data.state->compositeAndRestore(ctx, m_data.monitor.lock(), m_data.rawBox, m_data.transformBox, m_data.transformedRegion, m_data.alpha);
+        m_data.state->compositeAndRestore(ctx, m_data.monitor.lock(), m_data.pixelBox, m_data.transformedRegion, m_data.alpha);
 
     return {};
 }

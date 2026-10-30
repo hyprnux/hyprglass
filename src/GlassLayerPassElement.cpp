@@ -45,8 +45,6 @@ bool CGlassLayerPassElement::needsLiveBlur(Render::CRenderContext& ctx) {
     // Ensure the render pass fully re-renders the background behind this
     // element before we sample it. Without this, partial damage causes the
     // glass to sample a mix of fresh wallpaper and its own stale output.
-    // Per-monitor sceneGeneration prevents non-focused monitors from
-    // re-sampling, so the continuous damage cost is limited.
     //
     // Must agree with boundingBox() on whether a box exists: Hyprland's
     // CRenderPass::render() asserts a bounding box for any element reporting
@@ -55,13 +53,27 @@ bool CGlassLayerPassElement::needsLiveBlur(Render::CRenderContext& ctx) {
     if (!paddedLogicalBox(ctx).has_value())
         return false;
 
+    const auto monitor  = ctx.m_data.pMonitor.lock();
+    const auto layerBox = LayerGeometry::computeLayerBox(m_data.layerState->getLayerSurface(), monitor);
+    if (!layerBox)
+        return false;
+
+    // A contour field waiting to be built needs the hint too: the build wants
+    // every pixel of the layer redrawn, and nothing may occlude part of it.
+    if (m_data.layerState->needsContourBuild(ctx, monitor, *layerBox, m_data.alpha))
+        return true;
+
+    // Only a frame that takes a new sample needs the background redrawn. A cache
+    // hit composites our own texture, and the hint would keep an animated blur
+    // variant redrawing this monitor for nothing: same gate as the window B1.
+    // sampleAndRedirect() decides from the same predicate, so the two agree.
+    if (!m_data.layerState->wantsBackgroundResample(monitor, *layerBox, m_data.xray))
+        return false;
+
     // An x-ray snapshot that already covers the layer is sampled instead of the
     // frame. One that does not needs this hint: it un-occludes the background
     // under opaque windows so the snapshot copy picks it up this frame.
-    // A contour field waiting to be built needs it too, for the same reason: the build
-    // wants every pixel of the layer redrawn, and nothing may occlude part of it.
-    return !(m_data.xray && m_data.layerState->xraySnapshotCovers(ctx, ctx.m_data.pMonitor.lock())) ||
-           m_data.layerState->needsContourBuild();
+    return !(m_data.xray && m_data.layerState->xraySnapshotCovers(ctx, monitor));
 }
 
 bool CGlassLayerPassElement::needsPrecomputeBlur(Render::CRenderContext&) {

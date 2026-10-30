@@ -34,7 +34,7 @@ struct SGlobalState {
     CShaderManager                    shaderManager;
     SPluginConfig                     config;
 
-    // User-defined presets (populated from config keyword, swapped in on configReloaded)
+    // User-defined presets (populated by hyprglass.preset() calls, swapped in on config.reloaded)
     std::unordered_map<std::string, SCustomPreset> customPresets;
 
     // Shared blur temp framebuffer (reused across all decorations since they render sequentially)
@@ -64,13 +64,13 @@ struct SGlobalState {
     // watchedSurfaces below. Pruned lazily wherever it's walked (see main.cpp).
     std::unordered_map<WP<CWLSurfaceResource>, std::shared_ptr<CGlassSubsurfaceState>> subsurfaceGlass;
 
-    // Parsed namespace whitelist (empty = match all when layers enabled)
+    // hg.layer() whitelist (empty or containing LAYER_NAMESPACE_WILDCARD = match all when layers enabled)
     std::unordered_set<std::string> layerNamespaceFilter;
-    // Parsed namespace blacklist (always excluded, takes priority over whitelist)
+    // hg.layer(..., { exclude = true }) blacklist (always excluded, takes priority over whitelist)
     std::unordered_set<std::string> layerNamespaceExclude;
     // Per-namespace preset overrides (namespace → preset name)
     std::unordered_map<std::string, std::string> layerNamespacePresets;
-    // Per-namespace mask alpha threshold (namespace → threshold, overrides layers:mask_threshold)
+    // Per-namespace mask alpha threshold (namespace → threshold, overrides layers.mask_threshold)
     std::unordered_map<std::string, float> layerNamespaceMaskThresholds;
     // Per-namespace live resample override (namespace → enabled)
     std::unordered_map<std::string, bool> layerNamespaceLiveResample;
@@ -81,9 +81,9 @@ struct SGlobalState {
     // Per-namespace fixed glass shape (namespace → shape); absent = the whole layer box
     std::unordered_map<std::string, SLayerShape> layerNamespaceShapes;
 
-    // Contour (layers:mask_mode = contour): the render targets every layer's field build
+    // Contour (layers.mask_mode = "contour"): the render targets every layer's field build
     // shares, and whether the GPU can do it at all. Once the GPU or the shaders turn out not
-    // to be up to it, every layer draws as with mask_mode = alpha until the plugin is reloaded.
+    // to be up to it, every layer draws as with mask_mode = "alpha" until the plugin is reloaded.
     Contour::SScratch   contourScratch;
     std::optional<bool> contourGpuSupported;
     bool                contourUnavailable = false;
@@ -92,9 +92,8 @@ struct SGlobalState {
     // changes on that monitor. Layer surfaces compare to their cached value to
     // skip redundant blur work. Per-monitor avoids cross-monitor feedback loops
     // where re-sampling on an idle monitor captures its own stale glass output.
-    // Keyed by MONITORID rather than CMonitor* so the code builds on both
-    // Hyprland <= 0.55.x (global CMonitor) and git (Monitor::CMonitor), and a
-    // stale entry can never alias a reallocated monitor object.
+    // Keyed by MONITORID rather than CMonitor* so a stale entry can never alias a
+    // reallocated monitor object.
     std::unordered_map<MONITORID, uint64_t> sceneGeneration;
 
     uint64_t getSceneGeneration(const PHLMONITOR& mon) const {
@@ -108,10 +107,11 @@ struct SGlobalState {
             sceneGeneration[mon->m_id]++;
     }
 
-    // Render-order fingerprint: a per-monitor running hash folded from every
-    // glass-eligible window's identity/geometry/alpha in z-order, compared frame
-    // to frame to catch stacking/membership changes (e.g. a window closing behind
-    // a cached glass window) that no other event bumps scene generation for.
+    // Render-order fingerprint: a per-monitor running hash folded from the
+    // monitor's fade-outs and every glass-eligible window's identity/geometry/alpha
+    // in z-order, compared frame to frame to catch stacking/membership changes
+    // (e.g. a window closing behind a cached glass surface) that no other event
+    // bumps scene generation for.
     struct SRenderFingerprint {
         size_t runningHash = 0;
         size_t lastHash    = 0;

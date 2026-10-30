@@ -18,9 +18,9 @@ struct std::hash<Hyprutils::Math::Vector2D> {
 namespace Hash {
 
 // Boost-style variadic hash fold: mixes each argument into seed in turn via
-// std::hash<T>, in the order given. Used by CGlassDecoration's render-order
-// fingerprint to fold window identity/geometry/alpha into a per-monitor
-// running hash without allocating.
+// std::hash<T>, in the order given. Used by the render-order fingerprint to
+// fold window and fade-out identity/geometry/alpha into a per-monitor running
+// hash without allocating.
 template <typename T, typename... Rest>
 inline void hashCombine(size_t& seed, const T& value, const Rest&... rest) {
     seed ^= std::hash<T>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);

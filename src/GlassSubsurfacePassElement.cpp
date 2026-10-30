@@ -16,7 +16,7 @@ std::vector<UP<IPassElement>> CGlassSubsurfacePassElement::draw(Render::CRenderC
         return {};
 
     if (m_data.state) {
-        m_data.state->sampleAndRedirect(ctx, m_data.monitor.lock(), m_data.transformBox, m_data.alpha);
+        m_data.state->sampleAndRedirect(ctx, m_data.monitor.lock(), m_data.pixelBox, m_data.alpha);
         m_redirected = m_data.state->redirectedThisFrame();
     }
 
@@ -38,7 +38,13 @@ bool CGlassSubsurfacePassElement::needsLiveBlur(Render::CRenderContext& ctx) {
 
     // Must agree with boundingBox() on whether a box exists — see
     // CGlassLayerPassElement::needsLiveBlur() for why (Pass.cpp asserts this).
-    return boundingBox(ctx).has_value();
+    if (!boundingBox(ctx).has_value())
+        return false;
+
+    // Only a frame that takes a new sample needs the background redrawn: on a
+    // cache hit the hint would just keep an animated blur variant redrawing the
+    // monitor. draw() decides from the same predicate and the same pixelBox.
+    return !m_data.state || m_data.state->wantsBackgroundResample(m_data.monitor.lock(), m_data.pixelBox);
 }
 
 bool CGlassSubsurfacePassElement::needsPrecomputeBlur(Render::CRenderContext&) {

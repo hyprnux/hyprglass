@@ -239,11 +239,11 @@ std::string formatItems(IPC::Socket1::eOutputFormat format) {
     }
 
     if (live.empty())
-        return std::format("hyprglass items: no active subsurface glass items (subsurfaces:enabled={}, hyprglass_item_v1 protocol={})\n",
+        return std::format("hyprglass items: no active subsurface glass items (subsurfaces.enabled={}, hyprglass_item_v1 protocol={})\n",
                             subsurfacesEnabled ? "on" : "off", protocolActive ? "active" : "inactive");
 
     std::string out = "hyprglass items\n";
-    out += std::format("  subsurfaces:enabled: {}   hyprglass_item_v1 protocol: {}\n\n", subsurfacesEnabled ? "on" : "off",
+    out += std::format("  subsurfaces.enabled: {}   hyprglass_item_v1 protocol: {}\n\n", subsurfacesEnabled ? "on" : "off",
                         protocolActive ? "active" : "inactive");
     out += std::format("  {:<30} {:<10} {:<9} {}\n", "window", "monitor", "shape", "preset (requested -> resolved)");
 
@@ -324,7 +324,7 @@ std::string formatStats(IPC::Socket1::eOutputFormat format) {
     std::string out = "hyprglass stats\n";
 
     if (!timersOn)
-        out += "  stage timers: off (plugin:hyprglass:debug:timers = 0)\n";
+        out += "  stage timers: off (hg.config({ debug = { timers = true } }))\n";
     else if (!timersReady)
         out += "  stage timers: unavailable (GL_EXT_disjoint_timer_query not supported by this driver)\n";
 
@@ -390,7 +390,7 @@ std::string formatStatus(IPC::Socket1::eOutputFormat format) {
     const bool        protocolActive = ItemHints::active();
 
     // Same order as the render path: the setting, then the hook, then the shaders.
-    auto featureStatus = [&](Hyprlang::INT* const* enabledValue, bool hooked) {
+    auto featureStatus = [&](Config::BOOL* const* enabledValue, bool hooked) {
         SFeatureStatus status;
         status.enabled = enabledValue && **enabledValue;
         if (!status.enabled)
