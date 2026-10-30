@@ -23,7 +23,7 @@ commit_pins = [
   ["36b2e0cfe0c6094dbc47bd42a437431315bb3087", "c96940a86e6c5c9290dacb9fde204e4172186a96"], # hyprland 0.56.0 -> hyprglass v0.7.0
   ["5c9377c15f85c50648f35ca5a213754f95b93ca0", "725383e86a2a79457a81cdbc2ceb33c07363bd8d"], # hyprland 0.56.1 -> hyprglass v0.8.1
   ["efb50993780079460b0cbed1363e2166a2de1d9f", "7fc328064c63d9fbaaac8d8204eadf85dcdeae19"], # hyprland 0.56.2 -> hyprglass v0.11.0
-  ["0aa6745f705f2c4b0a5004eb019ef76e5bbdb426", "28b38df92176baf3d42fe58bf6c3b663d230c6c9"], # hyprland 0.57.0 -> hyprglass v1.0.0
+  ["0aa6745f705f2c4b0a5004eb019ef76e5bbdb426", "85b8a8ed8431d7b6f1ef8dad8ae0470d8ea7f291"], # hyprland 0.57.0 -> hyprglass v1.1.0
 ]
 
 [hyprglass]
