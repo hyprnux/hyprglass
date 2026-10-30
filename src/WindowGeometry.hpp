@@ -8,6 +8,9 @@
 
 namespace WindowGeometry {
 
+// Monitor-local physical pixels in render space, which is also the work
+// buffer's pixel space: Hyprland draws the whole pass unrotated, so a rotated
+// or flipped monitor needs no conversion before sampling or drawing.
 [[nodiscard]] inline std::optional<CBox> computeWindowBox(PHLWINDOW window, PHLMONITOR monitor) {
     if (!window || !monitor)
         return std::nullopt;
@@ -47,19 +50,6 @@ namespace WindowGeometry {
     const float scale = monitor ? monitor->m_scale : 1.0f;
     box.expand(paddingPx / scale);
 
-    return box;
-}
-
-// The monitor transform CGlassDecoration::renderPass() applies to its own
-// transformBox, factored out so CGlassPassElement::needsLiveBlur() can apply
-// it identically to the box it evaluates wantsBackgroundResample() against —
-// the two must agree on 90/270-degree-rotated monitors.
-[[nodiscard]] inline CBox applyMonitorTransform(CBox box, PHLMONITOR monitor) {
-    if (!monitor)
-        return box;
-
-    const auto transform = Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform));
-    box.transform(transform, monitor->m_transformedSize.x, monitor->m_transformedSize.y);
     return box;
 }
 

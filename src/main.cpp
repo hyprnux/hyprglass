@@ -10,6 +10,7 @@
 #include "GlassSubsurfacePassElement.hpp"
 #include "GlassSubsurfaceState.hpp"
 #include "Globals.hpp"
+#include "Hash.hpp"
 #include "ItemHints.hpp"
 #include "LoadGuard.hpp"
 #include "PluginConfig.hpp"
@@ -17,9 +18,11 @@
 #include "SubsurfaceGeometry.hpp"
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/desktop/state/FadingOutState.hpp>
 #include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
@@ -65,6 +68,36 @@ static void onMonitorGone(PHLMONITOR monitor) {
     g_pGlobalState->backgroundSnapshots.erase(monitor->m_id);
 }
 
+// A transform, scale or mode change on a live monitor leaves boxes that read as unchanged
+// while the pixels behind them are not: no per-window event reports it, so every cached
+// sample (windows, layers, items) is stale and the x-ray snapshot no longer matches.
+static void onMonitorLayoutChanged() {
+    if (!g_pGlobalState)
+        return;
+
+    for (const auto& monitor : State::monitorState()->monitors()) {
+        if (!monitor)
+            continue;
+
+        g_pGlobalState->bumpSceneGeneration(monitor);
+        if (const auto snapshot = g_pGlobalState->backgroundSnapshots.find(monitor->m_id); snapshot != g_pGlobalState->backgroundSnapshots.end())
+            snapshot->second.valid = CRegion{};
+    }
+}
+
+// A closing window is drawn from a snapshot with no decoration draw(), so it drops out of the
+// fingerprint once and nothing else changes while it fades or when it is gone. Folding the
+// fade-outs makes every fade step and their removal a change; with none, nothing is folded.
+static void foldFadeouts(const PHLMONITOR& monitor, size_t& hash) {
+    for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
+        if (!fadeout || fadeout->monitor() != monitor)
+            continue;
+
+        const auto box = fadeout->renderBox();
+        Hash::hashCombine(hash, fadeout.get(), fadeout->alpha(), box.x, box.y, box.w, box.h);
+    }
+}
+
 static void onNewWindow(PHLWINDOW window) {
     if (std::ranges::any_of(window->presentation().decorations(),
                             [](const auto& decoration) { return decoration->getDisplayName() == "HyprGlass"; }))
@@ -106,6 +139,20 @@ static void drawGlassForFullscreenWindow(Render::CRenderContext& ctx, const PHLW
 
     if (auto* deco = glassDecorationFor(window))
         deco->draw(ctx, monitor, 1.f, window->presentation().renderPresentation(dynamicPointerCast<Workspace::CWorkspacePresentable>(window->m_workspace))); // alpha unused, recomputed in renderPass
+}
+
+// Hyprland draws X11 override-redirect and no-border windows (menus, tooltips, splash) without
+// decorations, yet they still fade in and out over glass, so draw() never folds them into the
+// render-order fingerprint. Fullscreen ones are folded by drawGlassForFullscreenWindow().
+static void foldUndecoratedWindow(Render::CRenderContext& ctx, const PHLWINDOW& window, const PHLMONITOR& monitor) {
+    if (!window->backend().traits().suggestsNoBorder ||
+        Fullscreen::controller()->getFullscreenModes(window).internal == Fullscreen::FSMODE_FULLSCREEN)
+        return;
+
+    if (auto* deco = glassDecorationFor(window)) {
+        const auto presentation = window->presentation().renderPresentation(dynamicPointerCast<Workspace::CWorkspacePresentable>(window->m_workspace));
+        deco->foldRenderFingerprint(ctx, monitor, presentation.alpha * presentation.fadeAlpha);
+    }
 }
 
 // ── Duplicate window copies ──────────────────────────────────────────────────
@@ -221,6 +268,7 @@ static void beginWindowRender(Render::CRenderContext& ctx) {
         }
     }
 
+    foldUndecoratedWindow(ctx, window, monitor);
     drawGlassForFullscreenWindow(ctx, window, monitor);
 }
 
@@ -582,9 +630,7 @@ static void hkRenderPassAdd(Render::CRenderPass* pass, UP<IPassElement>&& el) {
         return;
     }
 
-    const CBox rawBox       = *pixelBox;
-    const CBox transformBox = SubsurfaceGeometry::toTransformBox(rawBox, monitor);
-    CRegion    region       = SubsurfaceGeometry::transformedItemBlurRegion(data.surface, rawBox, monitor);
+    CRegion region = SubsurfaceGeometry::transformedItemBlurRegion(data.surface, *pixelBox, monitor);
     if (region.empty()) {
         // A background effect was declared but nothing is left to glass this
         // frame (e.g. an explicit empty region, or clipped fully outside the
@@ -609,7 +655,7 @@ static void hkRenderPassAdd(Render::CRenderPass* pass, UP<IPassElement>&& el) {
     const float alpha = std::clamp(data.alpha * data.fadeAlpha, 0.0f, 1.0f);
 
     // Pre-surface: sample+blur background, redirect currentFB → temp FBO.
-    CGlassSubsurfacePassElement::SData preData{it->second, itemLogicalBox, transformBox, data.pMonitor, alpha};
+    CGlassSubsurfacePassElement::SData preData{it->second, itemLogicalBox, *pixelBox, data.pMonitor, alpha};
     callOriginalRenderPassAdd(pass, makeUnique<CGlassSubsurfacePassElement>(preData));
 
     // The surface element itself: Hyprland's own draw() call renders it into
@@ -618,7 +664,7 @@ static void hkRenderPassAdd(Render::CRenderPass* pass, UP<IPassElement>&& el) {
 
     // Post-surface: restore currentFB, composite glass masked by the protocol
     // region with the item's own foreground (from the temp FBO) on top.
-    CGlassSubsurfaceCompositeElement::SData postData{it->second, itemLogicalBox, rawBox, transformBox, std::move(region), data.pMonitor, alpha};
+    CGlassSubsurfaceCompositeElement::SData postData{it->second, itemLogicalBox, *pixelBox, std::move(region), data.pMonitor, alpha};
     callOriginalRenderPassAdd(pass, makeUnique<CGlassSubsurfaceCompositeElement>(postData));
 }
 
@@ -763,6 +809,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) { onMonitorGone(monitor); }));
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.destroyMon.listen([](PHLMONITOR monitor) { onMonitorGone(monitor); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.layoutChanged.listen([]() { onMonitorLayoutChanged(); }));
 
     // Z-order / visibility changes invalidate layer glass caches on the affected monitor only.
     // Per-monitor to avoid triggering re-samples on idle monitors (feedback loop).
@@ -788,16 +835,20 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen(
         [](Event::SRenderStageEvent event) { onRenderStage(event); }));
 
-    // Render-order fingerprint: reset the running hash at RENDER_BEGIN, then at
-    // RENDER_LAST_MOMENT compare it to last frame's and bump scene generation on
-    // a change. Both fire inside renderMonitor() strictly before endRender() runs
-    // the render pass, so a bump here reaches this same frame's resample checks.
+    // Render-order fingerprint: restart the running hash at RENDER_BEGIN with the
+    // monitor's fade-outs, then at RENDER_LAST_MOMENT compare it to last frame's and
+    // bump scene generation on a change. Both fire inside renderMonitor() strictly
+    // before endRender() runs the render pass, so a bump here reaches this same
+    // frame's resample checks.
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen(
         [](Event::SRenderStageEvent event) {
             if (event.stage != RENDER_BEGIN)
                 return;
-            if (const auto monitor = event.monitor)
-                g_pGlobalState->renderFingerprints[monitor->m_id].runningHash = 0;
+            if (const auto monitor = event.monitor) {
+                auto& fingerprint       = g_pGlobalState->renderFingerprints[monitor->m_id];
+                fingerprint.runningHash = 0;
+                foldFadeouts(monitor, fingerprint.runningHash);
+            }
         }));
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen(
         [](Event::SRenderStageEvent event) {

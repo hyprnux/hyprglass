@@ -17,12 +17,6 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprutils/math/Misc.hpp>
 
-static CBox transformedLayerBox(CBox pixelBox, PHLMONITOR monitor) {
-    const auto transform = Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform));
-    pixelBox.transform(transform, monitor->m_transformedSize.x, monitor->m_transformedSize.y).noNegativeSize().round();
-    return pixelBox;
-}
-
 CGlassLayerSurface::CGlassLayerSurface(PHLLS layerSurface)
     : m_layerSurface(layerSurface) {
 }
@@ -85,7 +79,7 @@ bool CGlassLayerSurface::xraySnapshotCovers(Render::CRenderContext& ctx, PHLMONI
 
     // The full layer box: sampleAndRedirect() samples it or the blur region
     // inside it, so covering it covers both.
-    return static_cast<bool>(xraySnapshotCovering(monitor, ctx.m_data.currentFB, transformedLayerBox(*layerBox, monitor)));
+    return static_cast<bool>(xraySnapshotCovering(monitor, ctx.m_data.currentFB, *layerBox));
 }
 
 std::string CGlassLayerSurface::resolvePresetName() const {
@@ -174,7 +168,7 @@ PHLLS CGlassLayerSurface::getLayerSurface() const {
     return m_layerSurface.lock();
 }
 
-CRegion CGlassLayerSurface::transformedBlurRegion(PHLMONITOR monitor, const CBox& rawBox) const {
+CRegion CGlassLayerSurface::transformedBlurRegion(PHLMONITOR monitor, const CBox& layerBox) const {
     const auto layerSurface = m_layerSurface.lock();
     const auto wlSurface    = layerSurface ? layerSurface->wlSurface() : nullptr;
     if (!layerSurface || !wlSurface || !monitor)
@@ -182,15 +176,12 @@ CRegion CGlassLayerSurface::transformedBlurRegion(PHLMONITOR monitor, const CBox
 
     const auto logicalSize = layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
 
-    // surface-local logical region -> box-local pixels, same
-    // scale/translate/transform sequence as transformedLayerBox()
+    // surface-local logical region -> monitor-local pixels, the space layerBox is in
     CRegion region = wlSurface->m_blurRegion.copy();
     region.intersect(0, 0, logicalSize.x, logicalSize.y); // spec: clipped to surface size
     region.scale(static_cast<float>(monitor->m_scale));
-    region.translate(rawBox.pos());
-    region.intersect(rawBox.x, rawBox.y, rawBox.w, rawBox.h); // defensive
-    region.transform(Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform)),
-                      monitor->m_transformedSize.x, monitor->m_transformedSize.y);
+    region.translate(layerBox.pos());
+    region.intersect(layerBox.x, layerBox.y, layerBox.w, layerBox.h); // defensive
     return region;
 }
 
@@ -337,6 +328,39 @@ void CGlassLayerSurface::flushDeferredResample(std::chrono::steady_clock::time_p
     markBackgroundDirty();
 }
 
+std::optional<CBox> CGlassLayerSurface::sampleRegionBox(PHLMONITOR monitor, const CBox& layerBox) const {
+    if (resolveMaskSource() != EMaskSource::PROTOCOL_REGION)
+        return std::nullopt;
+
+    return regionBoundingBoxAbsolute(monitor, layerBox);
+}
+
+bool CGlassLayerSurface::wantsBackgroundResample(PHLMONITOR monitor, const CBox& layerBox, bool xray) const {
+    const auto layerSurface = m_layerSurface.lock();
+    if (!layerSurface)
+        return true;
+
+    // A workspace slide or fade moves the whole scene behind us without changing
+    // any window's own geometry, so no window decoration update reports it.
+    const bool isAnimating = layerSurface->positionAnimation()->isBeingAnimated() ||
+                             layerSurface->sizeAnimation()->isBeingAnimated() ||
+                             layerSurface->alpha()[Desktop::View::LS_ALPHA_FADE]->isBeingAnimated() ||
+                             WorkspaceAnimation::anyWorkspaceAnimating(monitor);
+    const auto& config    = g_pGlobalState->config;
+    const bool  forceLive = config.layersForceLiveResample && **config.layersForceLiveResample;
+
+    // A region resize/move is otherwise invisible here (a layer's own commit
+    // doesn't mark itself dirty) — without this the mask shape would update
+    // immediately while the sample stays from the old box. Also true leaving
+    // region mode: the cached texture is still region-shrunk.
+    const bool regionBoxChanged = sampleRegionBox(monitor, layerBox) != m_cachedRegionSampleBox;
+
+    return !m_hasCachedSample ||
+           g_pGlobalState->getSceneGeneration(monitor) != m_lastSceneGeneration ||
+           isAnimating || m_backgroundDirty || forceLive || regionBoxChanged ||
+           xray != m_cachedFromSnapshot;
+}
+
 void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, float alpha, bool xray) {
     auto& shaderManager = g_pGlobalState->shaderManager;
     shaderManager.initializeIfNeeded();
@@ -356,8 +380,6 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
     if (!layerBox)
         return;
 
-    CBox transformBox = transformedLayerBox(*layerBox, monitor);
-
     // PROTOCOL_REGION: glass only ever shows inside the blur region, so blurred
     // data outside it is provably never sampled. m_cachedTransformedRegion is
     // computed once here and reused by compositeAndRestore()'s regionRects
@@ -365,14 +387,8 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
     // composite draw, which stay full-layer (see their own resolveMaskSource()
     // call sites elsewhere in this file). regionSampleBox becomes
     // m_cachedRegionSampleBox only when the sample is actually taken below.
-    const bool isRegionMode = resolveMaskSource() == EMaskSource::PROTOCOL_REGION;
-    m_cachedTransformedRegion = isRegionMode ? transformedBlurRegion(monitor, *layerBox) : CRegion{};
-    const std::optional<CBox> regionSampleBox = isRegionMode ? regionBoundingBoxAbsolute(monitor, *layerBox) : std::nullopt;
-    // A region resize/move is otherwise invisible to backgroundChanged below (a
-    // layer's own commit doesn't mark itself dirty) — without this the mask
-    // shape would update immediately while the sample stays from the old box.
-    // Also true leaving region mode: the cached texture is still region-shrunk.
-    const bool regionBoxChanged = regionSampleBox != m_cachedRegionSampleBox;
+    const std::optional<CBox> regionSampleBox = sampleRegionBox(monitor, *layerBox);
+    m_cachedTransformedRegion = regionSampleBox ? transformedBlurRegion(monitor, *layerBox) : CRegion{};
 
     // Brackets everything below, including the conditional resample and the
     // temp-FBO redirect/clear that always runs: GL forbids a concurrent
@@ -386,25 +402,14 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
     // but no window moved behind us, we reuse the cached blurred background.
     // This skips the most expensive GPU work (blit + 6 blur passes).
     const uint64_t currentGeneration = g_pGlobalState->getSceneGeneration(monitor);
-    // A workspace slide or fade moves the whole scene behind us without changing
-    // any window's own geometry, so no window decoration update reports it.
-    const bool isAnimating = layerSurface->positionAnimation()->isBeingAnimated() ||
-                             layerSurface->sizeAnimation()->isBeingAnimated() ||
-                             layerSurface->alpha()[Desktop::View::LS_ALPHA_FADE]->isBeingAnimated() ||
-                             WorkspaceAnimation::anyWorkspaceAnimating(monitor);
-    const auto& config = g_pGlobalState->config;
-    const bool forceLive = config.layersForceLiveResample && **config.layersForceLiveResample;
-    const bool backgroundChanged = !m_hasCachedSample ||
-                                   currentGeneration != m_lastSceneGeneration ||
-                                   isAnimating || m_backgroundDirty || forceLive || regionBoxChanged ||
-                                   xray != m_cachedFromSnapshot;
+    const bool     backgroundChanged = wantsBackgroundResample(monitor, *layerBox, xray);
 
     // X-ray never samples the live frame: it holds the windows it hides.
-    const CBox sampleBox     = regionSampleBox.value_or(transformBox);
+    const CBox sampleBox     = regionSampleBox.value_or(*layerBox);
     const auto snapshot      = (xray && backgroundChanged) ? xraySnapshotCovering(monitor, source, sampleBox) : nullptr;
     const bool sampleCovered = !backgroundChanged ||
                                (xray ? static_cast<bool>(snapshot) :
-                                       GlassRenderer::sampleRegionCovered(sampleBox, source, ctx.m_data.damage, monitor));
+                                       GlassRenderer::sampleRegionCovered(sampleBox, source, ctx.m_data.damage));
 
     if (!layerSurface->mapped()) {
         // During fade-out, re-sampling captures stale pixels. Reuse cached sample.
@@ -458,8 +463,7 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
     // Redirect surface rendering to a temp FBO cleared to transparent.
     // The original renderLayer (called between pre/post elements) will render
     // the surface into this FBO. compositeAndRestore uses its alpha as a mask.
-    // Size from the source FB, not the monitor: m_transformedSize is swapped
-    // relative to the framebuffer's native orientation on 90°/270° monitors (#41).
+    // Size from the source FB, which is what the surface is drawn into.
     int monitorWidth  = static_cast<int>(source->m_size.x);
     int monitorHeight = static_cast<int>(source->m_size.y);
 
@@ -481,12 +485,12 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
     ctx.m_data.currentFB = m_surfaceTempFramebuffer;
     g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_surfaceTempFramebuffer.get())->getFBID());
 
-    // Unpadded: the composite quad only ever reads transformBox (rawBox, never
+    // Unpadded: the composite quad only ever reads the layer box (never
     // padded), so the SAMPLE_PADDING_PX-expanded part of a padded clear is never
     // sampled — true regardless of mask mode, not the region-sized clear a
     // literal reading of "region-aware" would suggest (that would under-clear
     // real surface area outside the region that the composite quad does read).
-    CBox clearBox = transformBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
+    CBox clearBox = layerBox->intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
 
     if (std::isfinite(clearBox.x) && std::isfinite(clearBox.y) && std::isfinite(clearBox.w) && std::isfinite(clearBox.h) &&
         clearBox.w > 0.0 && clearBox.h > 0.0) {
@@ -499,17 +503,24 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
     m_redirectedThisFrame = true;
 }
 
-bool CGlassLayerSurface::attachContour(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& transformBox, float alpha,
-                                       float maskThreshold, const SResolveContext& resolveContext, GlassRenderer::SMaskInfo& maskInfo) {
-    if (g_pGlobalState->contourUnavailable)
-        return false;
+float CGlassLayerSurface::resolveMaskThreshold() const {
+    const auto& cfg = g_pGlobalState->config;
+    float threshold = cfg.layersMaskThreshold ? static_cast<float>(**cfg.layersMaskThreshold) : 0.001f;
+    if (const auto layerSurface = m_layerSurface.lock()) {
+        const auto thresholdIt = g_pGlobalState->layerNamespaceMaskThresholds.find(layerSurface->m_namespace);
+        if (thresholdIt != g_pGlobalState->layerNamespaceMaskThresholds.end())
+            threshold = thresholdIt->second;
+    }
+    return threshold;
+}
 
-    const auto target = ctx.m_data.currentFB;
-    if (!target || !m_surfaceTempFramebuffer || !monitor)
-        return false;
+std::optional<Contour::SBuildKey> CGlassLayerSurface::contourBuildKey(PHLMONITOR monitor, const CBox& layerBox, const Vector2D& targetSize, float alpha,
+                                                                      const SResolveContext& resolveContext) const {
+    if (!monitor)
+        return std::nullopt;
 
-    const int   boxWidth  = static_cast<int>(transformBox.w);
-    const int   boxHeight = static_cast<int>(transformBox.h);
+    const int   boxWidth  = static_cast<int>(layerBox.w);
+    const int   boxHeight = static_cast<int>(layerBox.h);
     const float scale     = monitor->m_scale > 0.0f ? monitor->m_scale : 1.0f;
 
     // The shader's own bezel and bevel widths, in the same units: they set how far the field reaches.
@@ -522,40 +533,75 @@ bool CGlassLayerSurface::attachContour(Render::CRenderContext& ctx, PHLMONITOR m
 
     const auto plan = Contour::makePlan(boxWidth, boxHeight, bezelPx, rimPx, scale);
     if (!plan)
-        return false;
-
-    m_contour.request();
+        return std::nullopt;
 
     // Part of the box off the screen was never drawn: what the field saw there depends on where the box sits.
-    const bool onScreen = transformBox.x >= 0.0 && transformBox.y >= 0.0 && transformBox.x + transformBox.w <= target->m_size.x &&
-                          transformBox.y + transformBox.h <= target->m_size.y;
+    const bool onScreen = layerBox.x >= 0.0 && layerBox.y >= 0.0 && layerBox.x + layerBox.w <= targetSize.x &&
+                          layerBox.y + layerBox.h <= targetSize.y;
 
-    const Contour::SBuildKey key{
+    // a NaN would never equal itself in the field's build key and rebuild it every frame
+    const float maskThreshold = resolveMaskThreshold();
+
+    return Contour::SBuildKey{
         .plan        = *plan,
-        .threshold   = maskThreshold,
+        .threshold   = std::isfinite(maskThreshold) ? maskThreshold : 0.001f,
         .provisional = alpha < Contour::COMPLETE_ALPHA,
-        .boxX        = onScreen ? 0 : static_cast<int>(transformBox.x),
-        .boxY        = onScreen ? 0 : static_cast<int>(transformBox.y),
+        .boxX        = onScreen ? 0 : static_cast<int>(layerBox.x),
+        .boxY        = onScreen ? 0 : static_cast<int>(layerBox.y),
     };
+}
 
-    if (m_contour.wantsBuild(key)) {
+bool CGlassLayerSurface::needsContourBuild(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& layerBox, float alpha) const {
+    if (m_contour.pending())
+        return true;
+
+    // A held field is rebuilt when what it depends on changed too: the fade finished, the box
+    // moved on or off the screen, the threshold or the geometry changed.
+    const auto target = ctx.m_data.currentFB;
+    if (!m_contour.held() || !target || g_pGlobalState->contourUnavailable || resolveMaskSource() != EMaskSource::CONTOUR)
+        return false;
+
+    const bool            isDark         = resolveThemeIsDark();
+    const std::string     preset         = resolvePresetName();
+    const SResolveContext resolveContext = {preset, isDark, g_pGlobalState->config, g_pGlobalState->customPresets};
+    const auto            key            = contourBuildKey(monitor, layerBox, target->m_size, alpha, resolveContext);
+    return key && m_contour.wantsBuild(*key);
+}
+
+bool CGlassLayerSurface::attachContour(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& layerBox, float alpha,
+                                       const SResolveContext& resolveContext, GlassRenderer::SMaskInfo& maskInfo) {
+    if (g_pGlobalState->contourUnavailable)
+        return false;
+
+    const auto target = ctx.m_data.currentFB;
+    if (!target || !m_surfaceTempFramebuffer || !monitor)
+        return false;
+
+    const auto key = contourBuildKey(monitor, layerBox, target->m_size, alpha, resolveContext);
+    if (!key)
+        return false;
+
+    const auto& plan = key->plan;
+    m_contour.request();
+
+    if (m_contour.wantsBuild(*key)) {
         // The temp FBO only holds what this frame redrew: a field needs all of the layer in it.
-        if (GlassRenderer::damageCoversBox(transformBox, target, ctx.m_data.damage, monitor)) {
-            if (!m_contour.build(ctx, key, m_surfaceTempFramebuffer, transformBox, alpha, target) && g_pGlobalState->contourUnavailable)
+        if (GlassRenderer::damageCoversBox(layerBox, target, ctx.m_data.damage)) {
+            if (!m_contour.build(ctx, *key, m_surfaceTempFramebuffer, layerBox, alpha, target) && g_pGlobalState->contourUnavailable)
                 return false;
         } else if (m_contour.noteUncoveredFrame())
             damageSampleRegion();
     }
 
     // A stale field of the same geometry still beats the rectangle for the frame or two before the next build.
-    if (!m_contour.usableFor(*plan))
+    if (!m_contour.usableFor(plan))
         return false;
 
     maskInfo.contourTextureId   = m_contour.framebuffer()->getTexture()->m_texID;
-    maskInfo.contourUVScale     = {transformBox.w / (static_cast<double>(plan->fieldWidth) * plan->divisor),
-                                   transformBox.h / (static_cast<double>(plan->fieldHeight) * plan->divisor)};
-    maskInfo.contourReferencePx = plan->referencePx;
-    maskInfo.contourReachPx     = plan->reachPx;
+    maskInfo.contourUVScale     = {layerBox.w / (static_cast<double>(plan.fieldWidth) * plan.divisor),
+                                   layerBox.h / (static_cast<double>(plan.fieldHeight) * plan.divisor)};
+    maskInfo.contourReferencePx = plan.referencePx;
+    maskInfo.contourReachPx     = plan.reachPx;
     return true;
 }
 
@@ -599,8 +645,7 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
     if (monitor)
         Diagnostics::recordLayerGlassDraw(monitor->m_id);
 
-    CBox rawBox       = *layerBox;
-    CBox transformBox = transformedLayerBox(rawBox, monitor);
+    const CBox box = *layerBox;
 
     const bool isDark                     = resolveThemeIsDark();
     const std::string preset              = resolvePresetName();
@@ -618,22 +663,15 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
     GlassRenderer::SMaskInfo maskInfo{
         .textureId = m_surfaceTempFramebuffer->getTexture()->m_texID,
         .target    = GL_TEXTURE_2D,
-        .uvOffset  = {transformBox.x / monitorWidth, transformBox.y / monitorHeight},
-        .uvScale   = {transformBox.w / monitorWidth, transformBox.h / monitorHeight},
+        .uvOffset  = {box.x / monitorWidth, box.y / monitorHeight},
+        .uvScale   = {box.w / monitorWidth, box.h / monitorHeight},
     };
-
-    float contourThreshold = 0.0f; // mask_threshold as configured, the key of a contour field
 
     switch (maskSource) {
         case EMaskSource::CONTOUR: // cuts like the alpha mask: the field only shapes the edge
         case EMaskSource::ALPHA_THRESHOLD: {
-            const auto& cfg     = g_pGlobalState->config;
-            float maskThreshold = cfg.layersMaskThreshold ? static_cast<float>(**cfg.layersMaskThreshold) : 0.001f;
-            auto threshIt = g_pGlobalState->layerNamespaceMaskThresholds.find(layerSurface->m_namespace);
-            if (threshIt != g_pGlobalState->layerNamespaceMaskThresholds.end())
-                maskThreshold = threshIt->second;
-            // a NaN would never equal itself in the field's build key and rebuild it every frame
-            contourThreshold = std::isfinite(maskThreshold) ? maskThreshold : 0.001f;
+            const auto& cfg           = g_pGlobalState->config;
+            const float maskThreshold = resolveMaskThreshold();
 
             // The temp FBO stores the layer after Hyprland applies fade alpha. Keep
             // mask_threshold relative to the layer's content alpha, otherwise fade-out
@@ -659,7 +697,7 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
             // (guarded by m_redirectedThisFrame above, so it did run); recomputes
             // as a defensive fallback only if that's somehow empty here.
             if (m_cachedTransformedRegion.empty())
-                m_cachedTransformedRegion = transformedBlurRegion(monitor, rawBox);
+                m_cachedTransformedRegion = transformedBlurRegion(monitor, box);
             CRegion& region = m_cachedTransformedRegion;
 
             const auto rects = region.getRects();
@@ -667,7 +705,7 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
                 maskInfo.regionRectCount = static_cast<int>(rects.size());
                 for (size_t i = 0; i < rects.size(); i++) {
                     const auto& r = rects[i];
-                    maskInfo.regionRects[i] = {static_cast<float>(r.x1 - transformBox.x), static_cast<float>(r.y1 - transformBox.y),
+                    maskInfo.regionRects[i] = {static_cast<float>(r.x1 - box.x), static_cast<float>(r.y1 - box.y),
                                                 static_cast<float>(r.x2 - r.x1), static_cast<float>(r.y2 - r.y1)};
                 }
             } else {
@@ -675,7 +713,7 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
                 // reads as more broken than a few extra glassed pixels at concave corners).
                 const auto extents = region.getExtents();
                 maskInfo.regionRectCount = 1;
-                maskInfo.regionRects[0]  = {static_cast<float>(extents.x - transformBox.x), static_cast<float>(extents.y - transformBox.y),
+                maskInfo.regionRects[0]  = {static_cast<float>(extents.x - box.x), static_cast<float>(extents.y - box.y),
                                              static_cast<float>(extents.w), static_cast<float>(extents.h)};
             }
             break;
@@ -687,14 +725,14 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
 
     // The traced outline is the glass shape: a fixed shape would only fight it, so it applies
     // when the layer has no field (yet).
-    const bool contoured = maskSource == EMaskSource::CONTOUR && attachContour(ctx, monitor, transformBox, alpha, contourThreshold, resolveContext, maskInfo);
+    const bool contoured = maskSource == EMaskSource::CONTOUR && attachContour(ctx, monitor, box, alpha, resolveContext, maskInfo);
 
     // A fixed shape replaces the layer box as the glass outline. The quad stays
     // the layer box, so content outside the shape is still drawn, without glass.
     if (const auto shape = contoured ? std::nullopt : resolveShape()) {
         const double scale = monitor->m_scale;
-        CBox shapeBox{rawBox.x + shape->insetLeft * scale, rawBox.y + shape->insetTop * scale,
-                      rawBox.w - (shape->insetLeft + shape->insetRight) * scale, rawBox.h - (shape->insetTop + shape->insetBottom) * scale};
+        CBox shapeBox{box.x + shape->insetLeft * scale, box.y + shape->insetTop * scale,
+                      box.w - (shape->insetLeft + shape->insetRight) * scale, box.h - (shape->insetTop + shape->insetBottom) * scale};
         shapeBox.round();
 
         // insets wider than the layer leave no shape: the whole box keeps its glass
@@ -703,9 +741,8 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
             const float maxRadius = static_cast<float>(std::min(shapeBox.w, shapeBox.h)) / 2.0f;
             cornerRadius          = shape->radius < 0.0f ? maxRadius : std::min(shape->radius * static_cast<float>(scale), maxRadius);
 
-            const CBox transformedShapeBox = transformedLayerBox(shapeBox, monitor);
-            maskInfo.glassBoxOffsetPx      = Vector2D(transformedShapeBox.x - transformBox.x, transformedShapeBox.y - transformBox.y);
-            maskInfo.glassBoxSizePx        = Vector2D(transformedShapeBox.w, transformedShapeBox.h);
+            maskInfo.glassBoxOffsetPx = Vector2D(shapeBox.x - box.x, shapeBox.y - box.y);
+            maskInfo.glassBoxSizePx   = Vector2D(shapeBox.w, shapeBox.h);
         }
     }
 
@@ -713,17 +750,17 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
     // the full-layer quad: remap the quad UV into that texture (toSampleBoxUV()
     // in Shaders.hpp). Keyed on the box the cached texture was taken from, not
     // this frame's mask mode or region, which a deferred resample leaves behind.
-    if (m_cachedRegionSampleBox && transformBox.w > 0.0 && transformBox.h > 0.0) {
+    if (m_cachedRegionSampleBox && box.w > 0.0 && box.h > 0.0) {
         const CBox& sampleBox   = *m_cachedRegionSampleBox;
-        maskInfo.sampleUVOffset = Vector2D((sampleBox.x - transformBox.x) / transformBox.w, (sampleBox.y - transformBox.y) / transformBox.h);
-        maskInfo.sampleUVScale  = Vector2D(sampleBox.w / transformBox.w, sampleBox.h / transformBox.h);
+        maskInfo.sampleUVOffset = Vector2D((sampleBox.x - box.x) / box.w, (sampleBox.y - box.y) / box.h);
+        maskInfo.sampleUVScale  = Vector2D(sampleBox.w / box.w, sampleBox.h / box.h);
     }
 
     // The glass shader composites both the glass effect and the surface content
     // in a single pass: glass behind, surface on top, using the temp FBO alpha.
     GlassRenderer::applyGlassEffect(ctx,
                                      m_sampleFramebuffer, target,
-                                     rawBox, transformBox, alpha,
+                                     box, alpha,
                                      std::array<float, 4>{cornerRadius, cornerRadius, cornerRadius, cornerRadius},
                                      roundingPower, m_samplePaddingRatio, resolveContext,
                                      &maskInfo);

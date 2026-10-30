@@ -107,10 +107,11 @@ struct SGlobalState {
             sceneGeneration[mon->m_id]++;
     }
 
-    // Render-order fingerprint: a per-monitor running hash folded from every
-    // glass-eligible window's identity/geometry/alpha in z-order, compared frame
-    // to frame to catch stacking/membership changes (e.g. a window closing behind
-    // a cached glass window) that no other event bumps scene generation for.
+    // Render-order fingerprint: a per-monitor running hash folded from the
+    // monitor's fade-outs and every glass-eligible window's identity/geometry/alpha
+    // in z-order, compared frame to frame to catch stacking/membership changes
+    // (e.g. a window closing behind a cached glass surface) that no other event
+    // bumps scene generation for.
     struct SRenderFingerprint {
         size_t runningHash = 0;
         size_t lastHash    = 0;

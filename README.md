@@ -166,7 +166,7 @@ Ranges in parentheses are the usual span, not limits: only `blur_iterations`, `s
 - A window made see-through by an `opacity` window rule draws opaque pixels, so its pane is entirely its own content
 - Raise `blur_strength` with it, or the window's own text stays readable in its glass
 - A window showing the screen (screen-share preview, OBS) sees a one-frame-old copy of itself
-- Transformed monitors (rotated or flipped) and layer surfaces ignore it
+- Layer surfaces ignore it
 
 **Cost:** a self-sampling window re-blurs its whole pane whenever its content changes, so busy windows cost more than static ones.
 
