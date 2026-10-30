@@ -44,6 +44,13 @@ class CGlassSubsurfaceState {
     // main.cpp's hook between this and compositeAndRestore) lands there instead.
     void sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& pixelBox, float alpha);
 
+    // The cached sample is missing or stale, so sampleAndRedirect() takes a new one.
+    // CGlassSubsurfacePassElement::needsLiveBlur() asks the same question before
+    // the draw: both must get the same answer, so neither keeps a copy of the
+    // conditions. Compares against the box of the last draw, which only
+    // sampleAndRedirect() advances.
+    [[nodiscard]] bool wantsBackgroundResample(PHLMONITOR monitor, const CBox& pixelBox) const;
+
     // Phase 2 (post-surface): restore currentFB, composite glass masked by the
     // protocol region with the temp FBO's content (the item's own foreground) on top.
     // transformedRegion is non-const: CRegion::getExtents() is a non-const method.

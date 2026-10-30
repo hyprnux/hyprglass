@@ -29,6 +29,11 @@ class CGlassLayerSurface {
     // The x-ray snapshot holds everything this layer would sample.
     [[nodiscard]] bool xraySnapshotCovers(Render::CRenderContext& ctx, PHLMONITOR monitor) const;
 
+    // The cached sample is missing or stale, so sampleAndRedirect() takes a new one.
+    // CGlassLayerPassElement::needsLiveBlur() asks the same question before the draw:
+    // both must get the same answer, so neither keeps a copy of the conditions.
+    [[nodiscard]] bool wantsBackgroundResample(PHLMONITOR monitor, const CBox& layerBox, bool xray) const;
+
     // Phase 2 (post-surface): restore currentFB, apply glass masked by temp FBO, blit surface
     void compositeAndRestore(Render::CRenderContext& ctx, PHLMONITOR monitor, float alpha, EMaskSource maskSource);
 
@@ -50,8 +55,9 @@ class CGlassLayerSurface {
     // The field is held, so a commit of this layer's own content matters.
     [[nodiscard]] bool holdsContour() const { return m_contour.held(); }
 
-    // A field build is waiting: the render pass must redraw the whole layer for it.
-    [[nodiscard]] bool needsContourBuild() const { return m_contour.pending(); }
+    // A field build is due for this draw, whether the content changed or what the field depends
+    // on did (see contourBuildKey()): the render pass must redraw the whole layer for it.
+    [[nodiscard]] bool needsContourBuild(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& layerBox, float alpha) const;
 
     // Frees the field (and the shared build targets with the last one): the layer is no
     // longer drawn with contour, or is gone.
@@ -134,6 +140,10 @@ class CGlassLayerSurface {
     // mark itself dirty).
     std::optional<CBox> m_cachedRegionSampleBox;
 
+    // The box the background is sampled from: the blur region's bounding box in
+    // PROTOCOL_REGION mode, nullopt (the whole layer box) otherwise.
+    [[nodiscard]] std::optional<CBox> sampleRegionBox(PHLMONITOR monitor, const CBox& layerBox) const;
+
     // Surface-local logical blur region intersected to the layer's own size,
     // then scaled/translated into layerBox's pixel space —
     // shared by regionBoundingBoxAbsolute() and compositeAndRestore()'s
@@ -150,7 +160,16 @@ class CGlassLayerSurface {
     // the whole layer) and points maskInfo at it. False: draw with the layer's rectangle, as every
     // other layer does: no field yet, a stale one for another size, or contour unavailable.
     [[nodiscard]] bool attachContour(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& layerBox, float alpha,
-                                     float maskThreshold, const SResolveContext& resolveContext, GlassRenderer::SMaskInfo& maskInfo);
+                                     const SResolveContext& resolveContext, GlassRenderer::SMaskInfo& maskInfo);
+
+    // What a field build depends on besides its content, for this draw. attachContour() builds
+    // against it and needsContourBuild() asks the render pass for a full redraw when it changed,
+    // so both must read it from here. Nullopt: no field can be built for this layer.
+    [[nodiscard]] std::optional<Contour::SBuildKey> contourBuildKey(PHLMONITOR monitor, const CBox& layerBox, const Vector2D& targetSize, float alpha,
+                                                                    const SResolveContext& resolveContext) const;
+
+    // mask_threshold for this layer as configured: namespace entry, else layers:mask_threshold.
+    [[nodiscard]] float resolveMaskThreshold() const;
 
     [[nodiscard]] bool           resolveThemeIsDark() const;
     [[nodiscard]] std::string    resolvePresetName() const;

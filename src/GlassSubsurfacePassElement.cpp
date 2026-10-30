@@ -38,7 +38,13 @@ bool CGlassSubsurfacePassElement::needsLiveBlur(Render::CRenderContext& ctx) {
 
     // Must agree with boundingBox() on whether a box exists — see
     // CGlassLayerPassElement::needsLiveBlur() for why (Pass.cpp asserts this).
-    return boundingBox(ctx).has_value();
+    if (!boundingBox(ctx).has_value())
+        return false;
+
+    // Only a frame that takes a new sample needs the background redrawn: on a
+    // cache hit the hint would just keep an animated blur variant redrawing the
+    // monitor. draw() decides from the same predicate and the same pixelBox.
+    return !m_data.state || m_data.state->wantsBackgroundResample(m_data.monitor.lock(), m_data.pixelBox);
 }
 
 bool CGlassSubsurfacePassElement::needsPrecomputeBlur(Render::CRenderContext&) {

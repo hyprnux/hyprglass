@@ -101,6 +101,13 @@ std::string CGlassSubsurfaceState::resolvePresetName(SPresetHintOutcome* hintOut
     return "default";
 }
 
+bool CGlassSubsurfaceState::wantsBackgroundResample(PHLMONITOR monitor, const CBox& pixelBox) const {
+    const bool movedOrResized = pixelBox.x != m_lastPixelBox.x || pixelBox.y != m_lastPixelBox.y ||
+                                pixelBox.w != m_lastPixelBox.w || pixelBox.h != m_lastPixelBox.h;
+
+    return !m_hasCachedSample || g_pGlobalState->getSceneGeneration(monitor) != m_lastSceneGeneration || movedOrResized;
+}
+
 void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& pixelBox, float alpha) {
     auto& shaderManager = g_pGlobalState->shaderManager;
     shaderManager.initializeIfNeeded();
@@ -121,11 +128,8 @@ void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMO
     const MONITORID monitorId = monitor ? monitor->m_id : -1; // -1 mirrors Hyprland's own MONITOR_INVALID
 
     const uint64_t currentGeneration = g_pGlobalState->getSceneGeneration(monitor);
-    const bool     movedOrResized    = pixelBox.x != m_lastPixelBox.x || pixelBox.y != m_lastPixelBox.y ||
-                                    pixelBox.w != m_lastPixelBox.w || pixelBox.h != m_lastPixelBox.h;
-    m_lastPixelBox = pixelBox;
-
-    const bool backgroundChanged = !m_hasCachedSample || currentGeneration != m_lastSceneGeneration || movedOrResized;
+    const bool     backgroundChanged = wantsBackgroundResample(monitor, pixelBox);
+    m_lastPixelBox                   = pixelBox;
 
     const bool sampleCovered = !backgroundChanged ||
         GlassRenderer::sampleRegionCovered(pixelBox, source, ctx.m_data.damage);
