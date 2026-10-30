@@ -92,7 +92,7 @@ end
 **Checking the config**
 
 ```sh
-hyprctl configerrors                                # unknown options, with the file and line of the hg.config call
+hyprctl configerrors                                # unknown options and wrong values in hg.config, hg.preset and hg.layer
 hyprctl getoption plugin:hyprglass:layers:enabled   # "set: true" once your value is applied
 ```
 
@@ -141,7 +141,7 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 | `tint_color` | color | `0x8899aa22` | — | — | Glass tint RRGGBBAA hex. Alpha = tint strength |
 | `lens_distortion` | float | `0.5` | — | — | Center dome magnification (0.0-1.0) |
 | `self_sample` | float | `0.0` | — | — | Mixes the window's own content into the glass behind it (0.0-1.0). Windows only |
-| `xray` | bool | `false` | — | — | `true` hides the windows under the glass: only the wallpaper shows through. See [X-ray](#x-ray) |
+| `xray` | int | `0` | — | — | `1` hides the windows under the glass: only the wallpaper shows through, `0` off. `true` and `false` work too. See [X-ray](#x-ray) |
 | `focus_light` | float | `0.0` | — | — | Light along the glass edge of the active window, `0` off. See [Focus light](#focus-light) (0.0-1.0). Windows only |
 | `focus_light_color` | color | `0xffffff00` | — | — | Color of the focus light; alpha sets how much it replaces white (0xRRGGBBAA) |
 | `frost` | float | `0.0` | — | — | The glass blurs further where other windows are behind it and stays clear over the wallpaper, `0` off. See [Frost](#frost) (0.0-1.0). Windows only |
@@ -349,11 +349,12 @@ hg.layer("quickshell:card", { shape = { inset = { 24, 0, 24, 0 }, radius = 16 } 
 
 #### Per-layer settings
 
+Every layer gets glass until you list one. `hg.layer(namespace, { ... })` whitelists a layer namespace (`hyprctl layers` shows them) and sets what differs for it; once a namespace is listed, only the listed layers get glass.
+
 ```lua
 hg.config({ layers = { enabled = true } })
 -- hg.config({ layers = { mask_threshold = 0.05 } })  -- cutoff for every layer (hides shadows fainter than 5%)
 
--- Each call whitelists the namespace and optionally configures it
 hg.layer("waybar", { preset = "subtle", mask_threshold = 0.05, live_resample = false })
 hg.layer("swaync")
 hg.layer("quickshell:bezel", { preset = "ui", mask_threshold = 0.3 })
@@ -375,7 +376,7 @@ hg.layer("debug-panel", { exclude = true })
 | `shape` | table | Fixed glass shape: `{ inset = px or { top, right, bottom, left }, radius = px }`, both optional (`0`); `radius = -1` = pill |
 | `exclude` | bool | Blacklist this namespace instead of whitelisting it |
 
-To tune one layer while every other layer keeps glass, whitelist all of them with `hg.layer("*")`. It takes no settings: those for every layer go in the `layers` table of `hg.config`. `exclude` still wins over `"*"`.
+To tune one layer while every other layer keeps glass, whitelist them all with `hg.layer("*")`. It takes no settings: those for every layer go in the `layers` table of `hg.config`. `exclude` still wins over `"*"`.
 
 ```lua
 hg.layer("*")
@@ -390,21 +391,13 @@ Options of the `layers` table in `hg.config`.
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `false` | Enable glass on layer surfaces |
-| `namespaces` | string | `""` | Comma-separated namespace whitelist. Empty = all layers |
-| `exclude_namespaces` | string | `""` | Comma-separated namespace blacklist (priority over whitelist) |
 | `preset` | string | `""` | Preset override for all layers |
-| `namespace_presets` | string | `""` | Per-namespace preset (`ns:preset` pairs, comma-separated) |
 | `mask_threshold` | float | `0.001` | Alpha threshold for all layers: pixels below it get no glass. A per-layer value wins |
-| `namespace_mask_thresholds` | string | `""` | Per-namespace alpha threshold (`ns=value` pairs, comma-separated) |
-| `namespace_live_resample` | string | `""` | Per-namespace live resample override (`ns=true`/`ns=false` pairs, comma-separated) |
 | `live_resample` | bool | `true` | Re-render layer glass when content behind it changes (e.g. a playing video). GPU cost scales with background activity; static scenes stay free. Overridable per layer |
 | `live_resample_fps` | int | `30` | Max re-renders per second per layer for live resample. `0` = uncapped |
 | `force_live_resample` | bool | `false` | Experimental: re-render layer glass every frame regardless of changes, ignoring `live_resample_fps`. Heavy GPU/battery cost |
 | `mask_mode` | string | `auto` | Where the glass goes: `auto` = where the app requests blur, else where content is visible; `region` = only where the app requests blur; `alpha` = only where content is visible; `contour` = where content is visible, with the edge following each shape the app draws |
-| `namespace_mask_modes` | string | `""` | Per-namespace `mask_mode` (`ns=mode` pairs, comma-separated) |
 | `mask_feather` | float | `0` | Soft edges: glass fades in over this much alpha above `mask_threshold` (e.g. `0.45` for a rounded dock). `0` = hard edge. Ignored where the app requests a blur region |
-| `namespace_mask_feathers` | string | `""` | Per-namespace `mask_feather` (`ns=value` pairs, comma-separated) |
-| `namespace_shapes` | string | `""` | Per-namespace fixed glass shape (`ns=inset:radius` or `ns=top:right:bottom:left:radius` pairs, comma-separated, logical px). `radius` `-1` = pill. Unset = the whole layer |
 | `manage_blur` | bool | `true` | Replace Hyprland's own blur with glass on glassed layers (the `ignore_alpha` layer rule then has no effect, use `mask_threshold`). Set to `false` to keep Hyprland's blur |
 
 > Layer support hooks into Hyprland's internal render pipeline. This is version-sensitive and may break across Hyprland updates.
@@ -522,12 +515,6 @@ hg.preset("clear", {
 })
 ```
 
-**Single-string form:**
-```lua
-hg.preset("name:clear, glass_opacity:0.8, blur_strength:1.5")
-hg.preset("name:clear:dark, brightness:0.7")
-```
-
 *Tip: increase the last two hex digits of `tint_color` for more tint opacity.*
 
 ## How It Works
@@ -623,7 +610,7 @@ hyprctl -j hyprglass stats       # same, as JSON
 
 ```
 hyprglass stats
-  stage timers: off (plugin:hyprglass:debug:timers = 0)
+  stage timers: off (hg.config({ debug = { timers = true } }))
 
   monitor        frames  win_draws  opaque_skip  win_hit  win_miss  win_defer  win_disc  layer_draws  layer_hit  layer_miss  layer_defer  sub_draws  sub_hit  sub_miss  sub_defer  xray_copy  xray_defer  xray_evict  blur_pass  sampled_mpx  glass_mpx  frost_build  contour_build
   eDP-1            7212       3401         5122     3120       240         41         0         1560       1420          92            3        410      380        22          8          0           0           0       5520        41.30      18.77            0              0

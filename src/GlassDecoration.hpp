@@ -161,7 +161,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // precedence, and re-deriving would mis-attribute those to opaque-skip.
     enum class EEnabledResolution {
         Enabled,
-        Disabled,              // hyprglass_disabled tag, or plugin:hyprglass:enabled = 0
+        Disabled,              // hyprglass_disabled tag, or enabled = false
         DisabledBecauseOpaque, // skip_opaque_windows and the window is opaque
     };
 

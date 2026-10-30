@@ -54,9 +54,6 @@ struct SLayerShape {
     float radius      = 0.0f;
 };
 
-// Parses "inset:radius" or "top:right:bottom:left:radius"; nullopt for anything else.
-[[nodiscard]] std::optional<SLayerShape> parseLayerShape(std::string_view value);
-
 // Instrumentation mode (plugin:hyprglass:debug:mode). Isolates the render-pass
 // cost from the GL pipeline cost for A/B measurement: hints_only skips all GL
 // work in the pass elements while keeping their boundingBox/needsLiveBlur/
@@ -84,10 +81,6 @@ inline constexpr auto BLUR_FOLD           = "plugin:hyprglass:blur_fold";
 // Performance diagnostics
 inline constexpr auto DEBUG_MODE   = "plugin:hyprglass:debug:mode";
 inline constexpr auto DEBUG_TIMERS = "plugin:hyprglass:debug:timers";
-
-// Preset keyword, registered as unscoped because Hyprlang does not dispatch
-// scoped keyword handlers inside the plugin special category.
-inline constexpr auto PRESET_KEYWORD = "preset";
 
 // Overridable — global level
 inline constexpr auto BLUR_STRENGTH        = "plugin:hyprglass:blur_strength";
@@ -131,22 +124,14 @@ inline constexpr auto FROST_BLUR            = "plugin:hyprglass:frost_blur";
 
 // Layer surface support
 inline constexpr auto LAYERS_ENABLED            = "plugin:hyprglass:layers:enabled";
-inline constexpr auto LAYERS_NAMESPACES         = "plugin:hyprglass:layers:namespaces";
-inline constexpr auto LAYERS_EXCLUDE_NAMESPACES = "plugin:hyprglass:layers:exclude_namespaces";
 inline constexpr auto LAYERS_PRESET             = "plugin:hyprglass:layers:preset";
-inline constexpr auto LAYERS_NAMESPACE_PRESETS          = "plugin:hyprglass:layers:namespace_presets";
 inline constexpr auto LAYERS_MASK_THRESHOLD             = "plugin:hyprglass:layers:mask_threshold";
-inline constexpr auto LAYERS_NAMESPACE_MASK_THRESHOLDS  = "plugin:hyprglass:layers:namespace_mask_thresholds";
-inline constexpr auto LAYERS_NAMESPACE_LIVE_RESAMPLE    = "plugin:hyprglass:layers:namespace_live_resample";
 inline constexpr auto LAYERS_LIVE_RESAMPLE              = "plugin:hyprglass:layers:live_resample";
 inline constexpr auto LAYERS_LIVE_RESAMPLE_FPS          = "plugin:hyprglass:layers:live_resample_fps";
 inline constexpr auto LAYERS_FORCE_LIVE_RESAMPLE        = "plugin:hyprglass:layers:force_live_resample";
 inline constexpr auto LAYERS_MASK_MODE                  = "plugin:hyprglass:layers:mask_mode";
-inline constexpr auto LAYERS_NAMESPACE_MASK_MODES       = "plugin:hyprglass:layers:namespace_mask_modes";
 // Alpha mask only: alpha range above mask_threshold over which layer glass fades in; 0 keeps the hard mask.
 inline constexpr auto LAYERS_MASK_FEATHER               = "plugin:hyprglass:layers:mask_feather";
-inline constexpr auto LAYERS_NAMESPACE_MASK_FEATHERS    = "plugin:hyprglass:layers:namespace_mask_feathers";
-inline constexpr auto LAYERS_NAMESPACE_SHAPES           = "plugin:hyprglass:layers:namespace_shapes";
 inline constexpr auto LAYERS_MANAGE_BLUR                = "plugin:hyprglass:layers:manage_blur";
 
 // Subsurface item glass support (see GlassSubsurfaceState).
@@ -371,18 +356,18 @@ inline bool readBoolConfig(const BoolConfigPtr& ptr) {
 }
 
 struct SPluginConfig {
-    Config::INTEGER* const* enabled           = nullptr;
+    Config::BOOL* const*    enabled           = nullptr;
     // Glass replaces Hyprland's blur for glassed windows: when set, the plugin
     // marks them with the noblur window property so Hyprland composites them
     // against the live framebuffer (which contains the glass) instead of its
     // pre-frame cached blur.
-    Config::INTEGER* const* manageWindowBlur  = nullptr;
+    Config::BOOL* const*    manageWindowBlur  = nullptr;
     // Skip glass for windows CWindow::opaque() reports as opaque: nothing behind
     // them is visible, so sampling and blurring their background is wasted work.
-    Config::INTEGER* const* skipOpaqueWindows = nullptr;
+    Config::BOOL* const*    skipOpaqueWindows = nullptr;
     // Derives a smaller blur pass count from the requested radius (GlassRenderer::
     // foldBlurPasses) instead of always running blur_iterations passes at full radius.
-    Config::INTEGER* const* blurFold          = nullptr;
+    Config::BOOL* const*    blurFold          = nullptr;
     // Hyprland's render:xp_mode: no wallpaper or bottom layers are drawn, so
     // there is nothing for x-ray to show.
     BoolConfigPtr           xpMode;
@@ -393,32 +378,24 @@ struct SPluginConfig {
 
     // Performance diagnostics (see Diagnostics.hpp for the hyprctl side)
     StringConfigPtr         debugMode;
-    Config::INTEGER* const* debugTimers = nullptr;
+    Config::BOOL* const*    debugTimers = nullptr;
 
-    Config::INTEGER* const* layersEnabled                 = nullptr;
-    StringConfigPtr         layersNamespaces;
-    StringConfigPtr         layersExcludeNamespaces;
+    Config::BOOL* const*    layersEnabled                 = nullptr;
     StringConfigPtr         layersPreset;
-    StringConfigPtr         layersNamespacePresets;
     Config::FLOAT* const*   layersMaskThreshold           = nullptr;
-    StringConfigPtr         layersNamespaceMaskThresholds;
-    StringConfigPtr         layersNamespaceLiveResample;
-    Config::INTEGER* const* layersLiveResample            = nullptr;
+    Config::BOOL* const*    layersLiveResample            = nullptr;
     Config::INTEGER* const* layersLiveResampleFps         = nullptr;
-    Config::INTEGER* const* layersForceLiveResample       = nullptr;
+    Config::BOOL* const*    layersForceLiveResample       = nullptr;
     StringConfigPtr         layersMaskMode;
-    StringConfigPtr         layersNamespaceMaskModes;
     Config::FLOAT* const*   layersMaskFeather             = nullptr;
-    StringConfigPtr         layersNamespaceMaskFeathers;
-    StringConfigPtr         layersNamespaceShapes;
-    Config::INTEGER* const* layersManageBlur              = nullptr;
+    Config::BOOL* const*    layersManageBlur              = nullptr;
 
-    Config::INTEGER* const* subsurfacesEnabled = nullptr;
+    Config::BOOL* const*    subsurfacesEnabled = nullptr;
     StringConfigPtr         subsurfacesPreset;
     Config::FLOAT* const*   subsurfacesRadius  = nullptr;
 
-    Config::INTEGER* const* windowsBackgroundCache = nullptr;
-    Config::INTEGER* const* windowsLiveResample    = nullptr;
+    Config::BOOL* const*    windowsBackgroundCache = nullptr;
+    Config::BOOL* const*    windowsLiveResample    = nullptr;
     Config::INTEGER* const* windowsLiveResampleFps = nullptr;
 
     SOverridableConfig global;
@@ -456,14 +433,11 @@ struct SResolveContext {
 void registerConfig(HANDLE handle);
 void initConfigPointers(HANDLE handle, SPluginConfig& config);
 
-// Preset keyword handler (registered via addConfigKeyword)
-Hyprlang::CParseResult handlePresetKeyword(const char* command, const char* value);
+// Forget the pending presets/layers before the config is parsed again (preReload callback)
+void beginConfigReload();
 
-// Clear pending presets/layers before config re-parse (called from preConfigReload callback)
-void clearPendingPresets();
-void clearPendingLayers();
-
-// Swap pending data into active maps (called from configReloaded callback)
+// Swap pending data into active maps (reloaded callback). A reload that stopped before running
+// any hyprglass.* call and failed keeps what the last good one committed.
 void commitPendingPresets();
 void commitPendingLayers();
 
