@@ -375,6 +375,14 @@ hg.layer("debug-panel", { exclude = true })
 | `shape` | table | Fixed glass shape: `{ inset = px or { top, right, bottom, left }, radius = px }`, both optional (`0`); `radius = -1` = pill |
 | `exclude` | bool | Blacklist this namespace instead of whitelisting it |
 
+To tune one layer while every other layer keeps glass, whitelist all of them with `hg.layer("*")`. It takes no settings: those for every layer go in the `layers` table of `hg.config`. `exclude` still wins over `"*"`.
+
+```lua
+hg.layer("*")
+hg.layer("waybar", { preset = "subtle" })
+hg.layer("debug-panel", { exclude = true })
+```
+
 #### Layer options
 
 Options of the `layers` table in `hg.config`.

@@ -64,7 +64,7 @@ struct SGlobalState {
     // watchedSurfaces below. Pruned lazily wherever it's walked (see main.cpp).
     std::unordered_map<WP<CWLSurfaceResource>, std::shared_ptr<CGlassSubsurfaceState>> subsurfaceGlass;
 
-    // Parsed namespace whitelist (empty = match all when layers enabled)
+    // Parsed namespace whitelist (empty or containing LAYER_NAMESPACE_WILDCARD = match all when layers enabled)
     std::unordered_set<std::string> layerNamespaceFilter;
     // Parsed namespace blacklist (always excluded, takes priority over whitelist)
     std::unordered_set<std::string> layerNamespaceExclude;

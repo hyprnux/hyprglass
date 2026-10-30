@@ -33,6 +33,9 @@ inline constexpr Config::INTEGER SENTINEL_INT   = -1;
 
 inline constexpr int MAX_PRESET_INHERITANCE_DEPTH = 8;
 
+// hg.layer() namespace that whitelists every layer; exact match, no globbing.
+inline const std::string LAYER_NAMESPACE_WILDCARD = "*";
+
 // Layer glass masking strategy: how hyprglass decides which pixels of a layer
 // surface get the glass effect.
 enum class ELayerMaskMode { AUTO, ALPHA, REGION, CONTOUR };

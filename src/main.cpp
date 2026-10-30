@@ -378,7 +378,7 @@ static bool shouldGlassLayer(PHLLS layerSurface) {
         return false;
 
     const auto& include = g_pGlobalState->layerNamespaceFilter;
-    if (include.empty())
+    if (include.empty() || include.contains(LAYER_NAMESPACE_WILDCARD))
         return true;
 
     return include.contains(ns);

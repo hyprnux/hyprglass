@@ -919,7 +919,19 @@ static int handleLuaLayer(lua_State* L) {
     SPendingLayer entry;
     entry.ns = lua_tostring(L, 1);
 
-    if (lua_gettop(L) >= 2 && lua_istable(L, 2)) {
+    const bool hasTable = lua_gettop(L) >= 2 && lua_istable(L, 2);
+
+    if (hasTable && entry.ns == LAYER_NAMESPACE_WILDCARD) {
+        lua_pushnil(L);
+        if (lua_next(L, 2) != 0) {
+            lua_pop(L, 2);
+            // not a Lua error: it would unwind past entry's strings
+            luaConfigManager().addError("hyprglass.layer: '*' takes no settings, put the settings for every layer in the layers table of hyprglass.config");
+            return 0;
+        }
+    }
+
+    if (hasTable) {
         lua_getfield(L, 2, "exclude");
         if (lua_isboolean(L, -1) && lua_toboolean(L, -1))
             entry.exclude = true;
