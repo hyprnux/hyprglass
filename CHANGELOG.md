@@ -1,4 +1,33 @@
 
+## [v1.0.0](https://github.com/Hyprnux/hyprglass/compare/v0.11.0...v1.0.0) - 2026-10-30
+
+### Bug Fixes
+
+* hyprglass works on Hyprland 0.57 ([#100](https://github.com/Hyprnux/hyprglass/issues/100))
+* a build from main pauses instead of loading on a different Hyprland commit
+* glass renders correctly with hyprland-git's new renderer
+* use explicit instead of global render context
+
+### Build System
+
+* hyprglass targets Hyprland 0.57 and its Lua-only config ([#100](https://github.com/Hyprnux/hyprglass/issues/100))
+* v0.11.0 features build against hyprland-git
+* hyprglass builds against the latest hyprland-git
+* support hyprland-git passing the workspace presentable to window decorations
+* support hyprland-git (view, workspace and hyprctl API refactors)
+
+### Chores
+
+* **release:** pin hyprland 0.56.2 to v0.11.0 [skip ci]
+* **release:** pin hyprland 0.56.2 to v0.10.0 [skip ci]
+* **release:** pin hyprland 0.56.2 to v0.9.1 [skip ci]
+* **release:** pin hyprland 0.56.2 to v0.9.0 [skip ci]
+
+### Documentation
+
+* the README documents Hyprland 0.57's Lua-only config ([#100](https://github.com/Hyprnux/hyprglass/issues/100))
+
+
 ## [v0.11.0](https://github.com/Hyprnux/hyprglass/compare/v0.10.0...v0.11.0) - 2026-10-19
 
 ### Bug Fixes
@@ -8,6 +37,10 @@
 * layer glass no longer shifts for a frame when its blur region changes (spotted by [@Eddie175](https://github.com/Eddie175))
 * glass no longer stays stale after a quick burst of changes (spotted by [@Eddie175](https://github.com/Eddie175))
 * no stray glass from bars or glass layers over the lock screen (spotted by [@Eddie175](https://github.com/Eddie175))
+
+### Chores
+
+* **release:** v0.11.0 [skip ci]
 
 ### Documentation
 
