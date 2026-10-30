@@ -390,7 +390,7 @@ std::string formatStatus(IPC::Socket1::eOutputFormat format) {
     const bool        protocolActive = ItemHints::active();
 
     // Same order as the render path: the setting, then the hook, then the shaders.
-    auto featureStatus = [&](Hyprlang::INT* const* enabledValue, bool hooked) {
+    auto featureStatus = [&](Config::INTEGER* const* enabledValue, bool hooked) {
         SFeatureStatus status;
         status.enabled = enabledValue && **enabledValue;
         if (!status.enabled)

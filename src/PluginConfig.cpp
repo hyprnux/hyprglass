@@ -262,7 +262,7 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_FROST, Config::FLOAT{SENTINEL_FLOAT});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LIGHT_FROST_BLUR, Config::FLOAT{SENTINEL_FLOAT});
 
-    // Lua-config callbacks for custom presets and layers (hyprland-git has no legacy config).
+    // Lua callbacks for custom presets, layers and config.
     HyprlandAPI::addLuaFunction(handle, "hyprglass", "preset", handleLuaPreset);
     HyprlandAPI::addLuaFunction(handle, "hyprglass", "layer", handleLuaLayer);
     HyprlandAPI::addLuaFunction(handle, "hyprglass", "config", handleLuaConfig);
@@ -280,7 +280,7 @@ static StringConfigPtr getStringPtr(HANDLE /*handle*/, const char* key) {
     return {.dataptr = value.dataptr, .type = value.type};
 }
 
-static IntegerConfigPtr getIntegerPtr(HANDLE /*handle*/, const char* key) {
+static BoolConfigPtr getBoolPtr(HANDLE /*handle*/, const char* key) {
     const auto value = Config::mgr()->getConfigValue(key);
     return {.dataptr = value.dataptr, .type = value.type};
 }
@@ -307,84 +307,84 @@ static void initOverridablePointers(HANDLE handle, SOverridableConfig& layer,
                                     const char* selfSample, const char* xray,
                                     const char* focusLight, const char* focusLightColor,
                                     const char* frost, const char* frostBlur) {
-    layer.blurStrength        = getStaticPtr<Hyprlang::FLOAT>(handle, blurStrength);
-    layer.blurIterations      = getStaticPtr<Hyprlang::INT>(handle, blurIterations);
-    layer.noiseStrength       = getStaticPtr<Hyprlang::FLOAT>(handle, noiseStrength);
-    layer.refractionStrength  = getStaticPtr<Hyprlang::FLOAT>(handle, refractionStrength);
-    layer.chromaticAberration = getStaticPtr<Hyprlang::FLOAT>(handle, chromaticAberration);
-    layer.fresnelStrength     = getStaticPtr<Hyprlang::FLOAT>(handle, fresnelStrength);
-    layer.specularStrength    = getStaticPtr<Hyprlang::FLOAT>(handle, specularStrength);
-    layer.specularAngle       = getStaticPtr<Hyprlang::FLOAT>(handle, specularAngle);
-    layer.glassOpacity        = getStaticPtr<Hyprlang::FLOAT>(handle, glassOpacity);
-    layer.edgeThickness       = getStaticPtr<Hyprlang::FLOAT>(handle, edgeThickness);
-    layer.edgeThicknessPx     = getStaticPtr<Hyprlang::FLOAT>(handle, edgeThicknessPx);
-    layer.edgeHeight          = getStaticPtr<Hyprlang::FLOAT>(handle, edgeHeight);
-    layer.fresnelReflection   = getStaticPtr<Hyprlang::FLOAT>(handle, fresnelReflection);
-    layer.tintColor           = getStaticPtr<Hyprlang::INT>(handle, tintColor);
-    layer.lensDistortion      = getStaticPtr<Hyprlang::FLOAT>(handle, lensDistortion);
-    layer.brightness          = getStaticPtr<Hyprlang::FLOAT>(handle, brightness);
-    layer.contrast            = getStaticPtr<Hyprlang::FLOAT>(handle, contrast);
-    layer.saturation          = getStaticPtr<Hyprlang::FLOAT>(handle, saturation);
-    layer.vibrancy            = getStaticPtr<Hyprlang::FLOAT>(handle, vibrancy);
-    layer.vibrancyDarkness    = getStaticPtr<Hyprlang::FLOAT>(handle, vibrancyDarkness);
-    layer.adaptiveDim         = getStaticPtr<Hyprlang::FLOAT>(handle, adaptiveDim);
-    layer.adaptiveBoost       = getStaticPtr<Hyprlang::FLOAT>(handle, adaptiveBoost);
-    layer.refractionFlow      = getStaticPtr<Hyprlang::FLOAT>(handle, refractionFlow);
-    layer.refractionSpread    = getStaticPtr<Hyprlang::FLOAT>(handle, refractionSpread);
-    layer.fresnelTint         = getStaticPtr<Hyprlang::FLOAT>(handle, fresnelTint);
-    layer.bevelStrength       = getStaticPtr<Hyprlang::FLOAT>(handle, bevelStrength);
-    layer.bevelSize           = getStaticPtr<Hyprlang::FLOAT>(handle, bevelSize);
-    layer.fresnelColor        = getStaticPtr<Hyprlang::INT>(handle, fresnelColor);
-    layer.bevelColor          = getStaticPtr<Hyprlang::INT>(handle, bevelColor);
-    layer.bevelTint           = getStaticPtr<Hyprlang::FLOAT>(handle, bevelTint);
-    layer.bevelAngle          = getStaticPtr<Hyprlang::FLOAT>(handle, bevelAngle);
-    layer.bevelShadow         = getStaticPtr<Hyprlang::FLOAT>(handle, bevelShadow);
-    layer.selfSample          = getStaticPtr<Hyprlang::FLOAT>(handle, selfSample);
-    layer.xray                = getStaticPtr<Hyprlang::INT>(handle, xray);
-    layer.focusLight          = getStaticPtr<Hyprlang::FLOAT>(handle, focusLight);
-    layer.focusLightColor     = getStaticPtr<Hyprlang::INT>(handle, focusLightColor);
-    layer.frost               = getStaticPtr<Hyprlang::FLOAT>(handle, frost);
-    layer.frostBlur           = getStaticPtr<Hyprlang::FLOAT>(handle, frostBlur);
+    layer.blurStrength        = getStaticPtr<Config::FLOAT>(handle, blurStrength);
+    layer.blurIterations      = getStaticPtr<Config::INTEGER>(handle, blurIterations);
+    layer.noiseStrength       = getStaticPtr<Config::FLOAT>(handle, noiseStrength);
+    layer.refractionStrength  = getStaticPtr<Config::FLOAT>(handle, refractionStrength);
+    layer.chromaticAberration = getStaticPtr<Config::FLOAT>(handle, chromaticAberration);
+    layer.fresnelStrength     = getStaticPtr<Config::FLOAT>(handle, fresnelStrength);
+    layer.specularStrength    = getStaticPtr<Config::FLOAT>(handle, specularStrength);
+    layer.specularAngle       = getStaticPtr<Config::FLOAT>(handle, specularAngle);
+    layer.glassOpacity        = getStaticPtr<Config::FLOAT>(handle, glassOpacity);
+    layer.edgeThickness       = getStaticPtr<Config::FLOAT>(handle, edgeThickness);
+    layer.edgeThicknessPx     = getStaticPtr<Config::FLOAT>(handle, edgeThicknessPx);
+    layer.edgeHeight          = getStaticPtr<Config::FLOAT>(handle, edgeHeight);
+    layer.fresnelReflection   = getStaticPtr<Config::FLOAT>(handle, fresnelReflection);
+    layer.tintColor           = getStaticPtr<Config::INTEGER>(handle, tintColor);
+    layer.lensDistortion      = getStaticPtr<Config::FLOAT>(handle, lensDistortion);
+    layer.brightness          = getStaticPtr<Config::FLOAT>(handle, brightness);
+    layer.contrast            = getStaticPtr<Config::FLOAT>(handle, contrast);
+    layer.saturation          = getStaticPtr<Config::FLOAT>(handle, saturation);
+    layer.vibrancy            = getStaticPtr<Config::FLOAT>(handle, vibrancy);
+    layer.vibrancyDarkness    = getStaticPtr<Config::FLOAT>(handle, vibrancyDarkness);
+    layer.adaptiveDim         = getStaticPtr<Config::FLOAT>(handle, adaptiveDim);
+    layer.adaptiveBoost       = getStaticPtr<Config::FLOAT>(handle, adaptiveBoost);
+    layer.refractionFlow      = getStaticPtr<Config::FLOAT>(handle, refractionFlow);
+    layer.refractionSpread    = getStaticPtr<Config::FLOAT>(handle, refractionSpread);
+    layer.fresnelTint         = getStaticPtr<Config::FLOAT>(handle, fresnelTint);
+    layer.bevelStrength       = getStaticPtr<Config::FLOAT>(handle, bevelStrength);
+    layer.bevelSize           = getStaticPtr<Config::FLOAT>(handle, bevelSize);
+    layer.fresnelColor        = getStaticPtr<Config::INTEGER>(handle, fresnelColor);
+    layer.bevelColor          = getStaticPtr<Config::INTEGER>(handle, bevelColor);
+    layer.bevelTint           = getStaticPtr<Config::FLOAT>(handle, bevelTint);
+    layer.bevelAngle          = getStaticPtr<Config::FLOAT>(handle, bevelAngle);
+    layer.bevelShadow         = getStaticPtr<Config::FLOAT>(handle, bevelShadow);
+    layer.selfSample          = getStaticPtr<Config::FLOAT>(handle, selfSample);
+    layer.xray                = getStaticPtr<Config::INTEGER>(handle, xray);
+    layer.focusLight          = getStaticPtr<Config::FLOAT>(handle, focusLight);
+    layer.focusLightColor     = getStaticPtr<Config::INTEGER>(handle, focusLightColor);
+    layer.frost               = getStaticPtr<Config::FLOAT>(handle, frost);
+    layer.frostBlur           = getStaticPtr<Config::FLOAT>(handle, frostBlur);
 }
 
 void initConfigPointers(HANDLE handle, SPluginConfig& config) {
-    config.enabled           = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::ENABLED);
-    config.manageWindowBlur  = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::MANAGE_WINDOW_BLUR);
-    config.skipOpaqueWindows = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::SKIP_OPAQUE_WINDOWS);
-    config.blurFold          = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::BLUR_FOLD);
-    config.xpMode            = getIntegerPtr(handle, "render:xp_mode");
-    config.animationsEnabled = getIntegerPtr(handle, "animations:enabled");
+    config.enabled           = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::ENABLED);
+    config.manageWindowBlur  = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::MANAGE_WINDOW_BLUR);
+    config.skipOpaqueWindows = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::SKIP_OPAQUE_WINDOWS);
+    config.blurFold          = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::BLUR_FOLD);
+    config.xpMode            = getBoolPtr(handle, "render:xp_mode");
+    config.animationsEnabled = getBoolPtr(handle, "animations:enabled");
     config.defaultTheme  = getStringPtr(handle, ConfigKeys::DEFAULT_THEME);
     config.defaultPreset = getStringPtr(handle, ConfigKeys::DEFAULT_PRESET);
 
     config.debugMode   = getStringPtr(handle, ConfigKeys::DEBUG_MODE);
-    config.debugTimers = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::DEBUG_TIMERS);
+    config.debugTimers = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::DEBUG_TIMERS);
 
-    config.layersEnabled           = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_ENABLED);
+    config.layersEnabled           = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::LAYERS_ENABLED);
     config.layersNamespaces        = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACES);
     config.layersExcludeNamespaces = getStringPtr(handle, ConfigKeys::LAYERS_EXCLUDE_NAMESPACES);
     config.layersPreset            = getStringPtr(handle, ConfigKeys::LAYERS_PRESET);
     config.layersNamespacePresets         = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_PRESETS);
-    config.layersMaskThreshold           = getStaticPtr<Hyprlang::FLOAT>(handle, ConfigKeys::LAYERS_MASK_THRESHOLD);
+    config.layersMaskThreshold           = getStaticPtr<Config::FLOAT>(handle, ConfigKeys::LAYERS_MASK_THRESHOLD);
     config.layersNamespaceMaskThresholds = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_THRESHOLDS);
     config.layersNamespaceLiveResample = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_LIVE_RESAMPLE);
-    config.layersLiveResample      = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE);
-    config.layersLiveResampleFps   = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE_FPS);
-    config.layersForceLiveResample = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_FORCE_LIVE_RESAMPLE);
+    config.layersLiveResample      = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE);
+    config.layersLiveResampleFps   = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::LAYERS_LIVE_RESAMPLE_FPS);
+    config.layersForceLiveResample = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::LAYERS_FORCE_LIVE_RESAMPLE);
     config.layersMaskMode           = getStringPtr(handle, ConfigKeys::LAYERS_MASK_MODE);
     config.layersNamespaceMaskModes = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_MODES);
-    config.layersMaskFeather           = getStaticPtr<Hyprlang::FLOAT>(handle, ConfigKeys::LAYERS_MASK_FEATHER);
+    config.layersMaskFeather           = getStaticPtr<Config::FLOAT>(handle, ConfigKeys::LAYERS_MASK_FEATHER);
     config.layersNamespaceMaskFeathers = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_MASK_FEATHERS);
     config.layersNamespaceShapes       = getStringPtr(handle, ConfigKeys::LAYERS_NAMESPACE_SHAPES);
-    config.layersManageBlur         = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::LAYERS_MANAGE_BLUR);
+    config.layersManageBlur         = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::LAYERS_MANAGE_BLUR);
 
-    config.subsurfacesEnabled = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::SUBSURFACES_ENABLED);
+    config.subsurfacesEnabled = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::SUBSURFACES_ENABLED);
     config.subsurfacesPreset  = getStringPtr(handle, ConfigKeys::SUBSURFACES_PRESET);
-    config.subsurfacesRadius  = getStaticPtr<Hyprlang::FLOAT>(handle, ConfigKeys::SUBSURFACES_RADIUS);
+    config.subsurfacesRadius  = getStaticPtr<Config::FLOAT>(handle, ConfigKeys::SUBSURFACES_RADIUS);
 
-    config.windowsBackgroundCache = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::WINDOWS_BACKGROUND_CACHE);
-    config.windowsLiveResample    = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE);
-    config.windowsLiveResampleFps = getStaticPtr<Hyprlang::INT>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE_FPS);
+    config.windowsBackgroundCache = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::WINDOWS_BACKGROUND_CACHE);
+    config.windowsLiveResample    = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE);
+    config.windowsLiveResampleFps = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE_FPS);
 
     initOverridablePointers(handle, config.global,
         ConfigKeys::BLUR_STRENGTH, ConfigKeys::BLUR_ITERATIONS, ConfigKeys::NOISE_STRENGTH,
@@ -682,19 +682,19 @@ void commitPendingPresets() {
 // Keys are validated first so unknown options are reported with the user's file and line instead of '[C]'.
 // Lua errors longjmp, so they are raised only while no C++ object lives in our frames.
 
-static WP<Config::Lua::CConfigManager> luaConfigManager() {
-    return dynamicPointerCast<Config::Lua::CConfigManager>(WP<Config::IConfigManager>(Config::mgr()));
+// The Lua manager is the only config manager, and these callbacks run from its Lua state.
+static Config::Lua::CConfigManager& luaConfigManager() {
+    return static_cast<Config::Lua::CConfigManager&>(*Config::mgr());
 }
 
 struct SLuaConfigContext {
     lua_State*                                       L;
-    WP<Config::Lua::CConfigManager>                  luaMgr;
+    Config::Lua::CConfigManager&                     luaMgr;
     std::string                                      where;
     std::vector<std::pair<std::string, std::string>> applied; // {option path, dotted key}
 
     void report(const std::string& msg) const {
-        if (!luaMgr) return;
-        luaMgr->addError(where.empty() ? "hyprglass.config: " + msg : where + ": hyprglass.config: " + msg);
+        luaMgr.addError(where.empty() ? "hyprglass.config: " + msg : where + ": hyprglass.config: " + msg);
     }
 };
 
@@ -765,12 +765,12 @@ static bool forwardLuaConfig(lua_State* L) {
     lua_setfield(L, -2, "hyprglass");
     lua_setfield(L, -2, "plugin");
 
-    const std::string errorsBefore = ctx.luaMgr ? ctx.luaMgr->getErrors() : std::string{};
+    const std::string errorsBefore = ctx.luaMgr.getErrors();
     if (lua_pcall(L, 1, 0, 0) != LUA_OK)
         return false;
 
     // hl.config reports type and range errors itself; only look for silent no-ops while the config file is parsed.
-    if (ctx.luaMgr && !ctx.luaMgr->isDynamicParse() && ctx.luaMgr->getErrors() == errorsBefore) {
+    if (!ctx.luaMgr.isDynamicParse() && ctx.luaMgr.getErrors() == errorsBefore) {
         for (const auto& [optionPath, dotted] : ctx.applied) {
             if (!Config::mgr()->getConfigValue(optionPath).setByUser)
                 ctx.report(std::format("option '{}' was not applied", dotted));
@@ -954,10 +954,8 @@ static int handleLuaLayer(lua_State* L) {
         if (!lua_isnil(L, -1)) {
             entry.shape = lua_istable(L, -1) ? readLuaLayerShape(L, lua_gettop(L)) : std::nullopt;
             // not a Lua error: it would unwind past entry's strings
-            if (!entry.shape) {
-                if (const auto luaMgr = luaConfigManager())
-                    luaMgr->addError(std::format("hyprglass.layer: invalid shape for '{}', expected {{ inset = px or {{top, right, bottom, left}}, radius = px }}", entry.ns));
-            }
+            if (!entry.shape)
+                luaConfigManager().addError(std::format("hyprglass.layer: invalid shape for '{}', expected {{ inset = px or {{top, right, bottom, left}}, radius = px }}", entry.ns));
         }
         lua_pop(L, 1);
     }
@@ -1058,7 +1056,7 @@ bool anySelfSampleConfigured(const SPluginConfig& config, const std::unordered_m
 static float resolvePresetFloatImpl(
     const std::string& presetName, bool isDark,
     float SPresetValues::* presetField,
-    Hyprlang::FLOAT* const* SOverridableConfig::* configField,
+    Config::FLOAT* const* SOverridableConfig::* configField,
     const SPluginConfig& config,
     const std::unordered_map<std::string, SCustomPreset>& customPresets,
     float hardcodedDefault, int depth
@@ -1097,7 +1095,7 @@ static float resolvePresetFloatImpl(
 float resolvePresetFloat(
     const SResolveContext& context,
     float SPresetValues::* presetField,
-    Hyprlang::FLOAT* const* SOverridableConfig::* configField,
+    Config::FLOAT* const* SOverridableConfig::* configField,
     float hardcodedDefault
 ) {
     return resolvePresetFloatImpl(context.presetName, context.isDark, presetField, configField,
@@ -1107,7 +1105,7 @@ float resolvePresetFloat(
 static int64_t resolvePresetIntImpl(
     const std::string& presetName, bool isDark,
     int64_t SPresetValues::* presetField,
-    Hyprlang::INT* const* SOverridableConfig::* configField,
+    Config::INTEGER* const* SOverridableConfig::* configField,
     const SPluginConfig& config,
     const std::unordered_map<std::string, SCustomPreset>& customPresets,
     int64_t hardcodedDefault, int depth
@@ -1146,7 +1144,7 @@ static int64_t resolvePresetIntImpl(
 int64_t resolvePresetInt(
     const SResolveContext& context,
     int64_t SPresetValues::* presetField,
-    Hyprlang::INT* const* SOverridableConfig::* configField,
+    Config::INTEGER* const* SOverridableConfig::* configField,
     int64_t hardcodedDefault
 ) {
     return resolvePresetIntImpl(context.presetName, context.isDark, presetField, configField,

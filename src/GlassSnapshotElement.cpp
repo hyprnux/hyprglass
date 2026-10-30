@@ -37,7 +37,7 @@ static CRegion framebufferDamage(const PHLMONITOR& monitor, const CRegion& damag
 
 bool xrayHasBackground() {
     const auto& config = g_pGlobalState->config;
-    return readIntegerConfig(config.xpMode) == 0;
+    return !readBoolConfig(config.xpMode);
 }
 
 void requestXraySnapshot(PHLMONITOR monitor) {

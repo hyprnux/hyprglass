@@ -103,7 +103,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // glass is invisible on static windows (#46).
     bool m_noBlurApplied = false;
 
-    // Glass can start without a config reload (tags, hyprctl keyword), and
+    // Glass can start without a config reload (tags, hyprctl eval), and
     // each start rechecks that Hyprland shadows are on.
     bool m_glassWasEnabled = false;
 

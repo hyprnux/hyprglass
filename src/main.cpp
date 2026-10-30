@@ -467,7 +467,7 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, Render::CRenderContext
                            PHLMONITOR monitor, const Time::steady_tp& now, bool popups, bool lockscreen, bool workspaceScene) {
     const auto& config = g_pGlobalState->config;
 
-    // layers:enabled can flip without a config reload (hyprctl keyword), so follow it
+    // layers:enabled can flip without a config reload (hyprctl eval), so follow it
     // here too; this is a no-op once the observer is in the requested state.
     // self_sample is followed from the window path, which resolves it anyway.
     BackgroundDamageObserver::refreshEnabled();
@@ -500,7 +500,7 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, Render::CRenderContext
         return !pair.second->getLayerSurface();
     });
 
-    // layers:enabled can be turned off by hyprctl keyword without a config reload: the fields go with it
+    // layers:enabled can be turned off by hyprctl eval without a config reload: the fields go with it
     if (g_pGlobalState->contourScratch.users > 0 && !(config.layersEnabled && **config.layersEnabled))
         releaseContourFields(true);
 
@@ -756,21 +756,19 @@ static void ensureShadowsForWindowGlass() {
     if (!shadowEnabled.dataptr || !shadowEnabled.type)
         return;
 
-    if (*shadowEnabled.type == typeid(Hyprlang::INT)) {
-        if (!**reinterpret_cast<Hyprlang::INT* const*>(shadowEnabled.dataptr))
-            HyprlandAPI::invokeHyprctlCommand("keyword", "decoration:shadow:enabled true");
-    } else if (*shadowEnabled.type == typeid(Config::BOOL)) {
-        // Lua config: set the value the way hl.config() does at runtime. hyprctl
-        // eval would do the same but also clears the list hyprctl configerrors shows.
-        auto* const shadow = *reinterpret_cast<Config::BOOL* const*>(shadowEnabled.dataptr);
-        if (!*shadow) {
-            *shadow = true;
-            Config::Supplementary::refresher()->scheduleRefresh(Config::Supplementary::REFRESH_WINDOW_STATES);
-        }
+    if (*shadowEnabled.type != typeid(Config::BOOL))
+        return;
+
+    // Set the value the way hl.config() does at runtime. hyprctl eval would do
+    // the same but also clears the list hyprctl configerrors shows.
+    auto* const shadow = *reinterpret_cast<Config::BOOL* const*>(shadowEnabled.dataptr);
+    if (!*shadow) {
+        *shadow = true;
+        Config::Supplementary::refresher()->scheduleRefresh(Config::Supplementary::REFRESH_WINDOW_STATES);
     }
 }
 
-// Deferred so the keyword never runs inside a config reload or a render pass
+// Deferred so the value is never written inside a config reload or a render pass
 void scheduleShadowsForWindowGlass() {
     if (g_pGlobalState && g_pEventLoopManager)
         g_pGlobalState->shadowFixLock = g_pEventLoopManager->doLaterLock([] { ensureShadowsForWindowGlass(); });
