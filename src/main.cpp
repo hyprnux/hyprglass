@@ -20,6 +20,7 @@
 #include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
@@ -64,6 +65,23 @@ static void onMonitorGone(PHLMONITOR monitor) {
     // instead of keeping dead entries around indefinitely.
     g_pGlobalState->subsurfaceTempFramebuffers.erase(monitor->m_id);
     g_pGlobalState->backgroundSnapshots.erase(monitor->m_id);
+}
+
+// A transform, scale or mode change on a live monitor leaves boxes that read as unchanged
+// while the pixels behind them are not: no per-window event reports it, so every cached
+// sample (windows, layers, items) is stale and the x-ray snapshot no longer matches.
+static void onMonitorLayoutChanged() {
+    if (!g_pGlobalState)
+        return;
+
+    for (const auto& monitor : State::monitorState()->monitors()) {
+        if (!monitor)
+            continue;
+
+        g_pGlobalState->bumpSceneGeneration(monitor);
+        if (const auto snapshot = g_pGlobalState->backgroundSnapshots.find(monitor->m_id); snapshot != g_pGlobalState->backgroundSnapshots.end())
+            snapshot->second.valid = CRegion{};
+    }
 }
 
 static void onNewWindow(PHLWINDOW window) {
@@ -856,6 +874,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) { onMonitorGone(monitor); }));
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.destroyMon.listen([](PHLMONITOR monitor) { onMonitorGone(monitor); }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.monitor.layoutChanged.listen([]() { onMonitorLayoutChanged(); }));
 
     // Z-order / visibility changes invalidate layer glass caches on the affected monitor only.
     // Per-monitor to avoid triggering re-samples on idle monitors (feedback loop).
