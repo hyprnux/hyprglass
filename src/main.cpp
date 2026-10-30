@@ -675,9 +675,7 @@ static void hkRenderPassAdd(Render::CRenderPass* pass, UP<IPassElement>&& el) {
         return;
     }
 
-    const CBox rawBox       = *pixelBox;
-    const CBox transformBox = SubsurfaceGeometry::toTransformBox(rawBox, monitor);
-    CRegion    region       = SubsurfaceGeometry::transformedItemBlurRegion(data.surface, rawBox, monitor);
+    CRegion region = SubsurfaceGeometry::transformedItemBlurRegion(data.surface, *pixelBox, monitor);
     if (region.empty()) {
         // A background effect was declared but nothing is left to glass this
         // frame (e.g. an explicit empty region, or clipped fully outside the
@@ -702,7 +700,7 @@ static void hkRenderPassAdd(Render::CRenderPass* pass, UP<IPassElement>&& el) {
     const float alpha = std::clamp(data.alpha * data.fadeAlpha, 0.0f, 1.0f);
 
     // Pre-surface: sample+blur background, redirect currentFB → temp FBO.
-    CGlassSubsurfacePassElement::SData preData{it->second, itemLogicalBox, transformBox, data.pMonitor, alpha};
+    CGlassSubsurfacePassElement::SData preData{it->second, itemLogicalBox, *pixelBox, data.pMonitor, alpha};
     callOriginalRenderPassAdd(pass, makeUnique<CGlassSubsurfacePassElement>(preData));
 
     // The surface element itself: Hyprland's own draw() call renders it into
@@ -711,7 +709,7 @@ static void hkRenderPassAdd(Render::CRenderPass* pass, UP<IPassElement>&& el) {
 
     // Post-surface: restore currentFB, composite glass masked by the protocol
     // region with the item's own foreground (from the temp FBO) on top.
-    CGlassSubsurfaceCompositeElement::SData postData{it->second, itemLogicalBox, rawBox, transformBox, std::move(region), data.pMonitor, alpha};
+    CGlassSubsurfaceCompositeElement::SData postData{it->second, itemLogicalBox, *pixelBox, std::move(region), data.pMonitor, alpha};
     callOriginalRenderPassAdd(pass, makeUnique<CGlassSubsurfaceCompositeElement>(postData));
 }
 

@@ -405,7 +405,7 @@ void CGlassDecoration::flushDeferredResample(std::chrono::steady_clock::time_poi
     markBackgroundDirty();
 }
 
-bool CGlassDecoration::wantsBackgroundResample(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& transformBox, bool xray) const {
+bool CGlassDecoration::wantsBackgroundResample(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& windowBox, bool xray) const {
     const auto& config = g_pGlobalState->config;
     if (!config.windowsBackgroundCache || !**config.windowsBackgroundCache)
         return true; // kill switch off: exact pre-cache behavior, no other state consulted
@@ -457,8 +457,8 @@ bool CGlassDecoration::wantsBackgroundResample(Render::CRenderContext& ctx, PHLM
     const float blurStrength              = resolvePresetFloat(resolveContext, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
     const int   downscale                 = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-    const int fullWidth  = static_cast<int>(transformBox.w) + 2 * GlassRenderer::SAMPLE_PADDING_PX;
-    const int fullHeight = static_cast<int>(transformBox.h) + 2 * GlassRenderer::SAMPLE_PADDING_PX;
+    const int fullWidth  = static_cast<int>(windowBox.w) + 2 * GlassRenderer::SAMPLE_PADDING_PX;
+    const int fullHeight = static_cast<int>(windowBox.h) + 2 * GlassRenderer::SAMPLE_PADDING_PX;
     const int requiredWidth  = std::max(1, fullWidth / downscale);
     const int requiredHeight = std::max(1, fullHeight / downscale);
 
@@ -497,8 +497,7 @@ void CGlassDecoration::renderPass(Render::CRenderContext& ctx, PHLMONITOR monito
     if (monitor)
         Diagnostics::recordWindowGlassDraw(monitor->m_id);
 
-    CBox windowBox    = *optBox;
-    CBox transformBox = WindowGeometry::applyMonitorTransform(windowBox, monitor);
+    const CBox windowBox = *optBox;
 
     // Every non-discarded frame needs this regardless of cache hit/miss: a
     // cache-hit frame has no sampleBackground()/blurBackground() call for it
@@ -558,26 +557,26 @@ void CGlassDecoration::renderPass(Render::CRenderContext& ctx, PHLMONITOR monito
 
     const MONITORID monitorId = monitor ? monitor->m_id : -1; // -1 mirrors Hyprland's own MONITOR_INVALID
 
-    if (!wantsBackgroundResample(ctx, monitor, transformBox, xray)) {
+    if (!wantsBackgroundResample(ctx, monitor, windowBox, xray)) {
         // Background unchanged since the last real sample — reuse it, skip
         // the most expensive GPU work (blit + blur passes) entirely.
         Diagnostics::recordWindowCacheHit(monitorId);
     } else {
         // X-ray never samples the live frame: it holds the windows it hides.
-        const auto snapshot = xray ? xraySnapshotCovering(monitor, source, transformBox) : nullptr;
+        const auto snapshot = xray ? xraySnapshotCovering(monitor, source, windowBox) : nullptr;
         const bool covered  = xray ? static_cast<bool>(snapshot) :
-                                     GlassRenderer::sampleRegionCovered(transformBox, source, ctx.m_data.damage, monitor);
+                                     GlassRenderer::sampleRegionCovered(windowBox, source, ctx.m_data.damage);
 
         if (covered) {
             float blurStrength   = resolvePresetFloat(resolveContext, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
             int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-            GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, xray ? snapshot : source, transformBox, m_samplePaddingRatio, downscale);
+            GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, xray ? snapshot : source, windowBox, m_samplePaddingRatio, downscale);
 
             // Only here, on a real (non-cached) sample: blending onto a cache-hit
             // frame would double-composite our own content over an already-blurred FBO.
             if (m_lastSelfSample > 0.0f)
-                GlassRenderer::blendOwnContent(ctx, m_sampleFramebuffer, window, monitor, transformBox,
+                GlassRenderer::blendOwnContent(ctx, m_sampleFramebuffer, window, monitor, windowBox,
                                                downscale, m_lastSelfSample, cornerRadius, roundingPower);
 
             float blurRadius     = blurStrength * 12.0f / downscale;
@@ -666,7 +665,7 @@ void CGlassDecoration::renderPass(Render::CRenderContext& ctx, PHLMONITOR monito
     }
 
     GlassRenderer::applyGlassEffect(ctx, m_sampleFramebuffer, source,
-                                     windowBox, transformBox, glassAlpha,
+                                     windowBox, glassAlpha,
                                      std::array<float, 4>{cornerRadius, cornerRadius, cornerRadius, cornerRadius},
                                      roundingPower, m_samplePaddingRatio, resolveContext, nullptr, focusLight,
                                      frostInput.copy ? &frostInput : nullptr);

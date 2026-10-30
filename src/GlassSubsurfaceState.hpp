@@ -16,7 +16,7 @@
 //     main.cpp's CRenderPass::add hook), never alpha-threshold;
 //   - the sample box always equals the full item box (no region-shrink
 //     optimization), so the mask's sample UV mapping is always identity;
-//   - geometry (the item's box, in every coordinate family) is handed in by
+//   - geometry (the item's box) is handed in by
 //     the caller every frame rather than recomputed from a long-lived
 //     surface object: CSurfacePassElement is transient and owned by the
 //     render pass once enqueued, so the box is captured once at
@@ -39,16 +39,16 @@ class CGlassSubsurfaceState {
     explicit CGlassSubsurfaceState(WP<CWLSurfaceResource> surface, PHLWINDOWREF window);
     ~CGlassSubsurfaceState();
 
-    // Phase 1 (pre-surface): sample+blur background under transformBox, redirect
+    // Phase 1 (pre-surface): sample+blur background under pixelBox, redirect
     // currentFB → temp FBO so the original CSurfacePassElement draw (called by
     // main.cpp's hook between this and compositeAndRestore) lands there instead.
-    void sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& transformBox, float alpha);
+    void sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& pixelBox, float alpha);
 
     // Phase 2 (post-surface): restore currentFB, composite glass masked by the
     // protocol region with the temp FBO's content (the item's own foreground) on top.
     // transformedRegion is non-const: CRegion::getExtents() is a non-const method.
-    void compositeAndRestore(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& rawBox,
-                              const CBox& transformBox, CRegion& transformedRegion, float alpha);
+    void compositeAndRestore(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& pixelBox,
+                              CRegion& transformedRegion, float alpha);
 
     [[nodiscard]] bool alive() const { return !m_surface.expired(); }
     [[nodiscard]] bool redirectedThisFrame() const { return m_redirectedThisFrame; }
@@ -73,11 +73,11 @@ class CGlassSubsurfaceState {
     Vector2D                 m_samplePaddingRatio;
     bool                     m_hasCachedSample = false;
 
-    // Last transformBox seen, to force a resample when the item itself moves
+    // Last pixelBox seen, to force a resample when the item itself moves
     // or resizes with no other invalidation trigger (mirrors
     // CGlassLayerSurface::damageIfMoved(), inlined here since we have no
     // standing surface object to hang a separate call off of).
-    CBox m_lastTransformBox;
+    CBox m_lastPixelBox;
 
     uint64_t m_lastSceneGeneration = 0;
 

@@ -16,7 +16,7 @@ std::vector<UP<IPassElement>> CGlassSubsurfacePassElement::draw(Render::CRenderC
         return {};
 
     if (m_data.state) {
-        m_data.state->sampleAndRedirect(ctx, m_data.monitor.lock(), m_data.transformBox, m_data.alpha);
+        m_data.state->sampleAndRedirect(ctx, m_data.monitor.lock(), m_data.pixelBox, m_data.alpha);
         m_redirected = m_data.state->redirectedThisFrame();
     }
 

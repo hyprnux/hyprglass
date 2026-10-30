@@ -47,8 +47,8 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // Pure predicate: true when the cached sample must not be reused as-is
     // this frame. Called identically from CGlassPassElement::needsLiveBlur()
     // (draw()-time) and from renderPass() itself — safe to call twice, no GL
-    // calls. transformBox is monitor-local physical pixels (see callers).
-    [[nodiscard]] bool wantsBackgroundResample(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& transformBox, bool xray) const;
+    // calls. windowBox is monitor-local physical pixels (see callers).
+    [[nodiscard]] bool wantsBackgroundResample(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& windowBox, bool xray) const;
 
     // Owner test without the shared_ptr copy getOwner() hands out.
     [[nodiscard]] bool  ownsWindow(const PHLWINDOW& window) const { return m_window == window; }

@@ -25,13 +25,12 @@ static bool matchesFrame(const SP<Render::IFramebuffer>& snapshot, const SP<Rend
     return snapshot && frame && snapshot->m_size == frame->m_size && snapshot->m_drmFormat == frame->m_drmFormat;
 }
 
-// The render damage is in the monitor's transformed space, the framebuffer in
-// the output's native orientation: rotate it like Hyprland's own frame damage.
+// The render damage is already in framebuffer pixels (the pass is drawn unrotated);
+// clipped to the monitor like CRenderPass::simplify() clips element damage, since
+// the frame damage can reach past it.
 static CRegion framebufferDamage(const PHLMONITOR& monitor, const CRegion& damage) {
     CRegion region = damage.copy();
     region.intersect(CBox{{}, monitor->m_transformedSize});
-    region.transform(Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform)), monitor->m_transformedSize.x,
-                     monitor->m_transformedSize.y);
     return region;
 }
 
@@ -116,7 +115,7 @@ SP<Render::IFramebuffer> xraySnapshotCovering(PHLMONITOR monitor, const SP<Rende
         return nullptr;
 
     const auto& snapshot = it->second;
-    if (!matchesFrame(snapshot.framebuffer, frame) || !GlassRenderer::sampleRegionCovered(box, snapshot.framebuffer, snapshot.valid, nullptr))
+    if (!matchesFrame(snapshot.framebuffer, frame) || !GlassRenderer::sampleRegionCovered(box, snapshot.framebuffer, snapshot.valid))
         return nullptr;
 
     return snapshot.framebuffer;

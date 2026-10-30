@@ -3,7 +3,6 @@
 #include "GlassDecoration.hpp"
 #include "Globals.hpp"
 #include "ItemHints.hpp"
-#include "SubsurfaceGeometry.hpp"
 #include "WindowGeometry.hpp"
 
 #include <GLES3/gl32.h>
@@ -102,7 +101,7 @@ std::string CGlassSubsurfaceState::resolvePresetName(SPresetHintOutcome* hintOut
     return "default";
 }
 
-void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& transformBox, float alpha) {
+void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& pixelBox, float alpha) {
     auto& shaderManager = g_pGlobalState->shaderManager;
     shaderManager.initializeIfNeeded();
 
@@ -122,14 +121,14 @@ void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMO
     const MONITORID monitorId = monitor ? monitor->m_id : -1; // -1 mirrors Hyprland's own MONITOR_INVALID
 
     const uint64_t currentGeneration = g_pGlobalState->getSceneGeneration(monitor);
-    const bool     movedOrResized    = transformBox.x != m_lastTransformBox.x || transformBox.y != m_lastTransformBox.y ||
-                                    transformBox.w != m_lastTransformBox.w || transformBox.h != m_lastTransformBox.h;
-    m_lastTransformBox = transformBox;
+    const bool     movedOrResized    = pixelBox.x != m_lastPixelBox.x || pixelBox.y != m_lastPixelBox.y ||
+                                    pixelBox.w != m_lastPixelBox.w || pixelBox.h != m_lastPixelBox.h;
+    m_lastPixelBox = pixelBox;
 
     const bool backgroundChanged = !m_hasCachedSample || currentGeneration != m_lastSceneGeneration || movedOrResized;
 
     const bool sampleCovered = !backgroundChanged ||
-        GlassRenderer::sampleRegionCovered(transformBox, source, ctx.m_data.damage, monitor);
+        GlassRenderer::sampleRegionCovered(pixelBox, source, ctx.m_data.damage);
 
     if (!sampleCovered) {
         // The work buffer is cleared outside this frame's damage: sampling now
@@ -150,7 +149,7 @@ void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMO
         float blurStrength = resolvePresetFloat(resolveContext, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
         int   downscale    = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-        GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, source, transformBox, m_samplePaddingRatio, downscale);
+        GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, source, pixelBox, m_samplePaddingRatio, downscale);
 
         float blurRadius     = blurStrength * 12.0f / downscale;
         int   blurIterations = std::clamp(static_cast<int>(resolvePresetInt(resolveContext, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
@@ -194,7 +193,7 @@ void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMO
     ctx.m_data.currentFB = sharedFB;
     g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(sharedFB.get())->getFBID());
 
-    CBox clearBox = transformBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
+    CBox clearBox = pixelBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
 
     if (std::isfinite(clearBox.x) && std::isfinite(clearBox.y) && std::isfinite(clearBox.w) && std::isfinite(clearBox.h) &&
         clearBox.w > 0.0 && clearBox.h > 0.0) {
@@ -207,8 +206,8 @@ void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMO
     m_redirectedThisFrame = true;
 }
 
-void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& rawBox,
-                                                 const CBox& transformBox, CRegion& transformedRegion, float alpha) {
+void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHLMONITOR monitor, const CBox& pixelBox,
+                                                 CRegion& transformedRegion, float alpha) {
     if (m_savedCurrentFB) {
         ctx.m_data.currentFB = m_savedCurrentFB;
         g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_savedCurrentFB.get())->getFBID());
@@ -248,8 +247,8 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
     GlassRenderer::SMaskInfo maskInfo{
         .textureId = sharedFB->getTexture()->m_texID,
         .target    = GL_TEXTURE_2D,
-        .uvOffset  = {transformBox.x / monitorWidth, transformBox.y / monitorHeight},
-        .uvScale   = {transformBox.w / monitorWidth, transformBox.h / monitorHeight},
+        .uvOffset  = {pixelBox.x / monitorWidth, pixelBox.y / monitorHeight},
+        .uvScale   = {pixelBox.w / monitorWidth, pixelBox.h / monitorHeight},
     };
 
     maskInfo.maskMode       = 1; // ext-background-effect-v1 protocol region — always, for subsurface items
@@ -271,34 +270,29 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
     const auto hints    = surface ? ItemHints::forSurface(surface.get()) : std::nullopt;
 
     if (hints && hints->shapeMode == eItemShapeMode::EXPLICIT && hints->width > 0.0 && hints->height > 0.0) {
-        // Surface-local logical -> monitor-local pixel: rawBox's own origin
+        // Surface-local logical -> monitor-local pixel: pixelBox's own origin
         // already carries the item's on-monitor placement scaled the same
         // way (see SubsurfaceGeometry::toPixelBox), so the hint only needs
         // the same scale applied to its own offset/size.
         const float scale = static_cast<float>(monitor->m_scale);
-        CBox        hintPixelBox{rawBox.x + hints->x * scale, rawBox.y + hints->y * scale, hints->width * scale, hints->height * scale};
+        CBox        hintPixelBox{pixelBox.x + hints->x * scale, pixelBox.y + hints->y * scale, hints->width * scale, hints->height * scale};
 
         if (std::isfinite(hintPixelBox.x) && std::isfinite(hintPixelBox.y) && std::isfinite(hintPixelBox.w) && std::isfinite(hintPixelBox.h) &&
             hintPixelBox.w > 0.0 && hintPixelBox.h > 0.0) {
             radii = {static_cast<float>(hints->radii[0]) * scale, static_cast<float>(hints->radii[1]) * scale,
                      static_cast<float>(hints->radii[2]) * scale, static_cast<float>(hints->radii[3]) * scale};
-            // Clamped against the hint's own (pre-transform) box — the pairing
-            // radii[0]+radii[1] means "top edge" in the client's own frame,
-            // regardless of how the monitor transform later permutes the array.
             clampRadiiToBox(radii, static_cast<float>(hintPixelBox.w), static_cast<float>(hintPixelBox.h));
 
-            CBox transformedHintBox = WindowGeometry::applyMonitorTransform(hintPixelBox, monitor);
-            transformedHintBox.noNegativeSize().round();
-            maskInfo.glassBoxOffsetPx = Vector2D(transformedHintBox.x - transformBox.x, transformedHintBox.y - transformBox.y);
-            maskInfo.glassBoxSizePx   = Vector2D(transformedHintBox.w, transformedHintBox.h);
+            hintPixelBox.round();
+            maskInfo.glassBoxOffsetPx = Vector2D(hintPixelBox.x - pixelBox.x, hintPixelBox.y - pixelBox.y);
+            maskInfo.glassBoxSizePx   = Vector2D(hintPixelBox.w, hintPixelBox.h);
             haveGlassBox              = true;
         }
     } else if (hints && hints->shapeMode == eItemShapeMode::INHERIT_WINDOW) {
         if (const auto window = m_window.lock()) {
             if (const auto windowBox = WindowGeometry::computeWindowBox(window, monitor)) {
-                CBox transformedWindowBox = WindowGeometry::applyMonitorTransform(*windowBox, monitor);
-                maskInfo.glassBoxOffsetPx = Vector2D(transformedWindowBox.x - transformBox.x, transformedWindowBox.y - transformBox.y);
-                maskInfo.glassBoxSizePx   = Vector2D(transformedWindowBox.w, transformedWindowBox.h);
+                maskInfo.glassBoxOffsetPx = Vector2D(windowBox->x - pixelBox.x, windowBox->y - pixelBox.y);
+                maskInfo.glassBoxSizePx   = Vector2D(windowBox->w, windowBox->h);
                 haveGlassBox              = true;
 
                 const float windowRadius = window->presentation().rounding() * static_cast<float>(monitor->m_scale);
@@ -312,10 +306,10 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
     }
 
     if (!haveGlassBox) {
-        CBox glassExtents = transformedRegion.getExtents().intersection(transformBox);
+        CBox glassExtents = transformedRegion.getExtents().intersection(pixelBox);
         if (std::isfinite(glassExtents.x) && std::isfinite(glassExtents.y) && std::isfinite(glassExtents.w) &&
             std::isfinite(glassExtents.h) && glassExtents.w > 0.0 && glassExtents.h > 0.0) {
-            maskInfo.glassBoxOffsetPx = Vector2D(glassExtents.x - transformBox.x, glassExtents.y - transformBox.y);
+            maskInfo.glassBoxOffsetPx = Vector2D(glassExtents.x - pixelBox.x, glassExtents.y - pixelBox.y);
             maskInfo.glassBoxSizePx   = Vector2D(glassExtents.w, glassExtents.h);
 
             const auto& config           = g_pGlobalState->config;
@@ -329,22 +323,18 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
         // applyGlassEffect falls back to the whole box with every radius 0.
     }
 
-    // Monitor rotation/mirroring permutes which physical corner each array
-    // slot refers to. A no-op whenever all four radii are equal (NONE, INHERIT_WINDOW).
-    radii = SubsurfaceGeometry::permuteRadiiForMonitorTransform(radii, monitor);
-
     const auto rects = transformedRegion.getRects();
     if (rects.size() <= static_cast<size_t>(GlassRenderer::MAX_REGION_RECTS)) {
         maskInfo.regionRectCount = static_cast<int>(rects.size());
         for (size_t i = 0; i < rects.size(); i++) {
             const auto& r           = rects[i];
-            maskInfo.regionRects[i] = {static_cast<float>(r.x1 - transformBox.x), static_cast<float>(r.y1 - transformBox.y),
+            maskInfo.regionRects[i] = {static_cast<float>(r.x1 - pixelBox.x), static_cast<float>(r.y1 - pixelBox.y),
                                         static_cast<float>(r.x2 - r.x1), static_cast<float>(r.y2 - r.y1)};
         }
     } else {
         const auto extents       = transformedRegion.getExtents();
         maskInfo.regionRectCount = 1;
-        maskInfo.regionRects[0]  = {static_cast<float>(extents.x - transformBox.x), static_cast<float>(extents.y - transformBox.y),
+        maskInfo.regionRects[0]  = {static_cast<float>(extents.x - pixelBox.x), static_cast<float>(extents.y - pixelBox.y),
                                      static_cast<float>(extents.w), static_cast<float>(extents.h)};
     }
 
@@ -354,11 +344,9 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
     maskInfo.sampleUVOffset = Vector2D(0.0, 0.0);
     maskInfo.sampleUVScale  = Vector2D(1.0, 1.0);
 
-    CBox mutableRawBox       = rawBox;
-    CBox mutableTransformBox = transformBox;
     GlassRenderer::applyGlassEffect(ctx,
                                      m_sampleFramebuffer, target,
-                                     mutableRawBox, mutableTransformBox, alpha,
+                                     pixelBox, alpha,
                                      radii, roundingPower, m_samplePaddingRatio, resolveContext,
                                      &maskInfo);
 
@@ -367,9 +355,9 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
     // is the sentinel meaning "whole box" (see SMaskInfo), same fallback the
     // shader itself applies.
     m_lastGlassBox = maskInfo.glassBoxSizePx.x >= 0.0 && maskInfo.glassBoxSizePx.y >= 0.0 ?
-        CBox{transformBox.x + maskInfo.glassBoxOffsetPx.x, transformBox.y + maskInfo.glassBoxOffsetPx.y,
+        CBox{pixelBox.x + maskInfo.glassBoxOffsetPx.x, pixelBox.y + maskInfo.glassBoxOffsetPx.y,
              maskInfo.glassBoxSizePx.x, maskInfo.glassBoxSizePx.y} :
-        transformBox;
+        pixelBox;
     m_lastRadii          = radii;
     m_lastRoundingPower  = roundingPower;
     m_lastResolvedPreset = preset;
