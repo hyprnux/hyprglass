@@ -36,6 +36,11 @@ class CGlassDecoration : public IHyprWindowDecoration {
     // window's own surface tree.
     void markBackgroundDirty();
 
+    // Folds this window into the monitor's render-order fingerprint. Public because
+    // Hyprland draws some windows without decorations (X11 menus, tooltips), so
+    // draw() never runs for them and main.cpp folds them from the window stage.
+    void foldRenderFingerprint(Render::CRenderContext& ctx, const PHLMONITOR& monitor, float alpha);
+
     // Applies a mark markBackgroundDirty() owed under the rate limit once its
     // deadline passed, or re-arms the shared timer for it.
     void flushDeferredResample(std::chrono::steady_clock::time_point now);

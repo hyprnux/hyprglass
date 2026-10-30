@@ -10,6 +10,7 @@
 #include "GlassSubsurfacePassElement.hpp"
 #include "GlassSubsurfaceState.hpp"
 #include "Globals.hpp"
+#include "Hash.hpp"
 #include "ItemHints.hpp"
 #include "LoadGuard.hpp"
 #include "PluginConfig.hpp"
@@ -17,6 +18,7 @@
 #include "SubsurfaceGeometry.hpp"
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/desktop/state/FadingOutState.hpp>
 #include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
@@ -84,6 +86,19 @@ static void onMonitorLayoutChanged() {
     }
 }
 
+// A closing window is drawn from a snapshot with no decoration draw(), so it drops out of the
+// fingerprint once and nothing else changes while it fades or when it is gone. Folding the
+// fade-outs makes every fade step and their removal a change; with none, nothing is folded.
+static void foldFadeouts(const PHLMONITOR& monitor, size_t& hash) {
+    for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
+        if (!fadeout || fadeout->monitor() != monitor)
+            continue;
+
+        const auto box = fadeout->renderBox();
+        Hash::hashCombine(hash, fadeout.get(), fadeout->alpha(), box.x, box.y, box.w, box.h);
+    }
+}
+
 static void onNewWindow(PHLWINDOW window) {
     if (std::ranges::any_of(window->presentation().decorations(),
                             [](const auto& decoration) { return decoration->getDisplayName() == "HyprGlass"; }))
@@ -125,6 +140,20 @@ static void drawGlassForFullscreenWindow(Render::CRenderContext& ctx, const PHLW
 
     if (auto* deco = glassDecorationFor(window))
         deco->draw(ctx, monitor, 1.f, window->presentation().renderPresentation(dynamicPointerCast<Workspace::CWorkspacePresentable>(window->m_workspace))); // alpha unused, recomputed in renderPass
+}
+
+// Hyprland draws X11 override-redirect and no-border windows (menus, tooltips, splash) without
+// decorations, yet they still fade in and out over glass, so draw() never folds them into the
+// render-order fingerprint. Fullscreen ones are folded by drawGlassForFullscreenWindow().
+static void foldUndecoratedWindow(Render::CRenderContext& ctx, const PHLWINDOW& window, const PHLMONITOR& monitor) {
+    if (!window->backend().traits().suggestsNoBorder ||
+        Fullscreen::controller()->getFullscreenModes(window).internal == Fullscreen::FSMODE_FULLSCREEN)
+        return;
+
+    if (auto* deco = glassDecorationFor(window)) {
+        const auto presentation = window->presentation().renderPresentation(dynamicPointerCast<Workspace::CWorkspacePresentable>(window->m_workspace));
+        deco->foldRenderFingerprint(ctx, monitor, presentation.alpha * presentation.fadeAlpha);
+    }
 }
 
 // ── Duplicate window copies ──────────────────────────────────────────────────
@@ -240,6 +269,7 @@ static void beginWindowRender(Render::CRenderContext& ctx) {
         }
     }
 
+    foldUndecoratedWindow(ctx, window, monitor);
     drawGlassForFullscreenWindow(ctx, window, monitor);
 }
 
@@ -900,16 +930,20 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen(
         [](Event::SRenderStageEvent event) { onRenderStage(event); }));
 
-    // Render-order fingerprint: reset the running hash at RENDER_BEGIN, then at
-    // RENDER_LAST_MOMENT compare it to last frame's and bump scene generation on
-    // a change. Both fire inside renderMonitor() strictly before endRender() runs
-    // the render pass, so a bump here reaches this same frame's resample checks.
+    // Render-order fingerprint: restart the running hash at RENDER_BEGIN with the
+    // monitor's fade-outs, then at RENDER_LAST_MOMENT compare it to last frame's and
+    // bump scene generation on a change. Both fire inside renderMonitor() strictly
+    // before endRender() runs the render pass, so a bump here reaches this same
+    // frame's resample checks.
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen(
         [](Event::SRenderStageEvent event) {
             if (event.stage != RENDER_BEGIN)
                 return;
-            if (const auto monitor = event.monitor)
-                g_pGlobalState->renderFingerprints[monitor->m_id].runningHash = 0;
+            if (const auto monitor = event.monitor) {
+                auto& fingerprint       = g_pGlobalState->renderFingerprints[monitor->m_id];
+                fingerprint.runningHash = 0;
+                foldFadeouts(monitor, fingerprint.runningHash);
+            }
         }));
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen(
         [](Event::SRenderStageEvent event) {

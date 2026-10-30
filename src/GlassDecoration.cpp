@@ -286,42 +286,51 @@ void CGlassDecoration::queueGlassPass(Render::CRenderContext& ctx, float alpha, 
     (windowPass ? *windowPass : g_pHyprRenderer->currentPass(ctx)).add(makeUnique<CGlassPassElement>(data));
 }
 
+// Render-order fingerprint: fold this window's identity/geometry/alpha into
+// the monitor's running hash in z-order, before resolveEnabled() so background
+// windows still count. Guarded by isForeignRender(), not a bare mainFB check,
+// since a foreign replay's z-order isn't this frame's real one. Folded at most
+// once per frameSerial: draw() itself runs 2-3x per monitor frame for a floating
+// window over fullscreen, and folding every copy would make the hash depend on
+// how many of those copies happened to render this frame rather than on the scene.
+void CGlassDecoration::foldRenderFingerprint(Render::CRenderContext& ctx, const PHLMONITOR& monitor, float alpha) {
+    if (!g_pGlobalState || !monitor || RenderGuards::isForeignRender(ctx))
+        return;
+
+    if (g_pGlobalState->frameSerial != 0 && m_lastFoldedFrameSerial == g_pGlobalState->frameSerial)
+        return;
+
+    const auto window = m_window.lock();
+    if (!window)
+        return;
+
+    const auto workspace = window->m_workspace;
+    const Vector2D workspaceRenderOffset =
+        (workspace && !(window->m_state & Desktop::View::WINDOW_STATE_PINNED)) ? workspace->m_renderOffset->value() : Vector2D();
+    const auto fullscreenMode = Fullscreen::controller()->getFullscreenModes(window).internal;
+
+    auto& fingerprint = g_pGlobalState->renderFingerprints[monitor->m_id];
+    Hash::hashCombine(fingerprint.runningHash, window.get(), window->positionAnimation()->value(),
+                       window->sizeAnimation()->value(), alpha, fullscreenMode, workspaceRenderOffset);
+
+    // The fade itself is not folded, only its start and its end: glass
+    // stacked above resamples the settled light, not every fade step.
+    m_focusLightFadingAtDraw = m_lastFocusLightStrength > 0.0f && focusLightFading(std::chrono::steady_clock::now());
+    if (m_lastFocusLightStrength > 0.0f)
+        Hash::hashCombine(fingerprint.runningHash, m_focusLightFadingAtDraw ? 2 : static_cast<int>(m_focusLightTarget));
+
+    // Same for frost: glass stacked above resamples where the ease starts and where it ends.
+    if (m_frost.moving() || m_frost.amount() > 0.0f)
+        Hash::hashCombine(fingerprint.runningHash, m_frost.moving() ? 2 : 1);
+
+    m_lastFoldedFrameSerial = g_pGlobalState->frameSerial;
+}
+
 void CGlassDecoration::draw(Render::CRenderContext& ctx, PHLMONITOR monitor, float const& alpha, const Render::SWindowRenderPresentation&) {
     if (!g_pGlobalState)
         return;
 
-    // Render-order fingerprint: fold this window's identity/geometry/alpha into
-    // the monitor's running hash in z-order, before resolveEnabled() so background
-    // windows still count. Guarded by isForeignRender(), not a bare mainFB check,
-    // since a foreign replay's z-order isn't this frame's real one. Folded at most
-    // once per frameSerial: draw() itself runs 2-3x per monitor frame for a floating
-    // window over fullscreen, and folding every copy would make the hash depend on
-    // how many of those copies happened to render this frame rather than on the scene.
-    if (monitor && !RenderGuards::isForeignRender(ctx) &&
-        (g_pGlobalState->frameSerial == 0 || m_lastFoldedFrameSerial != g_pGlobalState->frameSerial)) {
-        if (const auto window = m_window.lock()) {
-            const auto workspace = window->m_workspace;
-            const Vector2D workspaceRenderOffset =
-                (workspace && !(window->m_state & Desktop::View::WINDOW_STATE_PINNED)) ? workspace->m_renderOffset->value() : Vector2D();
-            const auto fullscreenMode = Fullscreen::controller()->getFullscreenModes(window).internal;
-
-            auto& fingerprint = g_pGlobalState->renderFingerprints[monitor->m_id];
-            Hash::hashCombine(fingerprint.runningHash, window.get(), window->positionAnimation()->value(),
-                               window->sizeAnimation()->value(), alpha, fullscreenMode, workspaceRenderOffset);
-
-            // The fade itself is not folded, only its start and its end: glass
-            // stacked above resamples the settled light, not every fade step.
-            m_focusLightFadingAtDraw = m_lastFocusLightStrength > 0.0f && focusLightFading(std::chrono::steady_clock::now());
-            if (m_lastFocusLightStrength > 0.0f)
-                Hash::hashCombine(fingerprint.runningHash, m_focusLightFadingAtDraw ? 2 : static_cast<int>(m_focusLightTarget));
-
-            // Same for frost: glass stacked above resamples where the ease starts and where it ends.
-            if (m_frost.moving() || m_frost.amount() > 0.0f)
-                Hash::hashCombine(fingerprint.runningHash, m_frost.moving() ? 2 : 1);
-
-            m_lastFoldedFrameSerial = g_pGlobalState->frameSerial;
-        }
-    }
+    foldRenderFingerprint(ctx, monitor, alpha);
 
     const auto enabledResolution = resolveEnabled();
     const bool enabled = enabledResolution == EEnabledResolution::Enabled;
