@@ -129,7 +129,6 @@ void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMO
 
     const uint64_t currentGeneration = g_pGlobalState->getSceneGeneration(monitor);
     const bool     backgroundChanged = wantsBackgroundResample(monitor, pixelBox);
-    m_lastPixelBox                   = pixelBox;
 
     const bool sampleCovered = !backgroundChanged ||
         GlassRenderer::sampleRegionCovered(pixelBox, source, ctx.m_data.damage);
@@ -166,8 +165,11 @@ void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMO
 
         GlassRenderer::blurBackground(ctx, m_sampleFramebuffer, blurRadius, blurIterations, source);
 
+        // only here: a deferred frame still holds the sample of the old box, so a move
+        // that deferred stays a miss until a frame that can sample it
         m_hasCachedSample     = true;
         m_lastSceneGeneration = currentGeneration;
+        m_lastPixelBox        = pixelBox;
     } else {
         // background unchanged, reuse cached blur
         Diagnostics::recordSubsurfaceCacheHit(monitorId);

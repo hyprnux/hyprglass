@@ -47,8 +47,8 @@ class CGlassSubsurfaceState {
     // The cached sample is missing or stale, so sampleAndRedirect() takes a new one.
     // CGlassSubsurfacePassElement::needsLiveBlur() asks the same question before
     // the draw: both must get the same answer, so neither keeps a copy of the
-    // conditions. Compares against the box of the last draw, which only
-    // sampleAndRedirect() advances.
+    // conditions. Compares against the box the cached sample was taken at, which only
+    // sample taken in sampleAndRedirect() advances.
     [[nodiscard]] bool wantsBackgroundResample(PHLMONITOR monitor, const CBox& pixelBox) const;
 
     // Phase 2 (post-surface): restore currentFB, composite glass masked by the
@@ -80,7 +80,7 @@ class CGlassSubsurfaceState {
     Vector2D                 m_samplePaddingRatio;
     bool                     m_hasCachedSample = false;
 
-    // Last pixelBox seen, to force a resample when the item itself moves
+    // The pixelBox the cached sample was taken at, to force a resample when the item itself moves
     // or resizes with no other invalidation trigger (mirrors
     // CGlassLayerSurface::damageIfMoved(), inlined here since we have no
     // standing surface object to hang a separate call off of).
