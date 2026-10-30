@@ -39,7 +39,6 @@
 #include <cstdlib>
 #include <dlfcn.h>
 #include <optional>
-#include <sstream>
 
 static void clearLayerGlassOnClose(PHLLS layerSurface) {
     if (!g_pGlobalState || !layerSurface)
@@ -275,98 +274,6 @@ static void onRenderStage(const Event::SRenderStageEvent event) {
 
 // ── Layer surface support ────────────────────────────────────────────────────
 
-// Parse comma-separated config string into a set of trimmed values.
-static void parseCommaSeparated(StringConfigPtr configPtr, std::unordered_set<std::string>& out) {
-    out.clear();
-    const auto raw = readStringConfig(configPtr);
-    if (raw.empty()) return;
-
-    std::istringstream stream{std::string(raw)};
-    std::string token;
-    while (std::getline(stream, token, ',')) {
-        auto start = token.find_first_not_of(" \t");
-        auto end   = token.find_last_not_of(" \t");
-        if (start != std::string::npos)
-            out.insert(token.substr(start, end - start + 1));
-    }
-}
-
-// Parse comma-separated "key<sep>value" pairs. The callback receives (key, valueStr) for each pair.
-template <typename Fn>
-static void parseKeyValuePairs(StringConfigPtr configPtr, char separator, Fn&& callback) {
-    const auto raw = readStringConfig(configPtr);
-    if (raw.empty()) return;
-
-    std::istringstream stream{std::string(raw)};
-    std::string token;
-    while (std::getline(stream, token, ',')) {
-        auto sepPos = token.rfind(separator);
-        if (sepPos == std::string::npos) continue;
-
-        auto kStart = token.find_first_not_of(" \t");
-        auto kEnd   = token.find_last_not_of(" \t", sepPos - 1);
-        auto vStart = token.find_first_not_of(" \t", sepPos + 1);
-        auto vEnd   = token.find_last_not_of(" \t");
-
-        if (kStart != std::string::npos && kEnd != std::string::npos &&
-            vStart != std::string::npos && vEnd != std::string::npos && kStart <= kEnd && vStart <= vEnd) {
-            callback(token.substr(kStart, kEnd - kStart + 1),
-                     token.substr(vStart, vEnd - vStart + 1));
-        }
-    }
-}
-
-static void parseLayerNamespaceFilters() {
-    const auto& config = g_pGlobalState->config;
-    parseCommaSeparated(config.layersNamespaces, g_pGlobalState->layerNamespaceFilter);
-    parseCommaSeparated(config.layersExcludeNamespaces, g_pGlobalState->layerNamespaceExclude);
-
-    g_pGlobalState->layerNamespacePresets.clear();
-    parseKeyValuePairs(config.layersNamespacePresets, ':', [&](const std::string& ns, const std::string& preset) {
-        g_pGlobalState->layerNamespacePresets.emplace(ns, preset);
-    });
-
-    g_pGlobalState->layerNamespaceMaskThresholds.clear();
-    parseKeyValuePairs(config.layersNamespaceMaskThresholds, '=', [&](const std::string& ns, const std::string& val) {
-        try { g_pGlobalState->layerNamespaceMaskThresholds.emplace(ns, std::stof(val)); } catch (...) {}
-    });
-
-    g_pGlobalState->layerNamespaceLiveResample.clear();
-    parseKeyValuePairs(config.layersNamespaceLiveResample, '=', [&](const std::string& ns, const std::string& val) {
-        if (val == "1" || val == "true" || val == "on" || val == "yes")
-            g_pGlobalState->layerNamespaceLiveResample[ns] = true;
-        else if (val == "0" || val == "false" || val == "off" || val == "no")
-            g_pGlobalState->layerNamespaceLiveResample[ns] = false;
-    });
-
-    g_pGlobalState->layerNamespaceMaskModes.clear();
-    parseKeyValuePairs(config.layersNamespaceMaskModes, '=', [&](const std::string& ns, const std::string& val) {
-        if (auto mode = parseLayerMaskMode(val))
-            g_pGlobalState->layerNamespaceMaskModes[ns] = *mode;
-    });
-
-    g_pGlobalState->layerNamespaceMaskFeathers.clear();
-    parseKeyValuePairs(config.layersNamespaceMaskFeathers, '=', [&](const std::string& ns, const std::string& val) {
-        try { g_pGlobalState->layerNamespaceMaskFeathers.emplace(ns, std::stof(val)); } catch (...) {}
-    });
-
-    g_pGlobalState->layerNamespaceShapes.clear();
-    std::string invalidShapes;
-    parseKeyValuePairs(config.layersNamespaceShapes, '=', [&](const std::string& ns, const std::string& val) {
-        if (const auto shape = parseLayerShape(val))
-            g_pGlobalState->layerNamespaceShapes[ns] = *shape;
-        else
-            invalidShapes += (invalidShapes.empty() ? "" : ", ") + ns + "=" + val;
-    });
-    if (!invalidShapes.empty()) {
-        HyprlandAPI::addNotificationV2(PHANDLE, {
-            {"text", "[hyprglass] Ignoring layers:namespace_shapes " + invalidShapes + ": expected ns=inset:radius or ns=top:right:bottom:left:radius."},
-            {"time", (uint64_t)5000},
-            {"color", CHyprColor{1.0, 0.8, 0.2, 1.0}},
-        });
-    }
-}
-
 static bool shouldGlassLayer(PHLLS layerSurface) {
     if (!layerSurface)
         return false;
@@ -378,7 +285,7 @@ static bool shouldGlassLayer(PHLLS layerSurface) {
         return false;
 
     const auto& include = g_pGlobalState->layerNamespaceFilter;
-    if (include.empty())
+    if (include.empty() || include.contains(LAYER_NAMESPACE_WILDCARD))
         return true;
 
     return include.contains(ns);
@@ -467,7 +374,7 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, Render::CRenderContext
                            PHLMONITOR monitor, const Time::steady_tp& now, bool popups, bool lockscreen, bool workspaceScene) {
     const auto& config = g_pGlobalState->config;
 
-    // layers:enabled can flip without a config reload (hyprctl keyword), so follow it
+    // layers:enabled can flip without a config reload (hyprctl eval), so follow it
     // here too; this is a no-op once the observer is in the requested state.
     // self_sample is followed from the window path, which resolves it anyway.
     BackgroundDamageObserver::refreshEnabled();
@@ -500,7 +407,7 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, Render::CRenderContext
         return !pair.second->getLayerSurface();
     });
 
-    // layers:enabled can be turned off by hyprctl keyword without a config reload: the fields go with it
+    // layers:enabled can be turned off by hyprctl eval without a config reload: the fields go with it
     if (g_pGlobalState->contourScratch.users > 0 && !(config.layersEnabled && **config.layersEnabled))
         releaseContourFields(true);
 
@@ -756,21 +663,19 @@ static void ensureShadowsForWindowGlass() {
     if (!shadowEnabled.dataptr || !shadowEnabled.type)
         return;
 
-    if (*shadowEnabled.type == typeid(Hyprlang::INT)) {
-        if (!**reinterpret_cast<Hyprlang::INT* const*>(shadowEnabled.dataptr))
-            HyprlandAPI::invokeHyprctlCommand("keyword", "decoration:shadow:enabled true");
-    } else if (*shadowEnabled.type == typeid(Config::BOOL)) {
-        // Lua config: set the value the way hl.config() does at runtime. hyprctl
-        // eval would do the same but also clears the list hyprctl configerrors shows.
-        auto* const shadow = *reinterpret_cast<Config::BOOL* const*>(shadowEnabled.dataptr);
-        if (!*shadow) {
-            *shadow = true;
-            Config::Supplementary::refresher()->scheduleRefresh(Config::Supplementary::REFRESH_WINDOW_STATES);
-        }
+    if (*shadowEnabled.type != typeid(Config::BOOL))
+        return;
+
+    // Set the value the way hl.config() does at runtime. hyprctl eval would do
+    // the same but also clears the list hyprctl configerrors shows.
+    auto* const shadow = *reinterpret_cast<Config::BOOL* const*>(shadowEnabled.dataptr);
+    if (!*shadow) {
+        *shadow = true;
+        Config::Supplementary::refresher()->scheduleRefresh(Config::Supplementary::REFRESH_WINDOW_STATES);
     }
 }
 
-// Deferred so the keyword never runs inside a config reload or a render pass
+// Deferred so the value is never written inside a config reload or a render pass
 void scheduleShadowsForWindowGlass() {
     if (g_pGlobalState && g_pEventLoopManager)
         g_pGlobalState->shadowFixLock = g_pEventLoopManager->doLaterLock([] { ensureShadowsForWindowGlass(); });
@@ -916,8 +821,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // Clear pending presets/layers before config re-parse, commit after
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.preReload.listen([&]() {
-        clearPendingPresets();
-        clearPendingLayers();
+        beginConfigReload();
     }));
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([&]() {
@@ -925,8 +829,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             return;
         initConfigPointers(PHANDLE, g_pGlobalState->config);
         commitPendingPresets();
-        parseLayerNamespaceFilters();
-        commitPendingLayers(); // merge Lua layer() calls on top of string config
+        commitPendingLayers(); // apply hg.layer() entries
         validateConfig();
         // a layer namespace or mask mode that no longer asks for contour keeps no field
         releaseContourFields(false);
@@ -1000,7 +903,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // Until then the values parsed so far are committed here.
     initConfigPointers(PHANDLE, g_pGlobalState->config);
     commitPendingPresets();
-    parseLayerNamespaceFilters();
     commitPendingLayers();
     validateConfig();
     refreshSurfaceObserver();

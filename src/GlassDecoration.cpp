@@ -102,7 +102,7 @@ static constexpr std::chrono::milliseconds FOCUS_LIGHT_FADE{200};
 // Hyprland's animations:enabled; a key that cannot be read counts as on.
 static bool hyprlandAnimationsEnabled() {
     const auto& pointer = g_pGlobalState->config.animationsEnabled;
-    return !pointer.dataptr || readIntegerConfig(pointer) != 0;
+    return !pointer.dataptr || readBoolConfig(pointer);
 }
 
 bool CGlassDecoration::focusLightFading(std::chrono::steady_clock::time_point now) const {
@@ -521,7 +521,7 @@ void CGlassDecoration::renderPass(Render::CRenderContext& ctx, PHLMONITOR monito
     // cache-hit frame too, when neither sampleBackground() nor blendOwnContent() run.
     m_lastSelfSample = selfSampleFor(resolveContext);
     if (m_lastSelfSample > 0.0f && !g_pGlobalState->selfSampleConfigured) {
-        // hyprctl keyword emits no config.reloaded, and a setup without layer
+        // hyprctl eval emits no config.reloaded, and a setup without layer
         // surfaces has no other place that would notice self_sample turning on
         g_pGlobalState->selfSampleConfigured = true;
         BackgroundDamageObserver::refreshEnabled();

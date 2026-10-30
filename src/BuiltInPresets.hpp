@@ -23,7 +23,7 @@ struct SThemeDefaults {
 inline constexpr SThemeDefaults DARK_THEME_DEFAULTS  = {0.82f, 0.90f, 0.80f, 0.15f, 0.0f, 0.4f, 0.0f};
 inline constexpr SThemeDefaults LIGHT_THEME_DEFAULTS = {1.12f, 0.92f, 0.85f, 0.12f, 0.0f, 0.0f, 0.4f};
 
-// Global config defaults — values registered with Hyprlang for effect settings.
+// Global config defaults — values registered as the Lua config defaults for effect settings.
 // Theme-sensitive settings (brightness, contrast, etc.) use SENTINEL at global
 // level so they fall through to the per-theme hardcoded defaults above.
 namespace GlobalDefaults {
