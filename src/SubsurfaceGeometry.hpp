@@ -1,11 +1,7 @@
 #pragma once
 
-#include "WindowGeometry.hpp"
-
-#include <array>
 #include <cmath>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
-#include <hyprland/src/helpers/math/Math.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprutils/math/Box.hpp>
@@ -20,15 +16,15 @@
 // CGlassLayerSurface (which recomputes its box from a long-lived PHLLS on every
 // call), all geometry here is derived once from a box handed in by the caller,
 // captured at CRenderPass::add() hook time while the CSurfacePassElement is
-// still in hand. WindowGeometry::applyMonitorTransform() is reused verbatim for
-// the 90/270-degree monitor rotation case, the same helper CGlassPassElement
-// and CGlassDecoration already share.
+// still in hand.
 namespace SubsurfaceGeometry {
 
 // itemLogicalBox: CSurfacePassElement::getTexBox() for the item's subsurface,
-// unmodified. Converts to a monitor-local PIXEL box (pre-rotation-transform) —
-// the "rawBox" family GlassRenderer::sampleBackground()/applyGlassEffect() use
-// for the desktop, matching CGlassLayerSurface's computeLayerBox() output.
+// unmodified. Converts to a monitor-local PIXEL box in render space, which is
+// also the pixel space of the framebuffers (Hyprland draws the pass unrotated,
+// so a rotated monitor needs no further conversion) — the box
+// GlassRenderer::sampleBackground()/applyGlassEffect() use for the desktop,
+// matching CGlassLayerSurface's computeLayerBox() output.
 [[nodiscard]] inline std::optional<CBox> toPixelBox(CBox itemLogicalBox, PHLMONITOR monitor) {
     if (!monitor)
         return std::nullopt;
@@ -41,15 +37,6 @@ namespace SubsurfaceGeometry {
         return std::nullopt;
 
     return itemLogicalBox;
-}
-
-// rawBox: toPixelBox() result. Applies the monitor rotation transform to land in
-// the same post-transform pixel space as the source/target framebuffers — the
-// "transformBox" family, matching CGlassLayerSurface's transformedLayerBox().
-[[nodiscard]] inline CBox toTransformBox(CBox rawBox, PHLMONITOR monitor) {
-    auto box = WindowGeometry::applyMonitorTransform(rawBox, monitor);
-    box.noNegativeSize().round();
-    return box;
 }
 
 // itemLogicalBox: CSurfacePassElement::getTexBox(), unmodified. Padded for the
@@ -72,11 +59,11 @@ namespace SubsurfaceGeometry {
 }
 
 // ext-background-effect-v1's blur region is surface-local logical coordinates,
-// clipped to the subsurface's own committed size. Maps it into rawBox's pixel
-// space (same scale/translate/transform sequence as
-// CGlassLayerSurface::transformedBlurRegion()) so it lands in the same
-// post-transform space as transformBox, ready for the shader's regionRects mask.
-[[nodiscard]] inline CRegion transformedItemBlurRegion(const SP<CWLSurfaceResource>& surface, const CBox& rawBox, PHLMONITOR monitor) {
+// clipped to the subsurface's own committed size. Maps it into pixelBox's pixel
+// space (same scale/translate sequence as
+// CGlassLayerSurface::transformedBlurRegion()), ready for the shader's
+// regionRects mask.
+[[nodiscard]] inline CRegion transformedItemBlurRegion(const SP<CWLSurfaceResource>& surface, const CBox& pixelBox, PHLMONITOR monitor) {
     if (!surface || !monitor)
         return {};
 
@@ -89,36 +76,9 @@ namespace SubsurfaceGeometry {
     CRegion region = wlSurface->m_blurRegion.copy();
     region.intersect(0, 0, surfaceSize.x, surfaceSize.y);
     region.scale(static_cast<float>(monitor->m_scale));
-    region.translate(rawBox.pos());
-    region.intersect(rawBox.x, rawBox.y, rawBox.w, rawBox.h);
-    region.transform(Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform)),
-                      monitor->m_transformedSize.x, monitor->m_transformedSize.y);
+    region.translate(pixelBox.pos());
+    region.intersect(pixelBox.x, pixelBox.y, pixelBox.w, pixelBox.h);
     return region;
-}
-
-// Permutes the four corner radii (top-left, top-right, bottom-right,
-// bottom-left) to follow the same rotation/mirror WindowGeometry::
-// applyMonitorTransform() applies to a box: a rigid transform maps a
-// rectangle's corners onto one another independent of its size or position,
-// so this permutation depends only on the monitor's transform. Uses the
-// identical transform value applyMonitorTransform() derives, so a radii
-// array and a box transformed through the two never disagree about which
-// corner is which. A no-op whenever all four radii are equal.
-[[nodiscard]] inline std::array<float, 4> permuteRadiiForMonitorTransform(const std::array<float, 4>& radii, PHLMONITOR monitor) {
-    if (!monitor)
-        return radii;
-
-    switch (Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform))) {
-        case HYPRUTILS_TRANSFORM_NORMAL: return radii;
-        case HYPRUTILS_TRANSFORM_90: return {radii[3], radii[0], radii[1], radii[2]};
-        case HYPRUTILS_TRANSFORM_180: return {radii[2], radii[3], radii[0], radii[1]};
-        case HYPRUTILS_TRANSFORM_270: return {radii[1], radii[2], radii[3], radii[0]};
-        case HYPRUTILS_TRANSFORM_FLIPPED: return {radii[1], radii[0], radii[3], radii[2]};
-        case HYPRUTILS_TRANSFORM_FLIPPED_90: return {radii[0], radii[3], radii[2], radii[1]};
-        case HYPRUTILS_TRANSFORM_FLIPPED_180: return {radii[3], radii[2], radii[1], radii[0]};
-        case HYPRUTILS_TRANSFORM_FLIPPED_270: return {radii[2], radii[1], radii[0], radii[3]};
-    }
-    return radii;
 }
 
 } // namespace SubsurfaceGeometry

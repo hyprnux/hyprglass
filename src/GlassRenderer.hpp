@@ -148,17 +148,14 @@ struct SSampleMap {
 
 // True when every pixel of `box`, clipped to the framebuffer, lies inside `damage`: the
 // frame redraws all of it. The only coverage predicate; sampleRegionCovered() asks it for
-// the sample's source rectangle. `box` is in post-transform framebuffer pixels; `damage`
-// is in render space like the render context's damage, and is transformed by `monitor` to match
-// (a null monitor for a region already in framebuffer space, like the x-ray one).
-[[nodiscard]] bool damageCoversBox(const CBox& box, const SP<Render::IFramebuffer>& framebuffer, const CRegion& damage,
-                                   const PHLMONITOR& monitor);
+// the sample's source rectangle. `box` and `damage` are both in render space, which is the
+// pixel space of every framebuffer the pass draws into: Hyprland renders it unrotated, so
+// the monitor's transform never enters here.
+[[nodiscard]] bool damageCoversBox(const CBox& box, const SP<Render::IFramebuffer>& framebuffer, const CRegion& damage);
 
 // True when every pixel sampleBackground() would read for `box` lies inside
-// `damage`. `box` is in post-transform framebuffer pixels, not the logical space
-// boundingBox() pads in; see damageCoversBox() for `damage`.
-[[nodiscard]] bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage,
-                                       const PHLMONITOR& monitor);
+// `damage`. `box` is in framebuffer pixels, not the logical space boundingBox() pads in.
+[[nodiscard]] bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage);
 
 void sampleBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sampleFramebuffer,
                        SP<Render::IFramebuffer> sourceFramebuffer, CBox box, Vector2D& outPaddingRatio, int downscale = 1);
@@ -170,8 +167,7 @@ void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& samp
                       PHLMONITOR monitor, const CBox& box, int downscale, float amount, float cornerRadius, float roundingPower);
 
 // callerFramebuffer is re-bound after the blur ping-pong; the viewport is
-// restored from its size so it always matches the re-bound framebuffer
-// (monitor fields would be wrong on 90°/270° transformed monitors).
+// restored from its size so it always matches the re-bound framebuffer.
 // temporaryFramebuffer: the ping-pong target; null uses the one every glass shares. A caller blurring
 // at another size than the rest passes its own, so the shared one is not reallocated back and forth.
 void blurBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer> sampleFramebuffer, float radius,
@@ -204,9 +200,12 @@ struct SFrostInput {
 // its fade). Only the active window's glass passes one above 0.
 //
 // frost: windows only, null when the glass is not frosted right now (see SFrostInput).
+//
+// box: the drawn quad in framebuffer pixels. The glass's up is the screen's up as the
+// user sees it, whatever the monitor's transform.
 void applyGlassEffect(Render::CRenderContext& ctx,
                        SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> targetFramebuffer,
-                       CBox& rawBox, CBox& transformedBox,
+                       const CBox& box,
                        float alpha, const std::array<float, 4>& radii, float roundingPower,
                        const Vector2D& paddingRatio, const SResolveContext& resolveContext,
                        const SMaskInfo* mask = nullptr, float focusLight = 0.0f, const SFrostInput* frost = nullptr);

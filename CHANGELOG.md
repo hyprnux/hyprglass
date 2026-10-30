@@ -1,4 +1,28 @@
 
+## [v1.1.0](https://github.com/Hyprnux/hyprglass/compare/v1.0.0...v1.1.0) - 2026-10-30
+
+### Bug Fixes
+
+* glass no longer keeps a stale backdrop after a window behind it opens or closes ([#98](https://github.com/Hyprnux/hyprglass/issues/98))
+* rotating or rescaling a monitor at runtime resamples the glass on it
+* a glass item that moves inside its window no longer keeps its old background
+* glassed layers and items no longer keep the monitor redrawing under an animated blur variant
+* glass lands in the right place on rotated and flipped monitors under Hyprland 0.57 ([#99](https://github.com/Hyprnux/hyprglass/issues/99))
+
+### Code Refactoring
+
+* the config is Lua-native: table presets, hyprglass.layer() namespaces, boolean switches
+* hyprglass drops the hyprlang code paths that Hyprland 0.57 no longer has
+
+### Documentation
+
+* the README writes every option as hg.config() takes it, with windows and debug examples
+
+### Features
+
+* hyprglass.layer("*") keeps glass on every layer while other calls tune one namespace
+
+
 ## [v1.0.0](https://github.com/Hyprnux/hyprglass/compare/v0.11.0...v1.0.0) - 2026-10-30
 
 ### Bug Fixes
@@ -18,6 +42,7 @@
 
 ### Chores
 
+* **release:** v1.0.0 [skip ci]
 * **release:** pin hyprland 0.56.2 to v0.11.0 [skip ci]
 * **release:** pin hyprland 0.56.2 to v0.10.0 [skip ci]
 * **release:** pin hyprland 0.56.2 to v0.9.1 [skip ci]

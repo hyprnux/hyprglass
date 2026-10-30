@@ -16,9 +16,8 @@ class CGlassSubsurfaceCompositeElement : public IPassElement {
         std::shared_ptr<CGlassSubsurfaceState> state;
         CBox                                   itemLogicalBox; // same box CGlassSubsurfacePassElement::boundingBox() pads, so the
                                                                 // two elements are discarded together (see boundingBox() below)
-        CBox                                   rawBox;
-        CBox                                   transformBox;
-        CRegion                                transformedRegion; // ext-background-effect-v1 region, in transformBox's pixel space
+        CBox                                   pixelBox;
+        CRegion                                transformedRegion; // ext-background-effect-v1 region, in pixelBox's pixel space
         PHLMONITORREF                          monitor;
         float                                  alpha = 1.0f;
     };

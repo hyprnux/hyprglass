@@ -8,8 +8,6 @@
 #include <typeinfo>
 #include <unordered_map>
 
-inline constexpr std::string_view CONFIG_PREFIX = "plugin:hyprglass:";
-
 // Window tags for theme and preset selection
 inline constexpr std::string_view TAG_THEME_PREFIX  = "hyprglass_theme_";
 inline constexpr std::string_view TAG_PRESET_PREFIX = "hyprglass_preset_";
@@ -19,10 +17,10 @@ inline constexpr std::string_view TAG_PRESET_PREFIX = "hyprglass_preset_";
 inline constexpr std::string_view TAG_ENABLED  = "hyprglass_enabled";
 inline constexpr std::string_view TAG_DISABLED = "hyprglass_disabled";
 
-// Hyprland stores dynamic tags (`tagwindow` dispatcher, dynamic window rules)
-// with a trailing '*'. CTagKeeper::isTagged() normalizes this for exact lookups,
-// but code iterating getTags() or registering preset names must strip it itself
-// so "firefox" and "firefox*" refer to the same preset.
+// Hyprland stores dynamic tags (the `tag` window rule effect) with a trailing '*'.
+// CTagKeeper::isTagged() normalizes this for exact lookups, but code iterating
+// getTags() or registering preset names must strip it itself so "firefox" and
+// "firefox*" refer to the same preset.
 inline std::string stripDynamicTagMarker(std::string_view tag) {
     if (tag.ends_with('*'))
         tag.remove_suffix(1);
@@ -30,10 +28,13 @@ inline std::string stripDynamicTagMarker(std::string_view tag) {
 }
 
 // Sentinel: "not set by user, inherit from parent layer"
-inline constexpr Hyprlang::FLOAT SENTINEL_FLOAT = -1.0;
-inline constexpr Hyprlang::INT   SENTINEL_INT   = -1;
+inline constexpr Config::FLOAT   SENTINEL_FLOAT = -1.0;
+inline constexpr Config::INTEGER SENTINEL_INT   = -1;
 
 inline constexpr int MAX_PRESET_INHERITANCE_DEPTH = 8;
+
+// hg.layer() namespace that whitelists every layer; exact match, no globbing.
+inline const std::string LAYER_NAMESPACE_WILDCARD = "*";
 
 // Layer glass masking strategy: how hyprglass decides which pixels of a layer
 // surface get the glass effect.
@@ -52,9 +53,6 @@ struct SLayerShape {
     float insetLeft   = 0.0f;
     float radius      = 0.0f;
 };
-
-// Parses "inset:radius" or "top:right:bottom:left:radius"; nullopt for anything else.
-[[nodiscard]] std::optional<SLayerShape> parseLayerShape(std::string_view value);
 
 // Instrumentation mode (plugin:hyprglass:debug:mode). Isolates the render-pass
 // cost from the GL pipeline cost for A/B measurement: hints_only skips all GL
@@ -83,10 +81,6 @@ inline constexpr auto BLUR_FOLD           = "plugin:hyprglass:blur_fold";
 // Performance diagnostics
 inline constexpr auto DEBUG_MODE   = "plugin:hyprglass:debug:mode";
 inline constexpr auto DEBUG_TIMERS = "plugin:hyprglass:debug:timers";
-
-// Preset keyword, registered as unscoped because Hyprlang does not dispatch
-// scoped keyword handlers inside the plugin special category.
-inline constexpr auto PRESET_KEYWORD = "preset";
 
 // Overridable — global level
 inline constexpr auto BLUR_STRENGTH        = "plugin:hyprglass:blur_strength";
@@ -130,22 +124,14 @@ inline constexpr auto FROST_BLUR            = "plugin:hyprglass:frost_blur";
 
 // Layer surface support
 inline constexpr auto LAYERS_ENABLED            = "plugin:hyprglass:layers:enabled";
-inline constexpr auto LAYERS_NAMESPACES         = "plugin:hyprglass:layers:namespaces";
-inline constexpr auto LAYERS_EXCLUDE_NAMESPACES = "plugin:hyprglass:layers:exclude_namespaces";
 inline constexpr auto LAYERS_PRESET             = "plugin:hyprglass:layers:preset";
-inline constexpr auto LAYERS_NAMESPACE_PRESETS          = "plugin:hyprglass:layers:namespace_presets";
 inline constexpr auto LAYERS_MASK_THRESHOLD             = "plugin:hyprglass:layers:mask_threshold";
-inline constexpr auto LAYERS_NAMESPACE_MASK_THRESHOLDS  = "plugin:hyprglass:layers:namespace_mask_thresholds";
-inline constexpr auto LAYERS_NAMESPACE_LIVE_RESAMPLE    = "plugin:hyprglass:layers:namespace_live_resample";
 inline constexpr auto LAYERS_LIVE_RESAMPLE              = "plugin:hyprglass:layers:live_resample";
 inline constexpr auto LAYERS_LIVE_RESAMPLE_FPS          = "plugin:hyprglass:layers:live_resample_fps";
 inline constexpr auto LAYERS_FORCE_LIVE_RESAMPLE        = "plugin:hyprglass:layers:force_live_resample";
 inline constexpr auto LAYERS_MASK_MODE                  = "plugin:hyprglass:layers:mask_mode";
-inline constexpr auto LAYERS_NAMESPACE_MASK_MODES       = "plugin:hyprglass:layers:namespace_mask_modes";
 // Alpha mask only: alpha range above mask_threshold over which layer glass fades in; 0 keeps the hard mask.
 inline constexpr auto LAYERS_MASK_FEATHER               = "plugin:hyprglass:layers:mask_feather";
-inline constexpr auto LAYERS_NAMESPACE_MASK_FEATHERS    = "plugin:hyprglass:layers:namespace_mask_feathers";
-inline constexpr auto LAYERS_NAMESPACE_SHAPES           = "plugin:hyprglass:layers:namespace_shapes";
 inline constexpr auto LAYERS_MANAGE_BLUR                = "plugin:hyprglass:layers:manage_blur";
 
 // Subsurface item glass support (see GlassSubsurfaceState).
@@ -248,44 +234,44 @@ inline constexpr auto LIGHT_FROST_BLUR          = "plugin:hyprglass:light:frost_
 
 // Cached pointers for a single config layer (built-in dark/light/global)
 struct SOverridableConfig {
-    Hyprlang::FLOAT* const* blurStrength        = nullptr;
-    Hyprlang::INT* const*   blurIterations      = nullptr;
-    Hyprlang::FLOAT* const* noiseStrength       = nullptr;
-    Hyprlang::FLOAT* const* refractionStrength  = nullptr;
-    Hyprlang::FLOAT* const* chromaticAberration = nullptr;
-    Hyprlang::FLOAT* const* fresnelStrength     = nullptr;
-    Hyprlang::FLOAT* const* specularStrength    = nullptr;
-    Hyprlang::FLOAT* const* specularAngle       = nullptr;
-    Hyprlang::FLOAT* const* glassOpacity        = nullptr;
-    Hyprlang::FLOAT* const* edgeThickness       = nullptr;
-    Hyprlang::FLOAT* const* edgeThicknessPx     = nullptr;
-    Hyprlang::FLOAT* const* edgeHeight          = nullptr;
-    Hyprlang::FLOAT* const* fresnelReflection   = nullptr;
-    Hyprlang::INT* const*   tintColor           = nullptr;
-    Hyprlang::FLOAT* const* lensDistortion      = nullptr;
-    Hyprlang::FLOAT* const* brightness          = nullptr;
-    Hyprlang::FLOAT* const* contrast            = nullptr;
-    Hyprlang::FLOAT* const* saturation          = nullptr;
-    Hyprlang::FLOAT* const* vibrancy            = nullptr;
-    Hyprlang::FLOAT* const* vibrancyDarkness    = nullptr;
-    Hyprlang::FLOAT* const* adaptiveDim         = nullptr;
-    Hyprlang::FLOAT* const* adaptiveBoost       = nullptr;
-    Hyprlang::FLOAT* const* refractionFlow      = nullptr;
-    Hyprlang::FLOAT* const* refractionSpread    = nullptr;
-    Hyprlang::FLOAT* const* fresnelTint         = nullptr;
-    Hyprlang::FLOAT* const* bevelStrength       = nullptr;
-    Hyprlang::FLOAT* const* bevelSize           = nullptr;
-    Hyprlang::INT* const*   fresnelColor        = nullptr;
-    Hyprlang::INT* const*   bevelColor          = nullptr;
-    Hyprlang::FLOAT* const* bevelTint           = nullptr;
-    Hyprlang::FLOAT* const* bevelAngle          = nullptr;
-    Hyprlang::FLOAT* const* bevelShadow         = nullptr;
-    Hyprlang::FLOAT* const* selfSample          = nullptr;
-    Hyprlang::INT* const*   xray                = nullptr;
-    Hyprlang::FLOAT* const* focusLight          = nullptr;
-    Hyprlang::INT* const*   focusLightColor     = nullptr;
-    Hyprlang::FLOAT* const* frost               = nullptr;
-    Hyprlang::FLOAT* const* frostBlur           = nullptr;
+    Config::FLOAT* const*   blurStrength        = nullptr;
+    Config::INTEGER* const* blurIterations      = nullptr;
+    Config::FLOAT* const*   noiseStrength       = nullptr;
+    Config::FLOAT* const*   refractionStrength  = nullptr;
+    Config::FLOAT* const*   chromaticAberration = nullptr;
+    Config::FLOAT* const*   fresnelStrength     = nullptr;
+    Config::FLOAT* const*   specularStrength    = nullptr;
+    Config::FLOAT* const*   specularAngle       = nullptr;
+    Config::FLOAT* const*   glassOpacity        = nullptr;
+    Config::FLOAT* const*   edgeThickness       = nullptr;
+    Config::FLOAT* const*   edgeThicknessPx     = nullptr;
+    Config::FLOAT* const*   edgeHeight          = nullptr;
+    Config::FLOAT* const*   fresnelReflection   = nullptr;
+    Config::INTEGER* const* tintColor           = nullptr;
+    Config::FLOAT* const*   lensDistortion      = nullptr;
+    Config::FLOAT* const*   brightness          = nullptr;
+    Config::FLOAT* const*   contrast            = nullptr;
+    Config::FLOAT* const*   saturation          = nullptr;
+    Config::FLOAT* const*   vibrancy            = nullptr;
+    Config::FLOAT* const*   vibrancyDarkness    = nullptr;
+    Config::FLOAT* const*   adaptiveDim         = nullptr;
+    Config::FLOAT* const*   adaptiveBoost       = nullptr;
+    Config::FLOAT* const*   refractionFlow      = nullptr;
+    Config::FLOAT* const*   refractionSpread    = nullptr;
+    Config::FLOAT* const*   fresnelTint         = nullptr;
+    Config::FLOAT* const*   bevelStrength       = nullptr;
+    Config::FLOAT* const*   bevelSize           = nullptr;
+    Config::INTEGER* const* fresnelColor        = nullptr;
+    Config::INTEGER* const* bevelColor          = nullptr;
+    Config::FLOAT* const*   bevelTint           = nullptr;
+    Config::FLOAT* const*   bevelAngle          = nullptr;
+    Config::FLOAT* const*   bevelShadow         = nullptr;
+    Config::FLOAT* const*   selfSample          = nullptr;
+    Config::INTEGER* const* xray                = nullptr;
+    Config::FLOAT* const*   focusLight          = nullptr;
+    Config::INTEGER* const* focusLightColor     = nullptr;
+    Config::FLOAT* const*   frost               = nullptr;
+    Config::FLOAT* const*   frostBlur           = nullptr;
 };
 
 // Plain values for a user-defined preset layer (all sentinel = not set → inherit)
@@ -352,84 +338,65 @@ inline std::string_view readStringConfig(const StringConfigPtr& ptr) {
         return value ? std::string_view(*value) : std::string_view{};
     }
 
-    if (*ptr.type == typeid(Hyprlang::STRING)) {
-        const auto value = *reinterpret_cast<Hyprlang::STRING const*>(ptr.dataptr);
-        return value ? std::string_view(value) : std::string_view{};
-    }
-
     return {};
 }
 
-// A Hyprland key whose storage is a bool under the Lua config and an INTEGER
-// under legacy .conf: read through its reported type, never as a bare int64.
-struct IntegerConfigPtr {
+// A Hyprland key stored as a bool: read through its reported type, so a key that
+// reports anything else reads as unset instead of as a misread byte.
+struct BoolConfigPtr {
     void* const*          dataptr = nullptr;
     const std::type_info* type    = nullptr;
 };
 
-inline Config::INTEGER readIntegerConfig(const IntegerConfigPtr& ptr) {
-    if (!ptr.dataptr || !ptr.type)
-        return 0;
+inline bool readBoolConfig(const BoolConfigPtr& ptr) {
+    if (!ptr.dataptr || !ptr.type || *ptr.type != typeid(bool))
+        return false;
 
-    if (*ptr.type == typeid(bool))
-        return **reinterpret_cast<const bool* const*>(ptr.dataptr);
-
-    if (*ptr.type == typeid(Config::INTEGER))
-        return **reinterpret_cast<const Config::INTEGER* const*>(ptr.dataptr);
-
-    return 0;
+    return **reinterpret_cast<const bool* const*>(ptr.dataptr);
 }
 
 struct SPluginConfig {
-    Hyprlang::INT* const* enabled           = nullptr;
+    Config::BOOL* const*    enabled           = nullptr;
     // Glass replaces Hyprland's blur for glassed windows: when set, the plugin
     // marks them with the noblur window property so Hyprland composites them
     // against the live framebuffer (which contains the glass) instead of its
     // pre-frame cached blur.
-    Hyprlang::INT* const* manageWindowBlur  = nullptr;
+    Config::BOOL* const*    manageWindowBlur  = nullptr;
     // Skip glass for windows CWindow::opaque() reports as opaque: nothing behind
     // them is visible, so sampling and blurring their background is wasted work.
-    Hyprlang::INT* const* skipOpaqueWindows = nullptr;
+    Config::BOOL* const*    skipOpaqueWindows = nullptr;
     // Derives a smaller blur pass count from the requested radius (GlassRenderer::
     // foldBlurPasses) instead of always running blur_iterations passes at full radius.
-    Hyprlang::INT* const* blurFold = nullptr;
+    Config::BOOL* const*    blurFold          = nullptr;
     // Hyprland's render:xp_mode: no wallpaper or bottom layers are drawn, so
     // there is nothing for x-ray to show.
-    IntegerConfigPtr      xpMode;
+    BoolConfigPtr           xpMode;
     // Hyprland's animations:enabled: off, the focus light switches without a fade.
-    IntegerConfigPtr      animationsEnabled;
-    StringConfigPtr      defaultTheme;
-    StringConfigPtr      defaultPreset;
+    BoolConfigPtr           animationsEnabled;
+    StringConfigPtr         defaultTheme;
+    StringConfigPtr         defaultPreset;
 
     // Performance diagnostics (see Diagnostics.hpp for the hyprctl side)
-    StringConfigPtr       debugMode;
-    Hyprlang::INT* const* debugTimers = nullptr;
+    StringConfigPtr         debugMode;
+    Config::BOOL* const*    debugTimers = nullptr;
 
-    Hyprlang::INT* const* layersEnabled                  = nullptr;
-    StringConfigPtr       layersNamespaces;
-    StringConfigPtr       layersExcludeNamespaces;
-    StringConfigPtr       layersPreset;
-    StringConfigPtr       layersNamespacePresets;
-    Hyprlang::FLOAT* const* layersMaskThreshold          = nullptr;
-    StringConfigPtr       layersNamespaceMaskThresholds;
-    StringConfigPtr       layersNamespaceLiveResample;
-    Hyprlang::INT* const* layersLiveResample             = nullptr;
-    Hyprlang::INT* const* layersLiveResampleFps          = nullptr;
-    Hyprlang::INT* const* layersForceLiveResample        = nullptr;
-    StringConfigPtr       layersMaskMode;
-    StringConfigPtr       layersNamespaceMaskModes;
-    Hyprlang::FLOAT* const* layersMaskFeather            = nullptr;
-    StringConfigPtr       layersNamespaceMaskFeathers;
-    StringConfigPtr       layersNamespaceShapes;
-    Hyprlang::INT* const* layersManageBlur               = nullptr;
+    Config::BOOL* const*    layersEnabled                 = nullptr;
+    StringConfigPtr         layersPreset;
+    Config::FLOAT* const*   layersMaskThreshold           = nullptr;
+    Config::BOOL* const*    layersLiveResample            = nullptr;
+    Config::INTEGER* const* layersLiveResampleFps         = nullptr;
+    Config::BOOL* const*    layersForceLiveResample       = nullptr;
+    StringConfigPtr         layersMaskMode;
+    Config::FLOAT* const*   layersMaskFeather             = nullptr;
+    Config::BOOL* const*    layersManageBlur              = nullptr;
 
-    Hyprlang::INT* const*   subsurfacesEnabled = nullptr;
+    Config::BOOL* const*    subsurfacesEnabled = nullptr;
     StringConfigPtr         subsurfacesPreset;
-    Hyprlang::FLOAT* const* subsurfacesRadius  = nullptr;
+    Config::FLOAT* const*   subsurfacesRadius  = nullptr;
 
-    Hyprlang::INT* const* windowsBackgroundCache  = nullptr;
-    Hyprlang::INT* const* windowsLiveResample     = nullptr;
-    Hyprlang::INT* const* windowsLiveResampleFps  = nullptr;
+    Config::BOOL* const*    windowsBackgroundCache = nullptr;
+    Config::BOOL* const*    windowsLiveResample    = nullptr;
+    Config::INTEGER* const* windowsLiveResampleFps = nullptr;
 
     SOverridableConfig global;
     SOverridableConfig dark;
@@ -448,13 +415,13 @@ struct SResolveContext {
 [[nodiscard]] float resolvePresetFloat(
     const SResolveContext& context,
     float SPresetValues::* presetField,
-    Hyprlang::FLOAT* const* SOverridableConfig::* configField,
+    Config::FLOAT* const* SOverridableConfig::* configField,
     float hardcodedDefault = static_cast<float>(SENTINEL_FLOAT));
 
 [[nodiscard]] int64_t resolvePresetInt(
     const SResolveContext& context,
     int64_t SPresetValues::* presetField,
-    Hyprlang::INT* const* SOverridableConfig::* configField,
+    Config::INTEGER* const* SOverridableConfig::* configField,
     int64_t hardcodedDefault = SENTINEL_INT);
 
 // True when any tier can resolve self_sample above 0. Answers "could a window
@@ -466,14 +433,11 @@ struct SResolveContext {
 void registerConfig(HANDLE handle);
 void initConfigPointers(HANDLE handle, SPluginConfig& config);
 
-// Preset keyword handler (registered via addConfigKeyword)
-Hyprlang::CParseResult handlePresetKeyword(const char* command, const char* value);
+// Forget the pending presets/layers before the config is parsed again (preReload callback)
+void beginConfigReload();
 
-// Clear pending presets/layers before config re-parse (called from preConfigReload callback)
-void clearPendingPresets();
-void clearPendingLayers();
-
-// Swap pending data into active maps (called from configReloaded callback)
+// Swap pending data into active maps (reloaded callback). A reload that stopped before running
+// any hyprglass.* call and failed keeps what the last good one committed.
 void commitPendingPresets();
 void commitPendingLayers();
 
