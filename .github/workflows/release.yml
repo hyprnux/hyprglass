@@ -198,24 +198,30 @@ jobs:
           echo "$CHANGELOG_CONTENT" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - name: Commit changelog
+      - name: Commit changelog and update Nix version fallbacks
         if: steps.version-bump.outputs.skip != 'true'
         id: commit
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
 
-          git add CHANGELOG.md
+          NEW_VER="${{ steps.version-bump.outputs.new_version }}"
+          CUR_VER="${{ steps.version-bump.outputs.current_version }}"
+
+          sed -i "s/version ? \"${CUR_VER}\"/version ? \"${NEW_VER}\"/" nix/package.nix
+          sed -i "s/\"${CUR_VER}\"/\"${NEW_VER}\"/" flake.nix
+
+          git add CHANGELOG.md nix/package.nix flake.nix
 
           if git diff --staged --quiet; then
-            echo "No changelog changes to commit"
+            echo "No changes to commit"
           else
-            git commit -m "chore(release): v${{ steps.version-bump.outputs.new_version }} [skip ci]" \
-              -m "Bump version from ${{ steps.version-bump.outputs.current_version }} to ${{ steps.version-bump.outputs.new_version }}" \
-              -m "Update CHANGELOG.md"
+            git commit -m "chore(release): v${NEW_VER} [skip ci]" \
+              -m "Bump version from ${CUR_VER} to ${NEW_VER}" \
+              -m "Update CHANGELOG.md, nix/package.nix, and flake.nix"
 
             git push https://github-actions:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git "HEAD:${GITHUB_REF_NAME}"
-            echo "Changelog committed and pushed"
+            echo "Release updates committed and pushed"
           fi
 
           # The commit the release tag and the hyprpm pin point to.
