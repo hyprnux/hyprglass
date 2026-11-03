@@ -1,4 +1,11 @@
 
+## [v1.1.1](https://github.com/Hyprnux/hyprglass/compare/v1.1.0...v1.1.1) - 2026-11-03
+
+### Bug Fixes
+
+* glass refreshes over video and other GPU-rendered backgrounds ([#102](https://github.com/Hyprnux/hyprglass/issues/102))
+
+
 ## [v1.1.0](https://github.com/Hyprnux/hyprglass/compare/v1.0.0...v1.1.0) - 2026-10-30
 
 ### Bug Fixes
@@ -8,6 +15,10 @@
 * a glass item that moves inside its window no longer keeps its old background
 * glassed layers and items no longer keep the monitor redrawing under an animated blur variant
 * glass lands in the right place on rotated and flipped monitors under Hyprland 0.57 ([#99](https://github.com/Hyprnux/hyprglass/issues/99))
+
+### Chores
+
+* **release:** v1.1.0 [skip ci]
 
 ### Code Refactoring
 
