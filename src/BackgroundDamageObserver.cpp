@@ -216,12 +216,15 @@ namespace {
             return;
 
         CRegion damage = wlSurface->computeDamage(box);
-        if (damage.empty())
-            return;
 
         // X11 clients draw at their own scale; only a window root carries it
         if (viewWindow && viewWindow->backend().isX11() && viewWindow->backend().surfaceScale() != 1.f)
             damage.scale(1.0 / viewWindow->backend().surfaceScale());
+
+        // Hyprland's damageSurface ran first and consumed a dmabuf commit's damage
+        // (accumulateBufferDamage clears it): the bit is set, so the whole surface may have changed
+        if (damage.empty())
+            damage = CRegion(CBox{0.0, 0.0, box->w, box->h});
 
         // the animated origin, not Hyprland's animation goal: it is where the
         // content is actually drawn this frame
