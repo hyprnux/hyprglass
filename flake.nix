@@ -29,6 +29,17 @@
       ];
       forEachSystem = nixpkgs.lib.genAttrs systems;
 
+      baseVersion = "1.1.0";
+      version =
+        if (self ? shortRev) then
+          "${baseVersion}+unstable-${self.shortRev}"
+
+        else if (self ? dirtyShortRev) then
+          "${baseVersion}+unstable-${self.dirtyShortRev}"
+
+        else
+          baseVersion;
+
     in
     {
       packages = forEachSystem (
@@ -49,16 +60,6 @@
 
             else
               pkgs.hyprland;
-
-          version =
-            if (self ? shortRev) then
-              "git-${self.shortRev}"
-
-            else if (self ? dirtyShortRev) then
-              "git-${self.dirtyShortRev}"
-
-            else
-              "1.1.0";
 
         in
         {
@@ -96,6 +97,8 @@
 
               else
                 final.hyprland or prev.hyprland;
+
+            inherit version;
           };
         };
       };
