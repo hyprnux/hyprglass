@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <span>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/lua/ConfigManager.hpp>
 #include <hyprland/src/config/values/ConfigValues.hpp>
@@ -89,6 +90,11 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_MASK_MODE, Config::STRING{"auto"});
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::LAYERS_MASK_FEATHER, Config::FLOAT{0.0});
     addConfigValue<Config::Values::Bool>(handle, ConfigKeys::LAYERS_MANAGE_BLUR, true);
+    addConfigValue<Config::Values::Bool>(handle, ConfigKeys::LAYERS_POPUPS_ENABLED, false);
+    addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_POPUPS_PRESET, Config::STRING{});
+    addConfigValue<Config::Values::String>(handle, ConfigKeys::LAYERS_POPUPS_MASK_MODE, Config::STRING{});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LAYERS_POPUPS_MASK_THRESHOLD, Config::FLOAT{SENTINEL_FLOAT});
+    addConfigValue<Config::Values::Float>(handle, ConfigKeys::LAYERS_POPUPS_MASK_FEATHER, Config::FLOAT{SENTINEL_FLOAT});
 
     // Subsurface item glass
     addConfigValue<Config::Values::Bool>(handle, ConfigKeys::SUBSURFACES_ENABLED, false);
@@ -328,6 +334,11 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.layersMaskMode          = getStringPtr(handle, ConfigKeys::LAYERS_MASK_MODE);
     config.layersMaskFeather       = getStaticPtr<Config::FLOAT>(handle, ConfigKeys::LAYERS_MASK_FEATHER);
     config.layersManageBlur        = getStaticPtr<Config::BOOL>(handle, ConfigKeys::LAYERS_MANAGE_BLUR);
+    config.layersPopups.enabled       = getStaticPtr<Config::BOOL>(handle, ConfigKeys::LAYERS_POPUPS_ENABLED);
+    config.layersPopups.preset        = getStringPtr(handle, ConfigKeys::LAYERS_POPUPS_PRESET);
+    config.layersPopups.maskMode      = getStringPtr(handle, ConfigKeys::LAYERS_POPUPS_MASK_MODE);
+    config.layersPopups.maskThreshold = getStaticPtr<Config::FLOAT>(handle, ConfigKeys::LAYERS_POPUPS_MASK_THRESHOLD);
+    config.layersPopups.maskFeather   = getStaticPtr<Config::FLOAT>(handle, ConfigKeys::LAYERS_POPUPS_MASK_FEATHER);
 
     config.subsurfacesEnabled = getStaticPtr<Config::BOOL>(handle, ConfigKeys::SUBSURFACES_ENABLED);
     config.subsurfacesPreset  = getStringPtr(handle, ConfigKeys::SUBSURFACES_PRESET);
@@ -581,7 +592,7 @@ struct SLuaConfigContext {
 // Copies the known options of the table at srcIdx into the table at dstIdx (absolute indices).
 static void copyValidatedTable(SLuaConfigContext& ctx, int srcIdx, int dstIdx, const std::string& dottedPrefix, int depth = 0) {
     lua_State* L = ctx.L;
-    // options are at most two levels deep; the cap also ends self-referencing tables
+    // options are at most three levels deep; the cap also ends self-referencing tables
     if (depth > 4 || !lua_checkstack(L, 5)) {
         ctx.report(dottedPrefix.empty() ? std::string{"nesting too deep"} : std::format("nesting too deep in '{}'", dottedPrefix));
         return;
@@ -765,14 +776,10 @@ static int handleLuaPreset(lua_State* L) {
 // ── Lua layer handler ───────────────────────────────────────────────────────
 
 struct SPendingLayer {
-    std::string                   ns;
-    std::string                   preset;
-    float                         maskThreshold = -1.0f;
-    float                         maskFeather   = -1.0f;
-    bool                          exclude       = false;
-    int                           liveResample  = -1; // -1 = not set
-    std::optional<ELayerMaskMode> maskMode;
-    std::optional<SLayerShape>    shape;
+    std::string           ns;
+    bool                  exclude = false;
+    SSurfaceGlassSettings surface;
+    SSurfaceGlassSettings popups;
 };
 
 static std::vector<SPendingLayer> s_pendingLayers;
@@ -817,8 +824,88 @@ static std::optional<SLayerShape> readLuaLayerShape(lua_State* L, int tableIdx) 
     return shape;
 }
 
-// What hyprglass.layer takes in its table; anything else is reported.
-static constexpr std::array<std::string_view, 7> LAYER_SETTINGS = {"exclude", "preset", "mask_threshold", "mask_feather", "live_resample", "mask_mode", "shape"};
+// What hyprglass.layer takes in its table and in its popups table; anything else is reported.
+static constexpr std::array<std::string_view, 8> LAYER_SETTINGS = {"exclude", "preset", "mask_threshold", "mask_feather", "live_resample", "mask_mode", "shape", "popups"};
+static constexpr std::array<std::string_view, 6> POPUP_SETTINGS = {"enabled", "preset", "mask_mode", "mask_threshold", "mask_feather", "shape"};
+
+// Reads the settings of the table at tableIdx (absolute index). scope is empty for the layer's own
+// table, else the key of the nested table, named in the messages.
+static void readSurfaceGlassSettings(lua_State* L, int tableIdx, const std::string& ns, std::string_view scope, std::span<const std::string_view> allowedKeys,
+                                     SSurfaceGlassSettings& settings) {
+    const std::string where     = scope.empty() ? std::format("for '{}'", ns) : std::format("in '{}' for '{}'", scope, ns);
+    const auto        allows    = [allowedKeys](std::string_view key) { return std::ranges::find(allowedKeys, key) != allowedKeys.end(); };
+    const auto        typeError = [L, &where](std::string_view setting, std::string_view expected) {
+        reportLuaError(L, "layer", std::format("'{}' {} expects {}", setting, where, expected));
+    };
+
+    lua_pushnil(L);
+    while (lua_next(L, tableIdx) != 0) {
+        if (lua_type(L, -2) != LUA_TSTRING)
+            reportLuaError(L, "layer", std::format("ignoring non-string key {}", where));
+        else if (!allows(lua_tostring(L, -2)))
+            reportLuaError(L, "layer", std::format("unknown setting '{}' {}", lua_tostring(L, -2), where));
+        lua_pop(L, 1);
+    }
+
+    if (allows("enabled")) {
+        lua_getfield(L, tableIdx, "enabled");
+        if (lua_isboolean(L, -1))
+            settings.enabled = lua_toboolean(L, -1) != 0;
+        else if (!lua_isnil(L, -1))
+            typeError("enabled", "true or false");
+        lua_pop(L, 1);
+    }
+
+    lua_getfield(L, tableIdx, "preset");
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        if (std::string preset = lua_tostring(L, -1); !preset.empty())
+            settings.preset = std::move(preset);
+    } else if (!lua_isnil(L, -1)) {
+        typeError("preset", "a preset name");
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, tableIdx, "mask_threshold");
+    if (const auto value = luaFiniteNumber(L, -1); value && *value >= 0.0)
+        settings.maskThreshold = static_cast<float>(*value);
+    else if (!lua_isnil(L, -1))
+        typeError("mask_threshold", "a finite number, 0 or more");
+    lua_pop(L, 1);
+
+    lua_getfield(L, tableIdx, "mask_feather");
+    if (const auto value = luaFiniteNumber(L, -1); value && *value >= 0.0)
+        settings.maskFeather = static_cast<float>(*value);
+    else if (!lua_isnil(L, -1))
+        typeError("mask_feather", "a finite number, 0 or more");
+    lua_pop(L, 1);
+
+    if (allows("live_resample")) {
+        lua_getfield(L, tableIdx, "live_resample");
+        if (lua_isboolean(L, -1))
+            settings.liveResample = lua_toboolean(L, -1) != 0;
+        else if (!lua_isnil(L, -1))
+            typeError("live_resample", "true or false");
+        lua_pop(L, 1);
+    }
+
+    lua_getfield(L, tableIdx, "mask_mode");
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        settings.maskMode = parseLayerMaskMode(lua_tostring(L, -1));
+        if (!settings.maskMode)
+            typeError("mask_mode", "\"auto\", \"alpha\", \"region\" or \"contour\"");
+    } else if (!lua_isnil(L, -1)) {
+        typeError("mask_mode", "\"auto\", \"alpha\", \"region\" or \"contour\"");
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, tableIdx, "shape");
+    if (!lua_isnil(L, -1)) {
+        settings.shape = lua_istable(L, -1) ? readLuaLayerShape(L, lua_gettop(L)) : std::nullopt;
+        if (!settings.shape)
+            reportLuaError(L, "layer", std::format("invalid shape {}, expected {{ inset = px or {{top, right, bottom, left}}, radius = px }}", where));
+    }
+    lua_pop(L, 1);
+}
 
 static int handleLuaLayer(lua_State* L) {
     s_hyprglassCalledThisReload = true;
@@ -832,82 +919,36 @@ static int handleLuaLayer(lua_State* L) {
     entry.ns = lua_tostring(L, 1);
 
     // from here on problems go to reportLuaError: a Lua error would unwind past entry's strings
-    const auto typeError = [L, &entry](std::string_view setting, std::string_view expected) {
-        reportLuaError(L, "layer", std::format("'{}' for '{}' expects {}", setting, entry.ns, expected));
-    };
-
     const bool hasTable = lua_gettop(L) >= 2 && lua_istable(L, 2);
     if (lua_gettop(L) >= 2 && !lua_isnil(L, 2) && !hasTable)
         reportLuaError(L, "layer", std::format("settings for '{}' must be a table", entry.ns));
 
     if (hasTable) {
-        lua_pushnil(L);
-        while (lua_next(L, 2) != 0) {
-            if (entry.ns == LAYER_NAMESPACE_WILDCARD) {
+        if (entry.ns == LAYER_NAMESPACE_WILDCARD) {
+            lua_pushnil(L);
+            if (lua_next(L, 2) != 0) {
                 lua_pop(L, 2);
                 reportLuaError(L, "layer", "'*' takes no settings, put the settings for every layer in the layers table of hyprglass.config");
                 return 0;
             }
-            if (lua_type(L, -2) != LUA_TSTRING)
-                reportLuaError(L, "layer", std::format("ignoring non-string key for '{}'", entry.ns));
-            else if (std::ranges::find(LAYER_SETTINGS, std::string_view(lua_tostring(L, -2))) == LAYER_SETTINGS.end())
-                reportLuaError(L, "layer", std::format("unknown setting '{}' for '{}'", lua_tostring(L, -2), entry.ns));
-            lua_pop(L, 1);
         }
+
+        readSurfaceGlassSettings(L, 2, entry.ns, "", LAYER_SETTINGS, entry.surface);
+
+        lua_getfield(L, 2, "popups");
+        if (lua_istable(L, -1))
+            readSurfaceGlassSettings(L, lua_gettop(L), entry.ns, "popups", POPUP_SETTINGS, entry.popups);
+        else if (!lua_isnil(L, -1))
+            reportLuaError(L, "layer", std::format("'popups' for '{}' expects a table: popups = {{ enabled = true }}", entry.ns));
+        lua_pop(L, 1);
 
         lua_getfield(L, 2, "exclude");
         if (lua_isboolean(L, -1)) {
             entry.exclude = lua_toboolean(L, -1);
         } else if (!lua_isnil(L, -1)) {
             // keeping the entry would turn the exclusion into a whitelist entry
-            typeError("exclude", "true or false");
+            reportLuaError(L, "layer", std::format("'exclude' for '{}' expects true or false", entry.ns));
             return 0;
-        }
-        lua_pop(L, 1);
-
-        lua_getfield(L, 2, "preset");
-        if (lua_type(L, -1) == LUA_TSTRING)
-            entry.preset = lua_tostring(L, -1);
-        else if (!lua_isnil(L, -1))
-            typeError("preset", "a preset name");
-        lua_pop(L, 1);
-
-        lua_getfield(L, 2, "mask_threshold");
-        if (const auto value = luaFiniteNumber(L, -1); value && *value >= 0.0)
-            entry.maskThreshold = static_cast<float>(*value);
-        else if (!lua_isnil(L, -1))
-            typeError("mask_threshold", "a finite number, 0 or more");
-        lua_pop(L, 1);
-
-        lua_getfield(L, 2, "mask_feather");
-        if (const auto value = luaFiniteNumber(L, -1); value && *value >= 0.0)
-            entry.maskFeather = static_cast<float>(*value);
-        else if (!lua_isnil(L, -1))
-            typeError("mask_feather", "a finite number, 0 or more");
-        lua_pop(L, 1);
-
-        lua_getfield(L, 2, "live_resample");
-        if (lua_isboolean(L, -1))
-            entry.liveResample = lua_toboolean(L, -1) ? 1 : 0;
-        else if (!lua_isnil(L, -1))
-            typeError("live_resample", "true or false");
-        lua_pop(L, 1);
-
-        lua_getfield(L, 2, "mask_mode");
-        if (lua_type(L, -1) == LUA_TSTRING) {
-            entry.maskMode = parseLayerMaskMode(lua_tostring(L, -1));
-            if (!entry.maskMode)
-                typeError("mask_mode", "\"auto\", \"alpha\", \"region\" or \"contour\"");
-        } else if (!lua_isnil(L, -1)) {
-            typeError("mask_mode", "\"auto\", \"alpha\", \"region\" or \"contour\"");
-        }
-        lua_pop(L, 1);
-
-        lua_getfield(L, 2, "shape");
-        if (!lua_isnil(L, -1)) {
-            entry.shape = lua_istable(L, -1) ? readLuaLayerShape(L, lua_gettop(L)) : std::nullopt;
-            if (!entry.shape)
-                reportLuaError(L, "layer", std::format("invalid shape for '{}', expected {{ inset = px or {{top, right, bottom, left}}, radius = px }}", entry.ns));
         }
         lua_pop(L, 1);
     }
@@ -930,12 +971,22 @@ void beginConfigReload() {
 static void resetLayerNamespaces() {
     g_pGlobalState->layerNamespaceFilter.clear();
     g_pGlobalState->layerNamespaceExclude.clear();
-    g_pGlobalState->layerNamespacePresets.clear();
-    g_pGlobalState->layerNamespaceMaskThresholds.clear();
-    g_pGlobalState->layerNamespaceLiveResample.clear();
-    g_pGlobalState->layerNamespaceMaskModes.clear();
-    g_pGlobalState->layerNamespaceMaskFeathers.clear();
-    g_pGlobalState->layerNamespaceShapes.clear();
+    g_pGlobalState->layerNamespaceSettings.clear();
+}
+
+// A later hg.layer() call for the same namespace wins for the settings it sets.
+static void mergeSurfaceGlassSettings(SSurfaceGlassSettings& target, const SSurfaceGlassSettings& overrides) {
+    const auto take = [](auto& field, const auto& value) {
+        if (value)
+            field = value;
+    };
+    take(target.preset, overrides.preset);
+    take(target.maskMode, overrides.maskMode);
+    take(target.maskThreshold, overrides.maskThreshold);
+    take(target.maskFeather, overrides.maskFeather);
+    take(target.shape, overrides.shape);
+    take(target.liveResample, overrides.liveResample);
+    take(target.enabled, overrides.enabled);
 }
 
 void commitPendingLayers() {
@@ -946,18 +997,9 @@ void commitPendingLayers() {
             g_pGlobalState->layerNamespaceExclude.insert(entry.ns);
         } else {
             g_pGlobalState->layerNamespaceFilter.insert(entry.ns);
-            if (!entry.preset.empty())
-                g_pGlobalState->layerNamespacePresets[entry.ns] = entry.preset;
-            if (entry.maskThreshold >= 0.0f)
-                g_pGlobalState->layerNamespaceMaskThresholds[entry.ns] = entry.maskThreshold;
-            if (entry.maskFeather >= 0.0f)
-                g_pGlobalState->layerNamespaceMaskFeathers[entry.ns] = entry.maskFeather;
-            if (entry.liveResample >= 0)
-                g_pGlobalState->layerNamespaceLiveResample[entry.ns] = entry.liveResample != 0;
-            if (entry.maskMode)
-                g_pGlobalState->layerNamespaceMaskModes[entry.ns] = *entry.maskMode;
-            if (entry.shape)
-                g_pGlobalState->layerNamespaceShapes[entry.ns] = *entry.shape;
+            auto& settings = g_pGlobalState->layerNamespaceSettings[entry.ns];
+            mergeSurfaceGlassSettings(settings.surface, entry.surface);
+            mergeSurfaceGlassSettings(settings.popups, entry.popups);
         }
     }
     s_pendingLayers.clear();
@@ -981,6 +1023,15 @@ void validateConfig() {
     if (!parseLayerMaskMode(maskMode)) {
         HyprlandAPI::addNotificationV2(PHANDLE, {
             {"text", std::string("[hyprglass] Invalid layers.mask_mode '") + std::string(maskMode) + "', expected 'auto', 'alpha', 'region' or 'contour'. Falling back to 'auto'."},
+            {"time", (uint64_t)5000},
+            {"color", CHyprColor{1.0, 0.8, 0.2, 1.0}},
+        });
+    }
+
+    const auto popupMaskMode = readStringConfig(config.layersPopups.maskMode);
+    if (!popupMaskMode.empty() && !parseLayerMaskMode(popupMaskMode)) {
+        HyprlandAPI::addNotificationV2(PHANDLE, {
+            {"text", std::string("[hyprglass] Invalid layers.popups.mask_mode '") + std::string(popupMaskMode) + "', expected '', 'auto', 'alpha', 'region' or 'contour'. Using the layer's mask mode."},
             {"time", (uint64_t)5000},
             {"color", CHyprColor{1.0, 0.8, 0.2, 1.0}},
         });
@@ -1020,6 +1071,47 @@ bool anySelfSampleConfigured(const SPluginConfig& config, const std::unordered_m
     }
 
     return false;
+}
+
+SSurfaceGlassSettings globalLayerSettings(const SPluginConfig& config, bool popups) {
+    // "" and negative values (the popups' -1) leave the level unset
+    const auto name = [](const StringConfigPtr& pointer) -> std::optional<std::string> {
+        const auto value = readStringConfig(pointer);
+        return value.empty() ? std::nullopt : std::optional<std::string>(value);
+    };
+    const auto amount = [](Config::FLOAT* const* pointer) -> std::optional<float> {
+        if (!pointer || !*pointer || !std::isfinite(**pointer) || **pointer < 0.0f)
+            return std::nullopt;
+        return **pointer;
+    };
+    const auto flag = [](Config::BOOL* const* pointer) -> std::optional<bool> {
+        if (!pointer || !*pointer)
+            return std::nullopt;
+        return **pointer;
+    };
+
+    SSurfaceGlassSettings settings;
+    if (popups) {
+        const auto& source     = config.layersPopups;
+        settings.enabled       = flag(source.enabled);
+        settings.preset        = name(source.preset);
+        settings.maskMode      = parseLayerMaskMode(readStringConfig(source.maskMode));
+        settings.maskThreshold = amount(source.maskThreshold);
+        settings.maskFeather   = amount(source.maskFeather);
+    } else {
+        settings.preset        = name(config.layersPreset);
+        settings.maskMode      = parseLayerMaskMode(readStringConfig(config.layersMaskMode));
+        settings.maskThreshold = amount(config.layersMaskThreshold);
+        settings.maskFeather   = amount(config.layersMaskFeather);
+        settings.liveResample  = flag(config.layersLiveResample);
+    }
+    return settings;
+}
+
+bool anyPopupGlassConfigured(const SPluginConfig& config, const std::unordered_map<std::string, SLayerNamespaceSettings>& namespaceSettings) {
+    if (globalLayerSettings(config, true).enabled.value_or(false))
+        return true;
+    return std::ranges::any_of(namespaceSettings, [](const auto& entry) { return entry.second.popups.enabled.value_or(false); });
 }
 
 // ── Preset-aware resolution ──────────────────────────────────────────────────

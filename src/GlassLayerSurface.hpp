@@ -4,16 +4,43 @@
 #include "GlassRenderer.hpp"
 #include "PluginConfig.hpp"
 
+#include <array>
 #include <chrono>
 #include <optional>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/desktop/view/Popup.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprutils/math/Region.hpp>
 
 class CGlassLayerSurface {
   public:
-    explicit CGlassLayerSurface(PHLLS layerSurface);
+    // What the glass sits behind: the layer surface itself, or one of the popups Hyprland
+    // draws for it in its separate popups pass.
+    enum class ETarget { SURFACE, POPUP };
+
+    // No popup: the glass of the layer surface itself.
+    explicit CGlassLayerSurface(PHLLS layerSurface, WP<Desktop::View::CPopup> popup = {});
     ~CGlassLayerSurface();
+
+    [[nodiscard]] ETarget target() const { return m_target; }
+
+    // POPUP: the popup, nullptr once it is gone. CPopup is shared-owned, so locking it is safe.
+    [[nodiscard]] SP<Desktop::View::CPopup> popup() const;
+
+    // The glass box in global-logical coordinates, the family BackgroundDamageObserver's
+    // damagedBox uses. Nullopt: nothing to glass (popup not drawn, layer or popup gone).
+    [[nodiscard]] std::optional<CBox> globalBox() const;
+
+    // globalBox() in monitor-local framebuffer pixels: the box every sample, mask and
+    // composite of this state is computed in.
+    [[nodiscard]] std::optional<CBox> pixelBox(PHLMONITOR monitor) const;
+
+    // pixelBox() padded in monitor-local logical coordinates: the boundingBox() of both pass elements.
+    [[nodiscard]] std::optional<CBox> paddedLogicalBox(PHLMONITOR monitor) const;
+
+    // The surface draws what this glass shows on top (the layer's surface tree, or its popup's),
+    // so its commits are content, not background.
+    [[nodiscard]] bool ownsContentSurface(const SP<CWLSurfaceResource>& surface) const;
 
     // Where the glass mask for this layer comes from this frame. CONTOUR cuts like
     // ALPHA_THRESHOLD and also traces the outline for the edge (see Contour.hpp).
@@ -22,8 +49,8 @@ class CGlassLayerSurface {
     // Phase 1 (pre-surface): sample+blur background, redirect currentFB → temp FBO
     void sampleAndRedirect(Render::CRenderContext& ctx, PHLMONITOR monitor, float alpha, bool xray);
 
-    // Resolved once per frame where the pass element is queued. Never for a
-    // background or bottom layer: they render before the snapshot is taken.
+    // Resolved once per frame where the pass element is queued. Never for the surface
+    // of a background or bottom layer: it renders before the snapshot is taken.
     [[nodiscard]] bool resolveXray() const;
 
     // The x-ray snapshot holds everything this layer would sample.
@@ -63,15 +90,15 @@ class CGlassLayerSurface {
     // longer drawn with contour, or is gone.
     void releaseContour() { m_contour.release(); }
 
-    // Decides ALPHA_THRESHOLD vs PROTOCOL_REGION vs NONE for this layer, based on
-    // mask_mode and the root surface's ext-background-effect-v1 state.
+    // Decides ALPHA_THRESHOLD vs PROTOCOL_REGION vs NONE for this glass, based on
+    // mask_mode and the root surface's (the layer's or the popup's) ext-background-effect-v1 state.
     [[nodiscard]] EMaskSource resolveMaskSource() const;
 
     [[nodiscard]] PHLLS getLayerSurface() const;
 
     // PROTOCOL_REGION only: the blur region's bounding box in the same
     // monitor-pixel space as layerBox/regionRects (matches transformedBlurRegion()
-    // below). layerBox is the caller's already-computed LayerGeometry::computeLayerBox()
+    // below). layerBox is the caller's already-computed pixelBox()
     // result (both call sites have one in hand; avoids recomputing it here). Used to
     // shrink the sample blit box, never the composite draw or boundingBox() (both stay
     // full-layer — see GlassLayerSurface.cpp). Nullopt when the region is empty.
@@ -87,6 +114,8 @@ class CGlassLayerSurface {
 
   private:
     PHLLSREF     m_layerSurface;
+    WP<Desktop::View::CPopup> m_popup;
+    ETarget      m_target = ETarget::SURFACE;
     SP<Render::IFramebuffer> m_sampleFramebuffer;
     SP<Render::IFramebuffer> m_surfaceTempFramebuffer;
     Vector2D     m_samplePaddingRatio;
@@ -109,7 +138,7 @@ class CGlassLayerSurface {
     // must not reuse a sample of the other.
     bool m_cachedFromSnapshot = false;
 
-    // Track last position/size to detect movement and expand damage
+    // Last globalBox() position/size, to detect movement and expand damage
     Vector2D     m_lastPosition;
     Vector2D     m_lastSize;
 
@@ -168,12 +197,44 @@ class CGlassLayerSurface {
     [[nodiscard]] std::optional<Contour::SBuildKey> contourBuildKey(PHLMONITOR monitor, const CBox& layerBox, const Vector2D& targetSize, float alpha,
                                                                     const SResolveContext& resolveContext) const;
 
-    // mask_threshold for this layer as configured: namespace entry, else layers:mask_threshold.
+    // The settings levels this glass reads, first set value wins: for a popup its own
+    // (namespace, then layers.popups), then the layer's (namespace, then layers).
+    struct SSettingsChain {
+        std::array<SSurfaceGlassSettings, 4> levels;
+        size_t                               count = 0;
+
+        template <typename T>
+        [[nodiscard]] std::optional<T> first(std::optional<T> SSurfaceGlassSettings::* field) const {
+            for (size_t i = 0; i < count; i++) {
+                if (const auto& value = levels[i].*field)
+                    return value;
+            }
+            return std::nullopt;
+        }
+    };
+    [[nodiscard]] SSettingsChain settingsChain() const;
+
+    // The root surface whose content and ext-background-effect state this glass follows.
+    [[nodiscard]] SP<Desktop::View::CWLSurface> contentRoot() const;
+    [[nodiscard]] bool                          contentMapped() const;
+    // The layer's position, size or fade (and the popup's fade) is animating.
+    [[nodiscard]] bool contentAnimating() const;
+
+    // The layer's own temp FBO, or for a popup the per-monitor one items use too (see Globals.hpp).
+    [[nodiscard]] SP<Render::IFramebuffer>& tempFramebuffer(const PHLMONITOR& monitor);
+
+    // pixelBox() the cached sample was taken at. A popup bumps no scene generation (only
+    // later popups draw over it), so this is how its own move reaches its cache.
+    std::optional<CBox> m_sampledPixelBox;
+
+    // mask_threshold and mask_feather as configured, through settingsChain().
     [[nodiscard]] float resolveMaskThreshold() const;
+    [[nodiscard]] float resolveMaskFeather() const;
 
     [[nodiscard]] bool           resolveThemeIsDark() const;
     [[nodiscard]] std::string    resolvePresetName() const;
     [[nodiscard]] ELayerMaskMode resolveMaskMode() const;
-    // hg.layer() shape for this layer; nullopt = the whole layer box
+    // hg.layer() shape of this glass (a popup's from its popups table, never the layer's);
+    // nullopt = the whole box
     [[nodiscard]] std::optional<SLayerShape> resolveShape() const;
 };

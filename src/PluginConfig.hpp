@@ -54,6 +54,23 @@ struct SLayerShape {
     float radius      = 0.0f;
 };
 
+// Layer glass settings at one level (a namespace, the global options, a layer or its popups);
+// nullopt = not set there, the next level decides.
+struct SSurfaceGlassSettings {
+    std::optional<std::string>    preset;
+    std::optional<ELayerMaskMode> maskMode;
+    std::optional<float>          maskThreshold;
+    std::optional<float>          maskFeather;
+    std::optional<SLayerShape>    shape;
+    std::optional<bool>           liveResample; // layer only
+    std::optional<bool>           enabled;      // popups only
+};
+
+struct SLayerNamespaceSettings {
+    SSurfaceGlassSettings surface;
+    SSurfaceGlassSettings popups;
+};
+
 // Instrumentation mode (plugin:hyprglass:debug:mode). Isolates the render-pass
 // cost from the GL pipeline cost for A/B measurement: hints_only skips all GL
 // work in the pass elements while keeping their boundingBox/needsLiveBlur/
@@ -133,6 +150,12 @@ inline constexpr auto LAYERS_MASK_MODE                  = "plugin:hyprglass:laye
 // Alpha mask only: alpha range above mask_threshold over which layer glass fades in; 0 keeps the hard mask.
 inline constexpr auto LAYERS_MASK_FEATHER               = "plugin:hyprglass:layers:mask_feather";
 inline constexpr auto LAYERS_MANAGE_BLUR                = "plugin:hyprglass:layers:manage_blur";
+// Glass behind the popups (menus, tooltips) of glassed layers. "" and -1 take the layer's value.
+inline constexpr auto LAYERS_POPUPS_ENABLED             = "plugin:hyprglass:layers:popups:enabled";
+inline constexpr auto LAYERS_POPUPS_PRESET              = "plugin:hyprglass:layers:popups:preset";
+inline constexpr auto LAYERS_POPUPS_MASK_MODE           = "plugin:hyprglass:layers:popups:mask_mode";
+inline constexpr auto LAYERS_POPUPS_MASK_THRESHOLD      = "plugin:hyprglass:layers:popups:mask_threshold";
+inline constexpr auto LAYERS_POPUPS_MASK_FEATHER        = "plugin:hyprglass:layers:popups:mask_feather";
 
 // Subsurface item glass support (see GlassSubsurfaceState).
 // Preset resolution: subsurfaces:preset -> layers:preset (if set) -> window default preset.
@@ -389,6 +412,13 @@ struct SPluginConfig {
     StringConfigPtr         layersMaskMode;
     Config::FLOAT* const*   layersMaskFeather             = nullptr;
     Config::BOOL* const*    layersManageBlur              = nullptr;
+    struct {
+        Config::BOOL* const*  enabled = nullptr;
+        StringConfigPtr       preset;
+        StringConfigPtr       maskMode;
+        Config::FLOAT* const* maskThreshold = nullptr;
+        Config::FLOAT* const* maskFeather   = nullptr;
+    } layersPopups;
 
     Config::BOOL* const*    subsurfacesEnabled = nullptr;
     StringConfigPtr         subsurfacesPreset;
@@ -429,6 +459,14 @@ struct SResolveContext {
 // unarmed on the default config.
 [[nodiscard]] bool anySelfSampleConfigured(const SPluginConfig&                                  config,
                                            const std::unordered_map<std::string, SCustomPreset>& customPresets);
+
+// The layers (popups = false) or layers.popups options as one settings level. Read on every
+// call: `hyprctl eval` changes the values without a reload.
+[[nodiscard]] SSurfaceGlassSettings globalLayerSettings(const SPluginConfig& config, bool popups);
+
+// True when layers.popups.enabled or any hg.layer popups block turns popup glass on.
+[[nodiscard]] bool anyPopupGlassConfigured(const SPluginConfig&                                            config,
+                                           const std::unordered_map<std::string, SLayerNamespaceSettings>& namespaceSettings);
 
 void registerConfig(HANDLE handle);
 void initConfigPointers(HANDLE handle, SPluginConfig& config);

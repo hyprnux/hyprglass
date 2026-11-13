@@ -137,12 +137,6 @@ namespace {
         });
     }
 
-    bool surfaceInTree(const SP<CWLSurfaceResource>& surface, const SP<CWLSurfaceResource>& root) {
-        if (!root)
-            return false;
-        return root->findFirstPreorder([&surface](SP<CWLSurfaceResource> candidate) { return candidate == surface; }) != nullptr;
-    }
-
     // A contour layer's outline was traced from its own content: a commit that changes that
     // content makes it stale. Unconditional like damageSelfSamplingWindow(): it has nothing to
     // do with live resample, only with what the layer itself draws.
@@ -159,11 +153,11 @@ namespace {
                 continue;
 
             const auto layer = state->getLayerSurface();
-            if (!layer || !layer->mapped() || !layer->wlSurface())
+            if (!layer || !layer->mapped())
                 continue;
 
-            // the layer's own surfaces, not its popups: those are not in what the field was traced from
-            if (surfaceInTree(resource, layer->wlSurface()->resource()))
+            // only the surfaces the field was traced from: the layer's tree, or its popup's
+            if (state->ownsContentSurface(resource))
                 state->markContourContentChanged();
         }
     }
@@ -184,7 +178,7 @@ namespace {
 
         // cheap skip when nothing can want a live resample
         const bool layersWantLive  = (config.layersLiveResample && **config.layersLiveResample) ||
-            std::ranges::any_of(g_pGlobalState->layerNamespaceLiveResample, [](const auto& kv) { return kv.second; });
+            std::ranges::any_of(g_pGlobalState->layerNamespaceSettings, [](const auto& entry) { return entry.second.surface.liveResample.value_or(false); });
         const bool windowsWantLive = config.windowsLiveResample && **config.windowsLiveResample;
         if (!layersWantLive && !windowsWantLive)
             return;
@@ -258,16 +252,18 @@ namespace {
                 // be marked dirty.
                 sampleBox.expand(GlassRenderer::SAMPLE_PADDING_PX / monScale);
             } else {
-                sampleBox = CBox{layer->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT),
-                                  layer->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
+                const auto glassBox = state->globalBox();
+                if (!glassBox)
+                    continue; // popup not drawn: nothing sampled
+                sampleBox = *glassBox;
                 sampleBox.expand(GlassRenderer::SAMPLE_PADDING_PX / monScale);
             }
 
             if (!sampleBox.overlaps(damagedBox))
                 continue;
 
-            // a layer's own content is not its background
-            if (surfaceInTree(resource, layer->wlSurface() ? layer->wlSurface()->resource() : nullptr))
+            // what the glass draws on top is not its background
+            if (state->ownsContentSurface(resource))
                 continue;
 
             state->markBackgroundDirty();

@@ -183,13 +183,13 @@ void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMO
 
     DRMFormat tempFormat = monitor->useFP16() ? source->m_drmFormat : DRM_FORMAT_ARGB8888;
 
-    // One shared FBO per monitor for every item on it this frame (see
+    // One shared FBO per monitor for every item and layer popup on it this frame (see
     // Globals.hpp), not one per item — items on a monitor are visited
     // serially (see main.cpp's hkRenderPassAdd), so redirect -> surface draw
     // -> composite -> next item never overlaps and reuse here is safe.
-    auto& sharedFB = g_pGlobalState->subsurfaceTempFramebuffers[monitorId];
+    auto& sharedFB = g_pGlobalState->sharedTempFramebuffers[monitorId];
     if (!sharedFB)
-        sharedFB = g_pHyprRenderer->createFB("hyprglass-subsurface-temp");
+        sharedFB = g_pHyprRenderer->createFB("hyprglass-shared-temp");
 
     if (sharedFB->m_size.x != monitorWidth || sharedFB->m_size.y != monitorHeight || sharedFB->m_drmFormat != tempFormat)
         sharedFB->alloc(monitorWidth, monitorHeight, tempFormat);
@@ -246,7 +246,7 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
 
     float roundingPower = 2.0f;
 
-    auto& sharedFB    = g_pGlobalState->subsurfaceTempFramebuffers[monitor->m_id];
+    auto& sharedFB    = g_pGlobalState->sharedTempFramebuffers[monitor->m_id];
     int monitorWidth  = static_cast<int>(sharedFB->m_size.x);
     int monitorHeight = static_cast<int>(sharedFB->m_size.y);
 

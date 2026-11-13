@@ -417,6 +417,16 @@ std::string formatStatus(IPC::Socket1::eOutputFormat format) {
     if (subsurfaces.active() && !windows.active())
         subsurfaces.reason = "window_glass_off";
 
+    // Popup glass rides on layer glass and on the CRenderPass::add hook.
+    SFeatureStatus popups;
+    popups.enabled = anyPopupGlassConfigured(config, g_pGlobalState->layerNamespaceSettings);
+    if (!popups.enabled)
+        popups.reason = "disabled";
+    else if (!layers.active())
+        popups.reason = layers.reason == "disabled" ? "layers_off" : layers.reason;
+    else if (!g_pGlobalState->renderPassAddHook)
+        popups.reason = "hook_missing";
+
     const bool active = windows.active() || layers.active() || subsurfaces.active();
 
     if (format == IPC::Socket1::eOutputFormat::FORMAT_JSON) {
@@ -425,9 +435,9 @@ std::string formatStatus(IPC::Socket1::eOutputFormat format) {
                                status.active() ? std::string("null") : std::format("\"{}\"", status.reason));
         };
         return std::format("{{\n  \"schema\": {}, \"version\": \"{}\", \"versionCheck\": \"{}\", \"active\": {}, \"shaders\": \"{}\", \"itemProtocol\": {},\n"
-                           "  \"features\": {{\n    \"windows\": {},\n    \"layers\": {},\n    \"subsurfaces\": {}\n  }}\n}}\n",
+                           "  \"features\": {{\n    \"windows\": {},\n    \"layers\": {},\n    \"popups\": {},\n    \"subsurfaces\": {}\n  }}\n}}\n",
                            STATUS_SCHEMA, escapeJSONStrings(std::string(PLUGIN_VERSION)), g_pGlobalState->versionCheck, active ? "true" : "false", shaders,
-                           protocolActive ? "true" : "false", featureJson(windows), featureJson(layers), featureJson(subsurfaces));
+                           protocolActive ? "true" : "false", featureJson(windows), featureJson(layers), featureJson(popups), featureJson(subsurfaces));
     }
 
     auto featureText = [](const SFeatureStatus& status) {
@@ -443,7 +453,7 @@ std::string formatStatus(IPC::Socket1::eOutputFormat format) {
     std::string out = std::format("hyprglass {}: {}\n", PLUGIN_VERSION, active ? "active" : "inactive");
     out += std::format("  version check: {}\n", g_pGlobalState->versionCheck);
     out += std::format("  shaders: {}\n", shaders);
-    out += std::format("  windows: {}   layers: {}   subsurfaces: {}\n", featureText(windows), featureText(layers), featureText(subsurfaces));
+    out += std::format("  windows: {}   layers: {}   popups: {}   subsurfaces: {}\n", featureText(windows), featureText(layers), featureText(popups), featureText(subsurfaces));
     out += std::format("  hyprglass_item_v1 protocol: {}\n", protocolActive ? "active" : "inactive");
     return out;
 }
