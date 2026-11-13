@@ -152,7 +152,7 @@ void CGlassSubsurfaceState::sampleAndRedirect(Render::CRenderContext& ctx, PHLMO
         float blurStrength = resolvePresetFloat(resolveContext, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
         int   downscale    = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-        GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, source, pixelBox, m_samplePaddingRatio, downscale);
+        GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, source, pixelBox, m_sampleMap, downscale);
 
         float blurRadius     = blurStrength * 12.0f / downscale;
         int   blurIterations = std::clamp(static_cast<int>(resolvePresetInt(resolveContext, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
@@ -353,7 +353,7 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
     GlassRenderer::applyGlassEffect(ctx,
                                      m_sampleFramebuffer, target,
                                      pixelBox, alpha,
-                                     radii, roundingPower, m_samplePaddingRatio, resolveContext,
+                                     radii, roundingPower, m_sampleMap, resolveContext,
                                      &maskInfo);
 
     // Record the box/radii/roundingPower/preset already computed above for

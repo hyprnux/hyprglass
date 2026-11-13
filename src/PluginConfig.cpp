@@ -865,16 +865,17 @@ static void readSurfaceGlassSettings(lua_State* L, int tableIdx, const std::stri
     }
     lua_pop(L, 1);
 
+    // Past 1 neither changes what is drawn (no alpha exceeds 1); the bound keeps them in float range.
     lua_getfield(L, tableIdx, "mask_threshold");
     if (const auto value = luaFiniteNumber(L, -1); value && *value >= 0.0)
-        settings.maskThreshold = static_cast<float>(*value);
+        settings.maskThreshold = static_cast<float>(std::min(*value, 1.0));
     else if (!lua_isnil(L, -1))
         typeError("mask_threshold", "a finite number, 0 or more");
     lua_pop(L, 1);
 
     lua_getfield(L, tableIdx, "mask_feather");
     if (const auto value = luaFiniteNumber(L, -1); value && *value >= 0.0)
-        settings.maskFeather = static_cast<float>(*value);
+        settings.maskFeather = static_cast<float>(std::min(*value, 1.0));
     else if (!lua_isnil(L, -1))
         typeError("mask_feather", "a finite number, 0 or more");
     lua_pop(L, 1);

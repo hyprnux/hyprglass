@@ -118,7 +118,7 @@ class CGlassLayerSurface {
     ETarget      m_target = ETarget::SURFACE;
     SP<Render::IFramebuffer> m_sampleFramebuffer;
     SP<Render::IFramebuffer> m_surfaceTempFramebuffer;
-    Vector2D     m_samplePaddingRatio;
+    GlassRenderer::SSampleMap m_sampleMap;
     bool         m_hasCachedSample = false;
     bool         m_backgroundDirty = false;
     std::chrono::steady_clock::time_point m_lastDirtyMark{};

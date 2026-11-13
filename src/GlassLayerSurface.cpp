@@ -494,7 +494,7 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
         float blurStrength   = resolvePresetFloat(resolveContext, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
         int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-        GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, xray ? snapshot : source, sampleBox, m_samplePaddingRatio, downscale);
+        GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, xray ? snapshot : source, sampleBox, m_sampleMap, downscale);
         // only here: a deferred or cached frame keeps compositing the old texture
         m_cachedRegionSampleBox = regionSampleBox;
         m_sampledPixelBox       = *layerBox;
@@ -573,6 +573,13 @@ float CGlassLayerSurface::resolveMaskFeather() const {
 std::optional<Contour::SBuildKey> CGlassLayerSurface::contourBuildKey(PHLMONITOR monitor, const CBox& layerBox, const Vector2D& targetSize, float alpha,
                                                                       const SResolveContext& resolveContext) const {
     if (!monitor)
+        return std::nullopt;
+
+    // makePlan() refuses any box past this size; a client-sized box past it, or that far off
+    // the screen, must not reach the int conversions below.
+    constexpr double LARGEST_FIELD_BOX = static_cast<double>(Contour::MAX_FIELD_SIDE) * Contour::MAX_DIVISOR;
+    if (!(layerBox.w <= LARGEST_FIELD_BOX && layerBox.h <= LARGEST_FIELD_BOX && std::abs(layerBox.x) <= LARGEST_FIELD_BOX &&
+          std::abs(layerBox.y) <= LARGEST_FIELD_BOX))
         return std::nullopt;
 
     const int   boxWidth  = static_cast<int>(layerBox.w);
@@ -818,6 +825,6 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
                                      m_sampleFramebuffer, target,
                                      box, alpha,
                                      std::array<float, 4>{cornerRadius, cornerRadius, cornerRadius, cornerRadius},
-                                     roundingPower, m_samplePaddingRatio, resolveContext,
+                                     roundingPower, m_sampleMap, resolveContext,
                                      &maskInfo);
 }

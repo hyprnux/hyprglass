@@ -77,7 +77,7 @@ class CGlassSubsurfaceState {
     WP<CWLSurfaceResource>   m_surface;
     PHLWINDOWREF             m_window;
     SP<Render::IFramebuffer> m_sampleFramebuffer; // box-sized, per-item (small)
-    Vector2D                 m_samplePaddingRatio;
+    GlassRenderer::SSampleMap m_sampleMap;
     bool                     m_hasCachedSample = false;
 
     // The pixelBox the cached sample was taken at, to force a resample when the item itself moves
