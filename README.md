@@ -41,6 +41,7 @@ hl.plugin.load("/path/to/hyprglass.so")
 git clone https://github.com/hyprnux/hyprglass && cd hyprglass
 git checkout hyprland-0.57   # branch of your Hyprland version; stay on main for hyprland-git
 make
+make test   # optional, needs no Hyprland
 hyprctl plugin load $(pwd)/hyprglass.so
 ```
 
