@@ -153,7 +153,7 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 | `vibrancy` | float | — | `0.15` | `0.12` | Selective saturation boost |
 | `vibrancy_darkness` | float | — | `0.0` | `0.0` | Holds vibrancy back in dark areas: 0 boosts everywhere, 1 leaves black untouched, above 1 desaturates dark areas |
 | `adaptive_dim` | float | — | `0.4` | `0.0` | Dims bright areas behind the glass (white is white 0 -to- 1 white becomes black) |
-| `adaptive_boost` | float | — | `0.0` | `0.4` | Boosts dark areas behind the glass (black is black 0 -to- 1 black becomes white) |
+| `adaptive_boost` | float | — | `0.0` | `0.4` | Boosts dark areas behind the glass (0 black stays black, 1 black becomes grey, 2 white) |
 
 `—` in Global Default = falls through to per-theme default. `—` in Dark/Light = inherits global value.
 
