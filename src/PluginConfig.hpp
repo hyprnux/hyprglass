@@ -173,6 +173,9 @@ inline constexpr auto WINDOWS_BACKGROUND_CACHE  = "plugin:hyprglass:windows:back
 inline constexpr auto WINDOWS_LIVE_RESAMPLE     = "plugin:hyprglass:windows:live_resample";
 inline constexpr auto WINDOWS_LIVE_RESAMPLE_FPS = "plugin:hyprglass:windows:live_resample_fps";
 
+// Socket2 line on every floating window move or resize (GeometryEvents).
+inline constexpr auto EVENTS_GEOMETRY = "plugin:hyprglass:events:geometry";
+
 // Overridable — dark theme overrides
 inline constexpr auto DARK_BLUR_STRENGTH        = "plugin:hyprglass:dark:blur_strength";
 inline constexpr auto DARK_BLUR_ITERATIONS      = "plugin:hyprglass:dark:blur_iterations";
@@ -427,6 +430,8 @@ struct SPluginConfig {
     Config::BOOL* const*    windowsBackgroundCache = nullptr;
     Config::BOOL* const*    windowsLiveResample    = nullptr;
     Config::INTEGER* const* windowsLiveResampleFps = nullptr;
+
+    Config::BOOL* const* eventsGeometry = nullptr;
 
     SOverridableConfig global;
     SOverridableConfig dark;

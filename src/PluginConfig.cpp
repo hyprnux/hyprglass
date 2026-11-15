@@ -106,6 +106,8 @@ void registerConfig(HANDLE handle) {
     addConfigValue<Config::Values::Bool>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE, true);
     addConfigValue<Config::Values::Int>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE_FPS, Config::INTEGER{30});
 
+    addConfigValue<Config::Values::Bool>(handle, ConfigKeys::EVENTS_GEOMETRY, true);
+
     // Global level — real defaults for effect settings,
     // sentinel for theme-sensitive settings (fallback to hardcoded theme defaults)
     addConfigValue<Config::Values::Float>(handle, ConfigKeys::BLUR_STRENGTH, Config::FLOAT{GlobalDefaults::BLUR_STRENGTH});
@@ -347,6 +349,8 @@ void initConfigPointers(HANDLE handle, SPluginConfig& config) {
     config.windowsBackgroundCache = getStaticPtr<Config::BOOL>(handle, ConfigKeys::WINDOWS_BACKGROUND_CACHE);
     config.windowsLiveResample    = getStaticPtr<Config::BOOL>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE);
     config.windowsLiveResampleFps = getStaticPtr<Config::INTEGER>(handle, ConfigKeys::WINDOWS_LIVE_RESAMPLE_FPS);
+
+    config.eventsGeometry = getStaticPtr<Config::BOOL>(handle, ConfigKeys::EVENTS_GEOMETRY);
 
     initOverridablePointers(handle, config.global,
         ConfigKeys::BLUR_STRENGTH, ConfigKeys::BLUR_ITERATIONS, ConfigKeys::NOISE_STRENGTH,

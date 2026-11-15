@@ -107,6 +107,7 @@ hyprctl getoption plugin:hyprglass:layers:enabled   # "set: true" once your valu
 | `blur_fold` | bool | `true` | Fewer blur passes with an identical look. Set to `false` to always run `blur_iterations` passes at the configured radius. |
 | `default_theme` | string | `dark` | Default theme: `dark` or `light` |
 | `default_preset` | string | `default` | Default preset name |
+| `events.geometry` | bool | `true` | Send `hyprglass>>geometry,ADDRESS,X,Y,W,H` on socket2 each time a floating window moves or resizes. Set to `false` if nothing reads it. |
 
 ### Overridable settings
 

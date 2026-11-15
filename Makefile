@@ -27,7 +27,7 @@ ifneq ($(shell $(CXX) --version 2>/dev/null | grep -c 'Free Software Foundation'
 endif
 
 TARGET = hyprglass.so
-SOURCES = src/main.cpp src/LoadGuard.cpp src/GlassDecoration.cpp src/GlassPassElement.cpp src/GlassRenderer.cpp src/GlassLayerSurface.cpp src/GlassLayerPassElement.cpp src/GlassLayerCompositeElement.cpp src/BackgroundDamageObserver.cpp src/PluginConfig.cpp src/ShaderManager.cpp src/Diagnostics.cpp src/GlassSubsurfaceState.cpp src/GlassSubsurfacePassElement.cpp src/GlassSubsurfaceCompositeElement.cpp src/ItemHints.cpp src/MemfdLoad.cpp src/GlassSnapshotElement.cpp src/Frost.cpp src/Contour.cpp
+SOURCES = src/main.cpp src/LoadGuard.cpp src/GlassDecoration.cpp src/GlassPassElement.cpp src/GlassRenderer.cpp src/GlassLayerSurface.cpp src/GlassLayerPassElement.cpp src/GlassLayerCompositeElement.cpp src/BackgroundDamageObserver.cpp src/PluginConfig.cpp src/ShaderManager.cpp src/Diagnostics.cpp src/GlassSubsurfaceState.cpp src/GlassSubsurfacePassElement.cpp src/GlassSubsurfaceCompositeElement.cpp src/ItemHints.cpp src/MemfdLoad.cpp src/GlassSnapshotElement.cpp src/Frost.cpp src/Contour.cpp src/GeometryEvents.cpp
 OBJ = $(SOURCES:.cpp=.o)
 HEADERS = $(wildcard src/*.hpp)
 

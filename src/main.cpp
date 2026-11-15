@@ -1,5 +1,6 @@
 #include "BackgroundDamageObserver.hpp"
 #include "Diagnostics.hpp"
+#include "GeometryEvents.hpp"
 #include "GlassDecoration.hpp"
 #include "GlassLayerCompositeElement.hpp"
 #include "GlassLayerPassElement.hpp"
@@ -959,6 +960,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen(
         [](Event::SRenderStageEvent event) { onRenderStage(event); }));
+
+    // Every moved or resized window damages a frame, so the frame's first stage sees the change.
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen(
+        [](Event::SRenderStageEvent event) {
+            if (event.stage != RENDER_PRE)
+                return;
+            const auto& config = g_pGlobalState->config;
+            if (config.eventsGeometry && **config.eventsGeometry)
+                GeometryEvents::scan();
+            else
+                GeometryEvents::clear();
+        }));
 
     // Render-order fingerprint: restart the running hash at RENDER_BEGIN with the
     // monitor's fade-outs, then at RENDER_LAST_MOMENT compare it to last frame's and
