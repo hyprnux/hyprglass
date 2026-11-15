@@ -585,14 +585,15 @@ void applyGlassEffect(Render::CRenderContext& ctx,
     glUniform1f(uniforms.lensMaxPx, lensDistortionValue * minDimensionPx * 0.006f);
 
     // inf * 0 at a square lens corner would give NaN offsets
-    const float refractionStrengthValue = resolvePresetFloat(resolveContext, &SPresetValues::refractionStrength, &SOverridableConfig::refractionStrength);
+    const float refractionStrengthValue = resolvePresetFloat(
+        resolveContext, &SPresetValues::refractionStrength, &SOverridableConfig::refractionStrength, GlobalDefaults::REFRACTION_STRENGTH);
     glUniform1f(uniforms.refractionStrength,  std::isfinite(refractionStrengthValue) ? refractionStrengthValue : 0.0f);
     glUniform1f(uniforms.noiseStrength,       resolvePresetFloat(resolveContext, &SPresetValues::noiseStrength, &SOverridableConfig::noiseStrength));
     glUniform1f(uniforms.chromaticAberration, resolvePresetFloat(resolveContext, &SPresetValues::chromaticAberration, &SOverridableConfig::chromaticAberration));
     glUniform1f(uniforms.fresnelStrength,     resolvePresetFloat(resolveContext, &SPresetValues::fresnelStrength, &SOverridableConfig::fresnelStrength));
     glUniform1f(uniforms.specularStrength,    resolvePresetFloat(resolveContext, &SPresetValues::specularStrength, &SOverridableConfig::specularStrength));
     glUniform1f(uniforms.specularAngle,       resolvePresetFloat(resolveContext, &SPresetValues::specularAngle, &SOverridableConfig::specularAngle));
-    glUniform1f(uniforms.glassOpacity,        resolvePresetFloat(resolveContext, &SPresetValues::glassOpacity, &SOverridableConfig::glassOpacity) * alpha);
+    glUniform1f(uniforms.glassOpacity,        resolvePresetFloat(resolveContext, &SPresetValues::glassOpacity, &SOverridableConfig::glassOpacity, GlobalDefaults::GLASS_OPACITY) * alpha);
     glUniform1f(uniforms.edgeThickness,       edgeThicknessValue);
     glUniform1f(uniforms.lensDistortion,      lensDistortionValue);
     glUniform1f(uniforms.refractionFlow,      resolvePresetFloat(resolveContext, &SPresetValues::refractionFlow, &SOverridableConfig::refractionFlow));
@@ -641,7 +642,7 @@ void applyGlassEffect(Render::CRenderContext& ctx,
 
     uploadThemeUniforms(resolveContext, program);
 
-    const int64_t tintColorValue = resolvePresetInt(resolveContext, &SPresetValues::tintColor, &SOverridableConfig::tintColor);
+    const int64_t tintColorValue = resolvePresetInt(resolveContext, &SPresetValues::tintColor, &SOverridableConfig::tintColor, GlobalDefaults::TINT_COLOR);
     glUniform3f(uniforms.tintColor,
         static_cast<float>((tintColorValue >> 24) & 0xFF) / 255.0f,
         static_cast<float>((tintColorValue >> 16) & 0xFF) / 255.0f,

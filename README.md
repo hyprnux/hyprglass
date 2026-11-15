@@ -158,6 +158,8 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 
 `—` in Global Default = falls through to per-theme default. `—` in Dark/Light = inherits global value.
 
+A negative value means "not set": the next level applies. For an angle, write `270`, not `-90`.
+
 Ranges in parentheses are the usual span, not limits: only `blur_iterations`, `self_sample`, `focus_light`, `frost`, `fresnel_reflection`, `edge_thickness_px` (at most half the smaller side) and `edge_height` (at most 500) are clamped, and the built-in presets go past some of them (`glass` uses `refraction_strength = 8.0`).
 
 #### Self sampling
