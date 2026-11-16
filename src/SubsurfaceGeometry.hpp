@@ -42,7 +42,7 @@ namespace SubsurfaceGeometry {
 // itemLogicalBox: CSurfacePassElement::getTexBox(), unmodified. Padded for the
 // IPassElement::boundingBox() contract (monitor-local logical, pre-scale) so the
 // render pass's damage expansion (needsLiveBlur) re-renders the desktop under
-// the item before we sample it — mirrors LayerGeometry::computePaddedLogicalLayerBox().
+// the item before we sample it — mirrors LayerGeometry::toPaddedLogicalBox().
 [[nodiscard]] inline std::optional<CBox> toPaddedLogicalBox(CBox itemLogicalBox, PHLMONITOR monitor, float paddingPx) {
     if (!monitor)
         return std::nullopt;

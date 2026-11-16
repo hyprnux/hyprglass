@@ -43,22 +43,42 @@ CBox SSampleMap::toSample(const CBox& framebufferBox) const {
                 framebufferBox.width * scaleX, framebufferBox.height * scaleY};
 }
 
-SSampleMap sampleMapFor(const CBox& box, int downscale) {
+SSampleMap sampleMapFor(const CBox& box, const Vector2D& framebufferSize, int downscale) {
+    // Only the part of the box on the framebuffer has pixels to sample. The box's size is
+    // the client's choice and can exceed any texture size the GPU accepts. A non-finite
+    // coordinate lands on a bound, never in an int conversion.
+    const auto bounded = [](double value, double low, double high) { return value > low ? std::min(value, high) : low; };
+    const double left   = bounded(box.x, 0.0, framebufferSize.x);
+    const double top    = bounded(box.y, 0.0, framebufferSize.y);
+    const double right  = bounded(box.x + box.width, left, framebufferSize.x);
+    const double bottom = bounded(box.y + box.height, top, framebufferSize.y);
+    // The size never follows the position, or a box crossing an edge would reallocate its
+    // sample every frame: the box moved inside the framebuffer, padded.
+    const double width  = bounded(box.width, 0.0, framebufferSize.x);
+    const double height = bounded(box.height, 0.0, framebufferSize.y);
+
     SSampleMap map;
-    map.fullWidth  = static_cast<int>(box.width) + 2 * SAMPLE_PADDING_PX;
-    map.fullHeight = static_cast<int>(box.height) + 2 * SAMPLE_PADDING_PX;
+    map.fullWidth  = static_cast<int>(width) + 2 * SAMPLE_PADDING_PX;
+    map.fullHeight = static_cast<int>(height) + 2 * SAMPLE_PADDING_PX;
+    map.srcX0      = static_cast<int>(bounded(box.x, 0.0, framebufferSize.x - width)) - SAMPLE_PADDING_PX;
+    map.srcY0      = static_cast<int>(bounded(box.y, 0.0, framebufferSize.y - height)) - SAMPLE_PADDING_PX;
+    map.srcX1      = map.srcX0 + map.fullWidth;
+    map.srcY1      = map.srcY0 + map.fullHeight;
+    map.readX0     = std::max(map.srcX0, static_cast<int>(left) - SAMPLE_PADDING_PX);
+    map.readY0     = std::max(map.srcY0, static_cast<int>(top) - SAMPLE_PADDING_PX);
+    map.readX1     = std::min(map.srcX1, static_cast<int>(right) + SAMPLE_PADDING_PX);
+    map.readY1     = std::min(map.srcY1, static_cast<int>(bottom) + SAMPLE_PADDING_PX);
 
     // Reduced resolution when blur is strong enough to hide it.
     // Weak blur at half-res shows pixelation.
     map.width  = std::max(1, map.fullWidth / downscale);
     map.height = std::max(1, map.fullHeight / downscale);
-
-    map.srcX0  = static_cast<int>(box.x) - SAMPLE_PADDING_PX;
-    map.srcY0  = static_cast<int>(box.y) - SAMPLE_PADDING_PX;
-    map.srcX1  = static_cast<int>(box.x + box.width) + SAMPLE_PADDING_PX;
-    map.srcY1  = static_cast<int>(box.y + box.height) + SAMPLE_PADDING_PX;
     map.scaleX = static_cast<float>(map.width) / map.fullWidth;
     map.scaleY = static_cast<float>(map.height) / map.fullHeight;
+
+    // the glass quad still spans the whole box
+    map.uvScale  = {box.width / map.fullWidth, box.height / map.fullHeight};
+    map.uvOffset = {(box.x - map.srcX0) / map.fullWidth, (box.y - map.srcY0) / map.fullHeight};
     return map;
 }
 
@@ -79,10 +99,13 @@ bool damageCoversBox(const CBox& box, const SP<Render::IFramebuffer>& framebuffe
 }
 
 bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage) {
+    if (!source)
+        return false;
+
     // The exact source rect the blit reads.
-    const auto map = sampleMapFor(box, 1);
-    return damageCoversBox(CBox{static_cast<double>(map.srcX0), static_cast<double>(map.srcY0), static_cast<double>(map.srcX1 - map.srcX0),
-                                static_cast<double>(map.srcY1 - map.srcY0)},
+    const auto map = sampleMapFor(box, source->m_size, 1);
+    return damageCoversBox(CBox{static_cast<double>(map.readX0), static_cast<double>(map.readY0), static_cast<double>(map.readX1 - map.readX0),
+                                static_cast<double>(map.readY1 - map.readY0)},
                            source, damage);
 }
 
@@ -98,23 +121,19 @@ SFoldedBlur foldBlurPasses(float radius, int iterations) noexcept {
 }
 
 void sampleBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sampleFramebuffer,
-                       SP<Render::IFramebuffer> sourceFramebuffer, CBox box, Vector2D& outPaddingRatio, int downscale) {
+                       SP<Render::IFramebuffer> sourceFramebuffer, CBox box, SSampleMap& outMap, int downscale) {
     if (!sourceFramebuffer)
         return;
 
     Diagnostics::CScopedStageTimer stageTimer(ctx, Diagnostics::EStage::SampleBackground);
 
-    const int  pad = SAMPLE_PADDING_PX;
-    const auto map = sampleMapFor(box, downscale);
-
-    int fullWidth  = map.fullWidth;
-    int fullHeight = map.fullHeight;
+    const auto map = sampleMapFor(box, sourceFramebuffer->m_size, downscale);
 
     // Full-res source pixels this call blits, before any downscale — what the
     // GPU actually reads off the source framebuffer, not the (possibly
     // half-res) destination the sample FBO ends up holding.
     if (const auto monitor = ctx.m_data.pMonitor.lock())
-        Diagnostics::recordSampledPixels(monitor->m_id, static_cast<double>(fullWidth) * static_cast<double>(fullHeight));
+        Diagnostics::recordSampledPixels(monitor->m_id, static_cast<double>(map.readX1 - map.readX0) * static_cast<double>(map.readY1 - map.readY0));
 
     int sampleWidth  = map.width;
     int sampleHeight = map.height;
@@ -127,36 +146,34 @@ void sampleBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sam
         sampleFramebuffer->m_drmFormat != sourceFramebuffer->m_drmFormat)
         sampleFramebuffer->alloc(sampleWidth, sampleHeight, sourceFramebuffer->m_drmFormat);
 
-    int srcX0 = map.srcX0;
-    int srcX1 = map.srcX1;
-    int srcY0 = map.srcY0;
-    int srcY1 = map.srcY1;
+    int srcX0 = map.readX0;
+    int srcX1 = map.readX1;
+    int srcY0 = map.readY0;
+    int srcY1 = map.readY1;
 
     // Clamp source coordinates to framebuffer bounds to avoid reading black/undefined pixels
     int framebufferWidth  = static_cast<int>(sourceFramebuffer->m_size.x);
     int framebufferHeight = static_cast<int>(sourceFramebuffer->m_size.y);
 
-    // Destination coords in downscaled FBO space
-    int dstX0 = 0, dstY0 = 0, dstX1 = sampleWidth, dstY1 = sampleHeight;
-
     // Scale destination adjustments proportionally for the downscaled FBO
     const float xScale = map.scaleX;
     const float yScale = map.scaleY;
 
-    // Tracks whether any clamp shrank the destination rect below the full FBO,
+    // Destination coords in downscaled FBO space: the read part's place in the sample
+    int dstX0 = static_cast<int>((srcX0 - map.srcX0) * xScale), dstY0 = static_cast<int>((srcY0 - map.srcY0) * yScale);
+    int dstX1 = sampleWidth - static_cast<int>((map.srcX1 - srcX1) * xScale);
+    int dstY1 = sampleHeight - static_cast<int>((map.srcY1 - srcY1) * yScale);
+
+    // Tracks whether the destination rect is smaller than the full FBO,
     // which is the only case that can leave uninitialized texels after the blit.
-    bool destinationClamped = false;
+    bool destinationClamped = dstX0 > 0 || dstY0 > 0 || dstX1 < sampleWidth || dstY1 < sampleHeight;
 
     if (srcX0 < 0) { dstX0 += static_cast<int>(-srcX0 * xScale); srcX0 = 0; destinationClamped = true; }
     if (srcY0 < 0) { dstY0 += static_cast<int>(-srcY0 * yScale); srcY0 = 0; destinationClamped = true; }
     if (srcX1 > framebufferWidth)  { dstX1 -= static_cast<int>((srcX1 - framebufferWidth) * xScale);  srcX1 = framebufferWidth; destinationClamped = true; }
     if (srcY1 > framebufferHeight) { dstY1 -= static_cast<int>((srcY1 - framebufferHeight) * yScale); srcY1 = framebufferHeight; destinationClamped = true; }
 
-    // Padding ratio is relative to the logical content area (resolution-independent)
-    outPaddingRatio = Vector2D(
-        static_cast<double>(pad) / fullWidth,
-        static_cast<double>(pad) / fullHeight
-    );
+    outMap = map;
 
     // The render pass scissors each element to its damage region.
     // That scissor state leaks here and clips glBlitFramebuffer on the
@@ -186,7 +203,7 @@ void sampleBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sam
 }
 
 void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW window,
-                      PHLMONITOR monitor, const CBox& box, int downscale, float amount, float cornerRadius, float roundingPower) {
+                      PHLMONITOR monitor, const CBox& box, const SSampleMap& map, float amount, float cornerRadius, float roundingPower) {
     if (amount <= 0.0f || !sampleFramebuffer || !window || !monitor)
         return;
 
@@ -200,11 +217,10 @@ void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& samp
     if (!root)
         return;
 
-    const auto     map    = sampleMapFor(box, downscale);
     const Vector2D fbSize = sampleFramebuffer->m_size;
 
-    // The map only describes this framebuffer if sampleBackground() sized it from the
-    // same box; otherwise boxes would project against one size and rasterise into another.
+    // The map only describes this framebuffer if sampleBackground() sized it with this
+    // map; otherwise boxes would project against one size and rasterise into another.
     if (fbSize.x != map.width || fbSize.y != map.height)
         return;
 
@@ -337,7 +353,8 @@ void blurBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer> sample
         blurTempFramebuffer->m_drmFormat != sampleFramebuffer->m_drmFormat)
         blurTempFramebuffer->alloc(width, height, sampleFramebuffer->m_drmFormat);
 
-    // An allocation that failed (out of GPU memory) leaves no texture to ping-pong through.
+    // Hyprland aborts on a framebuffer it cannot complete instead of failing here: what keeps
+    // this allocation possible is the bounded sample size (sampleMapFor()).
     if (!blurTempFramebuffer->isAllocated() || !blurTempFramebuffer->getTexture() || !sampleFramebuffer->getTexture())
         return;
 
@@ -461,7 +478,7 @@ void applyGlassEffect(Render::CRenderContext& ctx,
                        SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> targetFramebuffer,
                        const CBox& box,
                        float alpha, const std::array<float, 4>& radii, float roundingPower,
-                       const Vector2D& paddingRatio, const SResolveContext& resolveContext,
+                       const SSampleMap& sampleMap, const SResolveContext& resolveContext,
                        const SMaskInfo* mask, float focusLight, const SFrostInput* frost) {
     if (!sampleFramebuffer || !targetFramebuffer)
         return;
@@ -568,14 +585,15 @@ void applyGlassEffect(Render::CRenderContext& ctx,
     glUniform1f(uniforms.lensMaxPx, lensDistortionValue * minDimensionPx * 0.006f);
 
     // inf * 0 at a square lens corner would give NaN offsets
-    const float refractionStrengthValue = resolvePresetFloat(resolveContext, &SPresetValues::refractionStrength, &SOverridableConfig::refractionStrength);
+    const float refractionStrengthValue = resolvePresetFloat(
+        resolveContext, &SPresetValues::refractionStrength, &SOverridableConfig::refractionStrength, GlobalDefaults::REFRACTION_STRENGTH);
     glUniform1f(uniforms.refractionStrength,  std::isfinite(refractionStrengthValue) ? refractionStrengthValue : 0.0f);
     glUniform1f(uniforms.noiseStrength,       resolvePresetFloat(resolveContext, &SPresetValues::noiseStrength, &SOverridableConfig::noiseStrength));
     glUniform1f(uniforms.chromaticAberration, resolvePresetFloat(resolveContext, &SPresetValues::chromaticAberration, &SOverridableConfig::chromaticAberration));
     glUniform1f(uniforms.fresnelStrength,     resolvePresetFloat(resolveContext, &SPresetValues::fresnelStrength, &SOverridableConfig::fresnelStrength));
     glUniform1f(uniforms.specularStrength,    resolvePresetFloat(resolveContext, &SPresetValues::specularStrength, &SOverridableConfig::specularStrength));
     glUniform1f(uniforms.specularAngle,       resolvePresetFloat(resolveContext, &SPresetValues::specularAngle, &SOverridableConfig::specularAngle));
-    glUniform1f(uniforms.glassOpacity,        resolvePresetFloat(resolveContext, &SPresetValues::glassOpacity, &SOverridableConfig::glassOpacity) * alpha);
+    glUniform1f(uniforms.glassOpacity,        resolvePresetFloat(resolveContext, &SPresetValues::glassOpacity, &SOverridableConfig::glassOpacity, GlobalDefaults::GLASS_OPACITY) * alpha);
     glUniform1f(uniforms.edgeThickness,       edgeThicknessValue);
     glUniform1f(uniforms.lensDistortion,      lensDistortionValue);
     glUniform1f(uniforms.refractionFlow,      resolvePresetFloat(resolveContext, &SPresetValues::refractionFlow, &SOverridableConfig::refractionFlow));
@@ -624,7 +642,7 @@ void applyGlassEffect(Render::CRenderContext& ctx,
 
     uploadThemeUniforms(resolveContext, program);
 
-    const int64_t tintColorValue = resolvePresetInt(resolveContext, &SPresetValues::tintColor, &SOverridableConfig::tintColor);
+    const int64_t tintColorValue = resolvePresetInt(resolveContext, &SPresetValues::tintColor, &SOverridableConfig::tintColor, GlobalDefaults::TINT_COLOR);
     glUniform3f(uniforms.tintColor,
         static_cast<float>((tintColorValue >> 24) & 0xFF) / 255.0f,
         static_cast<float>((tintColorValue >> 16) & 0xFF) / 255.0f,
@@ -648,9 +666,8 @@ void applyGlassEffect(Render::CRenderContext& ctx,
     glUniform1f(uniforms.bevelColorAlpha,
         static_cast<float>(bevelColorValue & 0xFF) / 255.0f);
 
-    glUniform2f(uniforms.uvPadding,
-        static_cast<float>(paddingRatio.x),
-        static_cast<float>(paddingRatio.y));
+    glUniform2f(uniforms.texUVOffset, static_cast<float>(sampleMap.uvOffset.x), static_cast<float>(sampleMap.uvOffset.y));
+    glUniform2f(uniforms.texUVScale, static_cast<float>(sampleMap.uvScale.x), static_cast<float>(sampleMap.uvScale.y));
 
     // Layers only: enable mask and provide UV mapping from the glass quad into
     // the monitor-sized temp FBO. Windows use useMask=0 (no masking).

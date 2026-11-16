@@ -17,8 +17,83 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprutils/math/Misc.hpp>
 
-CGlassLayerSurface::CGlassLayerSurface(PHLLS layerSurface)
-    : m_layerSurface(layerSurface) {
+CGlassLayerSurface::CGlassLayerSurface(PHLLS layerSurface, WP<Desktop::View::CPopup> popup)
+    : m_layerSurface(layerSurface), m_popup(popup), m_target(popup.expired() ? ETarget::SURFACE : ETarget::POPUP) {
+}
+
+SP<Desktop::View::CPopup> CGlassLayerSurface::popup() const {
+    return m_popup.lock();
+}
+
+std::optional<CBox> CGlassLayerSurface::globalBox() const {
+    const auto layerSurface = m_layerSurface.lock();
+    if (!layerSurface)
+        return std::nullopt;
+
+    if (m_target == ETarget::POPUP)
+        return LayerGeometry::computePopupGlobalBox(layerSurface, popup());
+
+    return CBox{layerSurface->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT),
+                layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
+}
+
+SP<Desktop::View::CWLSurface> CGlassLayerSurface::contentRoot() const {
+    if (m_target == ETarget::POPUP) {
+        const auto popupView = popup();
+        return popupView ? popupView->wlSurface() : nullptr;
+    }
+
+    const auto layerSurface = m_layerSurface.lock();
+    return layerSurface ? layerSurface->wlSurface() : nullptr;
+}
+
+bool CGlassLayerSurface::contentMapped() const {
+    if (m_target == ETarget::POPUP) {
+        const auto popupView = popup();
+        return popupView && popupView->mapped();
+    }
+
+    const auto layerSurface = m_layerSurface.lock();
+    return layerSurface && layerSurface->mapped();
+}
+
+bool CGlassLayerSurface::contentAnimating() const {
+    const auto layerSurface = m_layerSurface.lock();
+    if (!layerSurface)
+        return false;
+
+    if (layerSurface->positionAnimation()->isBeingAnimated() || layerSurface->sizeAnimation()->isBeingAnimated() ||
+        layerSurface->alpha()[Desktop::View::LS_ALPHA_FADE]->isBeingAnimated())
+        return true;
+
+    const auto popupView = m_target == ETarget::POPUP ? popup() : nullptr;
+    return popupView && popupView->alpha()[Desktop::View::POPUP_ALPHA_FADE]->isBeingAnimated();
+}
+
+SP<Render::IFramebuffer>& CGlassLayerSurface::tempFramebuffer(const PHLMONITOR& monitor) {
+    if (m_target == ETarget::POPUP && monitor)
+        return g_pGlobalState->sharedTempFramebuffers[monitor->m_id];
+    return m_surfaceTempFramebuffer;
+}
+
+std::optional<CBox> CGlassLayerSurface::pixelBox(PHLMONITOR monitor) const {
+    const auto box = globalBox();
+    if (!box)
+        return std::nullopt;
+    return LayerGeometry::toMonitorPixelBox(*box, monitor);
+}
+
+std::optional<CBox> CGlassLayerSurface::paddedLogicalBox(PHLMONITOR monitor) const {
+    return LayerGeometry::toPaddedLogicalBox(pixelBox(monitor), monitor, GlassRenderer::SAMPLE_PADDING_PX);
+}
+
+bool CGlassLayerSurface::ownsContentSurface(const SP<CWLSurfaceResource>& surface) const {
+    const auto root     = contentRoot();
+    const auto resource = root ? root->resource() : nullptr;
+    if (!resource || !surface)
+        return false;
+
+    return resource->findFirstPreorder([&surface](SP<CWLSurfaceResource> candidate) { return candidate == surface; }) != nullptr;
 }
 
 CGlassLayerSurface::~CGlassLayerSurface() {
@@ -48,8 +123,11 @@ bool CGlassLayerSurface::resolveThemeIsDark() const {
 bool CGlassLayerSurface::resolveXray() const {
     // A background or bottom layer would sample its own previous output from
     // the snapshot, and live sampling already shows nothing but what is under it.
+    // Its popups are drawn after every window, like any other layer's.
     const auto layerSurface = m_layerSurface.lock();
-    if (!layerSurface || layerSurface->m_layer <= ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM || !xrayHasBackground())
+    if (!layerSurface || !xrayHasBackground())
+        return false;
+    if (m_target == ETarget::SURFACE && layerSurface->m_layer <= ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM)
         return false;
 
     // Without a workspace no window is drawn and no snapshot is ever taken.
@@ -69,11 +147,7 @@ bool CGlassLayerSurface::resolveXray() const {
 }
 
 bool CGlassLayerSurface::xraySnapshotCovers(Render::CRenderContext& ctx, PHLMONITOR monitor) const {
-    const auto layerSurface = m_layerSurface.lock();
-    if (!layerSurface || !monitor)
-        return false;
-
-    const auto layerBox = LayerGeometry::computeLayerBox(layerSurface, monitor);
+    const auto layerBox = pixelBox(monitor);
     if (!layerBox)
         return false;
 
@@ -82,26 +156,32 @@ bool CGlassLayerSurface::xraySnapshotCovers(Render::CRenderContext& ctx, PHLMONI
     return static_cast<bool>(xraySnapshotCovering(monitor, ctx.m_data.currentFB, *layerBox));
 }
 
+CGlassLayerSurface::SSettingsChain CGlassLayerSurface::settingsChain() const {
+    const SLayerNamespaceSettings* namespaceSettings = nullptr;
+    if (const auto layerSurface = m_layerSurface.lock()) {
+        const auto& settings = g_pGlobalState->layerNamespaceSettings;
+        if (const auto it = settings.find(layerSurface->m_namespace); it != settings.end())
+            namespaceSettings = &it->second;
+    }
+
+    SSettingsChain chain;
+    const auto     append = [&chain](SSurfaceGlassSettings settings) { chain.levels[chain.count++] = std::move(settings); };
+    if (m_target == ETarget::POPUP) {
+        append(namespaceSettings ? namespaceSettings->popups : SSurfaceGlassSettings{});
+        append(globalLayerSettings(g_pGlobalState->config, true));
+    }
+    append(namespaceSettings ? namespaceSettings->surface : SSurfaceGlassSettings{});
+    append(globalLayerSettings(g_pGlobalState->config, false));
+    return chain;
+}
+
 std::string CGlassLayerSurface::resolvePresetName() const {
     try {
-        // Per-namespace preset override (highest priority)
-        const auto layerSurface = m_layerSurface.lock();
-        if (layerSurface) {
-            const auto& nsPresets = g_pGlobalState->layerNamespacePresets;
-            auto it = nsPresets.find(layerSurface->m_namespace);
-            if (it != nsPresets.end())
-                return it->second;
-        }
-
-        const auto& config = g_pGlobalState->config;
-
-        // Layer-wide preset override
-        const auto layerPreset = readStringConfig(config.layersPreset);
-        if (!layerPreset.empty())
-            return std::string(layerPreset);
+        if (auto preset = settingsChain().first(&SSurfaceGlassSettings::preset))
+            return std::move(*preset);
 
         // Fall back to global default preset
-        const auto defaultPreset = readStringConfig(config.defaultPreset);
+        const auto defaultPreset = readStringConfig(g_pGlobalState->config.defaultPreset);
         if (!defaultPreset.empty())
             return std::string(defaultPreset);
     } catch (...) {}
@@ -110,33 +190,18 @@ std::string CGlassLayerSurface::resolvePresetName() const {
 }
 
 ELayerMaskMode CGlassLayerSurface::resolveMaskMode() const {
-    if (const auto layerSurface = m_layerSurface.lock()) {
-        const auto& overrides = g_pGlobalState->layerNamespaceMaskModes;
-        if (auto it = overrides.find(layerSurface->m_namespace); it != overrides.end())
-            return it->second;
-    }
-
-    if (auto mode = parseLayerMaskMode(readStringConfig(g_pGlobalState->config.layersMaskMode)))
-        return *mode;
-    return ELayerMaskMode::AUTO;
+    return settingsChain().first(&SSurfaceGlassSettings::maskMode).value_or(ELayerMaskMode::AUTO);
 }
 
 std::optional<SLayerShape> CGlassLayerSurface::resolveShape() const {
-    const auto layerSurface = m_layerSurface.lock();
-    if (!layerSurface)
-        return std::nullopt;
-
-    const auto& shapes = g_pGlobalState->layerNamespaceShapes;
-    if (auto it = shapes.find(layerSurface->m_namespace); it != shapes.end())
-        return it->second;
-    return std::nullopt;
+    // never inherited: the layer's insets describe the layer surface, not where its popups open
+    return settingsChain().levels[0].shape;
 }
 
 CGlassLayerSurface::EMaskSource CGlassLayerSurface::resolveMaskSource() const {
-    const auto layerSurface = m_layerSurface.lock();
-    const auto wlSurface    = layerSurface ? layerSurface->wlSurface() : nullptr; // root surface only
-    const bool hasEffect    = wlSurface && wlSurface->m_hasBackgroundEffect;
-    const bool regionEmpty  = !wlSurface || wlSurface->m_blurRegion.empty();
+    const auto wlSurface   = contentRoot(); // root surface only
+    const bool hasEffect   = wlSurface && wlSurface->m_hasBackgroundEffect;
+    const bool regionEmpty = !wlSurface || wlSurface->m_blurRegion.empty();
 
     switch (resolveMaskMode()) {
         case ELayerMaskMode::ALPHA:
@@ -154,14 +219,8 @@ CGlassLayerSurface::EMaskSource CGlassLayerSurface::resolveMaskSource() const {
 }
 
 bool CGlassLayerSurface::liveResampleEnabled() const {
-    if (const auto layerSurface = m_layerSurface.lock()) {
-        const auto& overrides = g_pGlobalState->layerNamespaceLiveResample;
-        if (auto it = overrides.find(layerSurface->m_namespace); it != overrides.end())
-            return it->second;
-    }
-
-    const auto& config = g_pGlobalState->config;
-    return config.layersLiveResample && **config.layersLiveResample;
+    // the layer's policy: a popup has no live_resample of its own
+    return settingsChain().first(&SSurfaceGlassSettings::liveResample).value_or(false);
 }
 
 PHLLS CGlassLayerSurface::getLayerSurface() const {
@@ -169,12 +228,12 @@ PHLLS CGlassLayerSurface::getLayerSurface() const {
 }
 
 CRegion CGlassLayerSurface::transformedBlurRegion(PHLMONITOR monitor, const CBox& layerBox) const {
-    const auto layerSurface = m_layerSurface.lock();
-    const auto wlSurface    = layerSurface ? layerSurface->wlSurface() : nullptr;
-    if (!layerSurface || !wlSurface || !monitor)
+    const auto wlSurface = contentRoot();
+    const auto glassBox  = globalBox();
+    if (!wlSurface || !glassBox || !monitor)
         return {};
 
-    const auto logicalSize = layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    const auto logicalSize = glassBox->size();
 
     // surface-local logical region -> monitor-local pixels, the space layerBox is in
     CRegion region = wlSurface->m_blurRegion.copy();
@@ -197,13 +256,13 @@ std::optional<CBox> CGlassLayerSurface::regionBoundingBoxAbsolute(PHLMONITOR mon
 }
 
 std::optional<CBox> CGlassLayerSurface::regionBoundingBoxGlobal() const {
-    const auto layerSurface = m_layerSurface.lock();
-    const auto wlSurface    = layerSurface ? layerSurface->wlSurface() : nullptr;
-    if (!layerSurface || !wlSurface)
+    const auto wlSurface = contentRoot();
+    const auto glassBox  = globalBox();
+    if (!wlSurface || !glassBox)
         return std::nullopt;
 
-    const auto position    = layerSurface->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    const auto logicalSize = layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    const auto position    = glassBox->pos();
+    const auto logicalSize = glassBox->size();
 
     // Stays in the layer's own global-logical family (no monitor scale/transform
     // applied): BackgroundDamageObserver's damagedBox is global-logical too.
@@ -219,20 +278,18 @@ std::optional<CBox> CGlassLayerSurface::regionBoundingBoxGlobal() const {
 
 void CGlassLayerSurface::damageIfMoved() {
     const auto layerSurface = m_layerSurface.lock();
-    if (!layerSurface)
+    const auto box          = globalBox();
+    if (!layerSurface || !box)
         return;
 
-    const auto currentPosition = layerSurface->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    const auto currentSize     = layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    const auto currentPosition = box->pos();
+    const auto currentSize     = box->size();
     if (currentSize.x <= 0.0 || currentSize.y <= 0.0 ||
         !std::isfinite(currentPosition.x) || !std::isfinite(currentPosition.y) ||
         !std::isfinite(currentSize.x) || !std::isfinite(currentSize.y))
         return;
 
-    const bool isAnimating = layerSurface->positionAnimation()->isBeingAnimated() ||
-                             layerSurface->sizeAnimation()->isBeingAnimated() ||
-                             layerSurface->alpha()[Desktop::View::LS_ALPHA_FADE]->isBeingAnimated() ||
-                             !layerSurface->mapped();
+    const bool isAnimating = contentAnimating() || !contentMapped();
 
     const bool moved = currentPosition != m_lastPosition || currentSize != m_lastSize;
 
@@ -242,7 +299,8 @@ void CGlassLayerSurface::damageIfMoved() {
 
         damageSampleRegion();
 
-        if (const auto monitor = layerSurface->m_monitor.lock())
+        // only later popups are drawn over a popup: no other glass samples it
+        if (const auto monitor = layerSurface->m_monitor.lock(); monitor && m_target == ETarget::SURFACE)
             g_pGlobalState->bumpSceneGeneration(monitor);
     } else if (const auto& config = g_pGlobalState->config;
                config.layersForceLiveResample && **config.layersForceLiveResample) {
@@ -253,13 +311,13 @@ void CGlassLayerSurface::damageIfMoved() {
 
 void CGlassLayerSurface::damageSampleRegion() {
     const auto layerSurface = m_layerSurface.lock();
-    if (!layerSurface)
+    auto       glassBox     = globalBox();
+    if (!layerSurface || !glassBox)
         return;
 
     const auto monitor = layerSurface->m_monitor.lock();
     const float scale = monitor ? monitor->m_scale : 1.0f;
-    auto box = CBox{layerSurface->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT),
-                    layerSurface->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
+    auto& box = *glassBox;
     box.expand(GlassRenderer::SAMPLE_PADDING_PX / scale).noNegativeSize();
     if (box.w > 0.0 && box.h > 0.0 &&
         std::isfinite(box.x) && std::isfinite(box.y) && std::isfinite(box.w) && std::isfinite(box.h))
@@ -342,10 +400,7 @@ bool CGlassLayerSurface::wantsBackgroundResample(PHLMONITOR monitor, const CBox&
 
     // A workspace slide or fade moves the whole scene behind us without changing
     // any window's own geometry, so no window decoration update reports it.
-    const bool isAnimating = layerSurface->positionAnimation()->isBeingAnimated() ||
-                             layerSurface->sizeAnimation()->isBeingAnimated() ||
-                             layerSurface->alpha()[Desktop::View::LS_ALPHA_FADE]->isBeingAnimated() ||
-                             WorkspaceAnimation::anyWorkspaceAnimating(monitor);
+    const bool isAnimating = contentAnimating() || WorkspaceAnimation::anyWorkspaceAnimating(monitor);
     const auto& config    = g_pGlobalState->config;
     const bool  forceLive = config.layersForceLiveResample && **config.layersForceLiveResample;
 
@@ -355,9 +410,12 @@ bool CGlassLayerSurface::wantsBackgroundResample(PHLMONITOR monitor, const CBox&
     // region mode: the cached texture is still region-shrunk.
     const bool regionBoxChanged = sampleRegionBox(monitor, layerBox) != m_cachedRegionSampleBox;
 
+    // a popup's move bumps no scene generation (see damageIfMoved())
+    const bool popupMoved = m_target == ETarget::POPUP && m_sampledPixelBox != layerBox;
+
     return !m_hasCachedSample ||
            g_pGlobalState->getSceneGeneration(monitor) != m_lastSceneGeneration ||
-           isAnimating || m_backgroundDirty || forceLive || regionBoxChanged ||
+           isAnimating || m_backgroundDirty || forceLive || regionBoxChanged || popupMoved ||
            xray != m_cachedFromSnapshot;
 }
 
@@ -376,7 +434,7 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
     if (!source)
         return;
 
-    auto layerBox = LayerGeometry::computeLayerBox(layerSurface, monitor);
+    auto layerBox = pixelBox(monitor);
     if (!layerBox)
         return;
 
@@ -411,7 +469,7 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
                                (xray ? static_cast<bool>(snapshot) :
                                        GlassRenderer::sampleRegionCovered(sampleBox, source, ctx.m_data.damage));
 
-    if (!layerSurface->mapped()) {
+    if (!contentMapped()) {
         // During fade-out, re-sampling captures stale pixels. Reuse cached sample.
         if (!m_hasCachedSample)
             return;
@@ -436,9 +494,10 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
         float blurStrength   = resolvePresetFloat(resolveContext, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
         int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-        GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, xray ? snapshot : source, sampleBox, m_samplePaddingRatio, downscale);
+        GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, xray ? snapshot : source, sampleBox, m_sampleMap, downscale);
         // only here: a deferred or cached frame keeps compositing the old texture
         m_cachedRegionSampleBox = regionSampleBox;
+        m_sampledPixelBox       = *layerBox;
 
         float blurRadius     = blurStrength * 12.0f / downscale;
         int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(resolveContext, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
@@ -473,17 +532,17 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
     // limited/no alpha, which would quantize mask values and break the discard.
     DRMFormat tempFormat = (monitor->useFP16()) ? source->m_drmFormat : DRM_FORMAT_ARGB8888;
 
-    if (!m_surfaceTempFramebuffer)
-        m_surfaceTempFramebuffer = g_pHyprRenderer->createFB("hyprglass-layer-temp");
+    auto& tempTarget = tempFramebuffer(monitor);
+    if (!tempTarget)
+        tempTarget = g_pHyprRenderer->createFB(m_target == ETarget::POPUP ? "hyprglass-shared-temp" : "hyprglass-layer-temp");
 
-    if (m_surfaceTempFramebuffer->m_size.x != monitorWidth || m_surfaceTempFramebuffer->m_size.y != monitorHeight ||
-        m_surfaceTempFramebuffer->m_drmFormat != tempFormat)
-        m_surfaceTempFramebuffer->alloc(monitorWidth, monitorHeight, tempFormat);
+    if (tempTarget->m_size.x != monitorWidth || tempTarget->m_size.y != monitorHeight || tempTarget->m_drmFormat != tempFormat)
+        tempTarget->alloc(monitorWidth, monitorHeight, tempFormat);
 
     m_savedCurrentFB = source;
 
-    ctx.m_data.currentFB = m_surfaceTempFramebuffer;
-    g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_surfaceTempFramebuffer.get())->getFBID());
+    ctx.m_data.currentFB = tempTarget;
+    g_pHyprOpenGL->bindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(tempTarget.get())->getFBID());
 
     // Unpadded: the composite quad only ever reads the layer box (never
     // padded), so the SAMPLE_PADDING_PX-expanded part of a padded clear is never
@@ -504,19 +563,23 @@ void CGlassLayerSurface::sampleAndRedirect(Render::CRenderContext& ctx, PHLMONIT
 }
 
 float CGlassLayerSurface::resolveMaskThreshold() const {
-    const auto& cfg = g_pGlobalState->config;
-    float threshold = cfg.layersMaskThreshold ? static_cast<float>(**cfg.layersMaskThreshold) : 0.001f;
-    if (const auto layerSurface = m_layerSurface.lock()) {
-        const auto thresholdIt = g_pGlobalState->layerNamespaceMaskThresholds.find(layerSurface->m_namespace);
-        if (thresholdIt != g_pGlobalState->layerNamespaceMaskThresholds.end())
-            threshold = thresholdIt->second;
-    }
-    return threshold;
+    return settingsChain().first(&SSurfaceGlassSettings::maskThreshold).value_or(0.001f);
+}
+
+float CGlassLayerSurface::resolveMaskFeather() const {
+    return settingsChain().first(&SSurfaceGlassSettings::maskFeather).value_or(0.0f);
 }
 
 std::optional<Contour::SBuildKey> CGlassLayerSurface::contourBuildKey(PHLMONITOR monitor, const CBox& layerBox, const Vector2D& targetSize, float alpha,
                                                                       const SResolveContext& resolveContext) const {
     if (!monitor)
+        return std::nullopt;
+
+    // makePlan() refuses any box past this size; a client-sized box past it, or that far off
+    // the screen, must not reach the int conversions below.
+    constexpr double LARGEST_FIELD_BOX = static_cast<double>(Contour::MAX_FIELD_SIDE) * Contour::MAX_DIVISOR;
+    if (!(layerBox.w <= LARGEST_FIELD_BOX && layerBox.h <= LARGEST_FIELD_BOX && std::abs(layerBox.x) <= LARGEST_FIELD_BOX &&
+          std::abs(layerBox.y) <= LARGEST_FIELD_BOX))
         return std::nullopt;
 
     const int   boxWidth  = static_cast<int>(layerBox.w);
@@ -574,7 +637,8 @@ bool CGlassLayerSurface::attachContour(Render::CRenderContext& ctx, PHLMONITOR m
         return false;
 
     const auto target = ctx.m_data.currentFB;
-    if (!target || !m_surfaceTempFramebuffer || !monitor)
+    const auto& tempTarget = tempFramebuffer(monitor);
+    if (!target || !tempTarget || !monitor)
         return false;
 
     const auto key = contourBuildKey(monitor, layerBox, target->m_size, alpha, resolveContext);
@@ -587,7 +651,7 @@ bool CGlassLayerSurface::attachContour(Render::CRenderContext& ctx, PHLMONITOR m
     if (m_contour.wantsBuild(*key)) {
         // The temp FBO only holds what this frame redrew: a field needs all of the layer in it.
         if (GlassRenderer::damageCoversBox(layerBox, target, ctx.m_data.damage)) {
-            if (!m_contour.build(ctx, *key, m_surfaceTempFramebuffer, layerBox, alpha, target) && g_pGlobalState->contourUnavailable)
+            if (!m_contour.build(ctx, *key, tempTarget, layerBox, alpha, target) && g_pGlobalState->contourUnavailable)
                 return false;
         } else if (m_contour.noteUncoveredFrame())
             damageSampleRegion();
@@ -617,7 +681,7 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
     // this one (its bounding box is evaluated first, against a superset of the
     // damage the pre-surface element sees — see disableSimplification() in
     // GlassLayerPassElement.cpp). Without this flag we'd mask/composite against
-    // whatever m_surfaceTempFramebuffer held from an earlier frame.
+    // whatever the temp FBO held from an earlier frame.
     if (!m_redirectedThisFrame)
         return;
     m_redirectedThisFrame = false;
@@ -634,7 +698,7 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
     if (!target)
         return;
 
-    auto layerBox = LayerGeometry::computeLayerBox(layerSurface, monitor);
+    auto layerBox = pixelBox(monitor);
     if (!layerBox)
         return;
 
@@ -657,11 +721,14 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
     // Use the temp FBO's rendered alpha as a mask: glass only where the surface
     // has visible content (alpha > 0). The temp FBO is in monitor coordinates,
     // so we map from the glass quad UV to monitor UV.
-    int monitorWidth  = static_cast<int>(m_surfaceTempFramebuffer->m_size.x);
-    int monitorHeight = static_cast<int>(m_surfaceTempFramebuffer->m_size.y);
+    const auto& tempTarget = tempFramebuffer(monitor);
+    if (!tempTarget)
+        return;
+    int monitorWidth  = static_cast<int>(tempTarget->m_size.x);
+    int monitorHeight = static_cast<int>(tempTarget->m_size.y);
 
     GlassRenderer::SMaskInfo maskInfo{
-        .textureId = m_surfaceTempFramebuffer->getTexture()->m_texID,
+        .textureId = tempTarget->getTexture()->m_texID,
         .target    = GL_TEXTURE_2D,
         .uvOffset  = {box.x / monitorWidth, box.y / monitorHeight},
         .uvScale   = {box.w / monitorWidth, box.h / monitorHeight},
@@ -670,7 +737,6 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
     switch (maskSource) {
         case EMaskSource::CONTOUR: // cuts like the alpha mask: the field only shapes the edge
         case EMaskSource::ALPHA_THRESHOLD: {
-            const auto& cfg           = g_pGlobalState->config;
             const float maskThreshold = resolveMaskThreshold();
 
             // The temp FBO stores the layer after Hyprland applies fade alpha. Keep
@@ -680,10 +746,7 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
             maskInfo.alphaThreshold = maskThreshold * std::clamp(alpha, 0.0f, 1.0f);
 
             // Region mode leaves coverage at 0: the app's region alone decides where glass goes.
-            float coverage  = cfg.layersMaskFeather ? static_cast<float>(**cfg.layersMaskFeather) : 0.0f;
-            auto coverageIt = g_pGlobalState->layerNamespaceMaskFeathers.find(layerSurface->m_namespace);
-            if (coverageIt != g_pGlobalState->layerNamespaceMaskFeathers.end())
-                coverage = coverageIt->second;
+            float coverage = resolveMaskFeather();
             // Capped so full-alpha content still gets full-strength glass.
             coverage          = std::clamp(coverage, 0.0f, std::max(0.0f, 1.0f - maskThreshold));
             maskInfo.coverage = coverage * std::clamp(alpha, 0.0f, 1.0f);
@@ -762,6 +825,6 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
                                      m_sampleFramebuffer, target,
                                      box, alpha,
                                      std::array<float, 4>{cornerRadius, cornerRadius, cornerRadius, cornerRadius},
-                                     roundingPower, m_samplePaddingRatio, resolveContext,
+                                     roundingPower, m_sampleMap, resolveContext,
                                      &maskInfo);
 }

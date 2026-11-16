@@ -22,3 +22,6 @@ build/
 # Debug
 *.dwo
 *.pdb
+
+# Test builds
+tests/build/

@@ -2,6 +2,7 @@
 
 #include "Contour.hpp"
 #include "GlassLayerSurface.hpp"
+#include "Hash.hpp"
 #include "PluginConfig.hpp"
 #include "ShaderManager.hpp"
 
@@ -13,10 +14,12 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/SharedDefs.hpp>
 #include <hyprutils/signal/Listener.hpp>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -40,21 +43,43 @@ struct SGlobalState {
     // Shared blur temp framebuffer (reused across all decorations since they render sequentially)
     SP<Render::IFramebuffer> blurTempFramebuffer;
 
-    // Per-monitor temp FBO for subsurface item glass, shared serially by every
-    // glassed item on that monitor in a frame — a per-item copy would be one
-    // full-monitor-sized allocation each. Safe because items on the same
-    // monitor are visited one at a time: CGlassSubsurfacePassElement::draw()
-    // (redirect) and CGlassSubsurfaceCompositeElement::draw()
-    // (composite+restore) for one item always fully bracket each other before
-    // the next item's pair starts (see main.cpp's hkRenderPassAdd) — no two
-    // items on the same monitor ever have it redirected at once. Keyed by
-    // MONITORID rather than CMonitor* (same reasoning as sceneGeneration
-    // below); entries are dropped on monitor removal (see main.cpp).
-    std::unordered_map<MONITORID, SP<Render::IFramebuffer>> subsurfaceTempFramebuffers;
+    // Per-monitor temp FBO for subsurface item glass and layer popup glass, shared
+    // serially by every glassed item and popup on that monitor in a frame — a copy
+    // each would be one full-monitor-sized allocation each. Safe because they are
+    // visited one at a time: the pre-surface element (redirect) and the composite
+    // element (composite+restore) of one item or popup always fully bracket each
+    // other before the next pair starts (see main.cpp's hkRenderPassAdd), and item
+    // brackets and popup brackets never nest. Keyed by MONITORID rather than
+    // CMonitor* (same reasoning as sceneGeneration below); entries are dropped on
+    // monitor removal (see main.cpp).
+    std::unordered_map<MONITORID, SP<Render::IFramebuffer>> sharedTempFramebuffers;
 
-    // Layer surface glass state (one per tracked layer, keyed by raw pointer).
+    // Layer surface glass state: one per tracked layer, plus one per popup of it while
+    // popup glass draws that popup (keyed by raw pointers, popup nullptr = the layer).
+    // Every walk over the map sees both, so invalidation never forgets the popups.
     // shared_ptr so CGlassLayerPassElement can hold a copy that survives map erasure mid-frame.
-    std::unordered_map<Desktop::View::CLayerSurface*, std::shared_ptr<CGlassLayerSurface>> layerSurfaces;
+    struct SLayerGlassKey {
+        Desktop::View::CLayerSurface* layer = nullptr;
+        Desktop::View::CPopup*        popup = nullptr;
+        bool                          operator==(const SLayerGlassKey&) const = default;
+    };
+    struct SLayerGlassKeyHash {
+        size_t operator()(const SLayerGlassKey& key) const noexcept {
+            size_t seed = 0;
+            Hash::hashCombine(seed, static_cast<const void*>(key.layer), static_cast<const void*>(key.popup));
+            return seed;
+        }
+    };
+    std::unordered_map<SLayerGlassKey, std::shared_ptr<CGlassLayerSurface>, SLayerGlassKeyHash> layerSurfaces;
+
+    // Open while hkRenderLayer runs a glassed layer's popups call: hkRenderPassAdd brackets
+    // each popup element of that layer and records the popups it drew.
+    struct SPopupGlassScope {
+        PHLLS                               layer;
+        bool                                manageBlur = false;
+        std::vector<Desktop::View::CPopup*> drawn; // identity only, never dereferenced
+    };
+    std::optional<SPopupGlassScope> popupScope;
 
     // Subsurface item glass state, one per glassed wl_subsurface, keyed by a
     // weak ref so a destroyed surface's entry is simply unreachable rather
@@ -68,18 +93,8 @@ struct SGlobalState {
     std::unordered_set<std::string> layerNamespaceFilter;
     // hg.layer(..., { exclude = true }) blacklist (always excluded, takes priority over whitelist)
     std::unordered_set<std::string> layerNamespaceExclude;
-    // Per-namespace preset overrides (namespace → preset name)
-    std::unordered_map<std::string, std::string> layerNamespacePresets;
-    // Per-namespace mask alpha threshold (namespace → threshold, overrides layers.mask_threshold)
-    std::unordered_map<std::string, float> layerNamespaceMaskThresholds;
-    // Per-namespace live resample override (namespace → enabled)
-    std::unordered_map<std::string, bool> layerNamespaceLiveResample;
-    // Per-namespace mask mode override (namespace → mode)
-    std::unordered_map<std::string, ELayerMaskMode> layerNamespaceMaskModes;
-    // Per-namespace mask_feather override (namespace → feather)
-    std::unordered_map<std::string, float> layerNamespaceMaskFeathers;
-    // Per-namespace fixed glass shape (namespace → shape); absent = the whole layer box
-    std::unordered_map<std::string, SLayerShape> layerNamespaceShapes;
+    // hg.layer() settings per namespace, for the layer and for its popups
+    std::unordered_map<std::string, SLayerNamespaceSettings> layerNamespaceSettings;
 
     // Contour (layers.mask_mode = "contour"): the render targets every layer's field build
     // shares, and whether the GPU can do it at all. Once the GPU or the shaders turn out not
@@ -191,10 +206,10 @@ struct SGlobalState {
     // renderLayer hook
     CFunctionHook* renderLayerHook = nullptr;
 
-    // Render::CRenderPass::add hook (subsurface item glass)
-    CFunctionHook* renderPassAddHook             = nullptr;
-    bool           renderPassAddSymbolFound      = false; // for the failure notification text
-    bool           subsurfaceHookFailureNotified = false;
+    // Render::CRenderPass::add hook (subsurface item glass, layer popup glass)
+    CFunctionHook* renderPassAddHook                = nullptr;
+    bool           renderPassAddSymbolFound         = false; // for the failure notification text
+    bool           renderPassAddHookFailureNotified = false;
 
     // `versionCheck` in `hyprctl hyprglass status`: match, unknown or skipped
     std::string_view versionCheck = "unknown";

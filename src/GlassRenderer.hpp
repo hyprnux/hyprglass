@@ -108,7 +108,7 @@ struct SMaskInfo {
     int                                        regionRectCount = 0;
 
     // Maps the glass quad's own UV (spanning the full drawn box) into the
-    // sample texture's own normalized space, applied before uvPadding
+    // sample texture's own normalized space, applied before toTexUV()
     // (toSampleBoxUV() in Shaders.hpp). Identity (no-op) unless
     // sampleBackground() was given a box smaller than the drawn quad —
     // PROTOCOL_REGION layers only; see GlassLayerSurface.cpp.
@@ -133,18 +133,25 @@ struct SMaskInfo {
 };
 
 // Affine map from source-framebuffer pixels into the sample framebuffer.
-// sampleBackground() blits through it and blendOwnContent() draws through it;
-// both derive every coordinate from here so the two can never drift apart.
+// sampleBackground() blits through it, blendOwnContent() draws through it and the glass
+// shader reads through it; all derive every coordinate from here so they never drift apart.
+// Its size is the box's, at most the framebuffer's, plus SAMPLE_PADDING_PX on each side,
+// whatever the box's size or position: a box crossing a framebuffer edge keeps its sample
+// framebuffer. Only the part of the box on the framebuffer, padded, is read into it.
 struct SSampleMap {
-    int   fullWidth = 1, fullHeight = 1;              // padded box, framebuffer pixels
+    int   fullWidth = 1, fullHeight = 1;              // sampled rect, framebuffer pixels
     int   width = 1, height = 1;                      // sample framebuffer size
-    int   srcX0 = 0, srcY0 = 0, srcX1 = 1, srcY1 = 1; // padded box in source pixels, (srcX0, srcY0) lands on sample (0, 0)
+    int   srcX0 = 0, srcY0 = 0, srcX1 = 1, srcY1 = 1; // sampled rect in source pixels, (srcX0, srcY0) lands on sample (0, 0)
+    int   readX0 = 0, readY0 = 0, readX1 = 1, readY1 = 1; // the part of it read from the framebuffer
     float scaleX = 1, scaleY = 1;
+    // the box's own UV -> sample texture UV (toTexUV() in Shaders.hpp); identity until a sample is taken
+    Vector2D uvOffset{0.0, 0.0};
+    Vector2D uvScale{1.0, 1.0};
 
     [[nodiscard]] CBox toSample(const CBox& framebufferBox) const;
 };
 
-[[nodiscard]] SSampleMap sampleMapFor(const CBox& box, int downscale);
+[[nodiscard]] SSampleMap sampleMapFor(const CBox& box, const Vector2D& framebufferSize, int downscale);
 
 // True when every pixel of `box`, clipped to the framebuffer, lies inside `damage`: the
 // frame redraws all of it. The only coverage predicate; sampleRegionCovered() asks it for
@@ -158,13 +165,13 @@ struct SSampleMap {
 [[nodiscard]] bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage);
 
 void sampleBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sampleFramebuffer,
-                       SP<Render::IFramebuffer> sourceFramebuffer, CBox box, Vector2D& outPaddingRatio, int downscale = 1);
+                       SP<Render::IFramebuffer> sourceFramebuffer, CBox box, SSampleMap& outMap, int downscale = 1);
 
 // Draws the window's own committed surfaces over the sampled background, so the
 // blur that follows works on a mix of the desktop and the window's own content.
-// box is the same framebuffer-space box sampleBackground() was given.
+// box and map: the framebuffer-space box sampleBackground() was given and the map it wrote.
 void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW window,
-                      PHLMONITOR monitor, const CBox& box, int downscale, float amount, float cornerRadius, float roundingPower);
+                      PHLMONITOR monitor, const CBox& box, const SSampleMap& map, float amount, float cornerRadius, float roundingPower);
 
 // callerFramebuffer is re-bound after the blur ping-pong; the viewport is
 // restored from its size so it always matches the re-bound framebuffer.
@@ -207,7 +214,7 @@ void applyGlassEffect(Render::CRenderContext& ctx,
                        SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> targetFramebuffer,
                        const CBox& box,
                        float alpha, const std::array<float, 4>& radii, float roundingPower,
-                       const Vector2D& paddingRatio, const SResolveContext& resolveContext,
+                       const SSampleMap& sampleMap, const SResolveContext& resolveContext,
                        const SMaskInfo* mask = nullptr, float focusLight = 0.0f, const SFrostInput* frost = nullptr);
 
 } // namespace GlassRenderer

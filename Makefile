@@ -27,7 +27,7 @@ ifneq ($(shell $(CXX) --version 2>/dev/null | grep -c 'Free Software Foundation'
 endif
 
 TARGET = hyprglass.so
-SOURCES = src/main.cpp src/LoadGuard.cpp src/GlassDecoration.cpp src/GlassPassElement.cpp src/GlassRenderer.cpp src/GlassLayerSurface.cpp src/GlassLayerPassElement.cpp src/GlassLayerCompositeElement.cpp src/BackgroundDamageObserver.cpp src/PluginConfig.cpp src/ShaderManager.cpp src/Diagnostics.cpp src/GlassSubsurfaceState.cpp src/GlassSubsurfacePassElement.cpp src/GlassSubsurfaceCompositeElement.cpp src/ItemHints.cpp src/GlassSnapshotElement.cpp src/Frost.cpp src/Contour.cpp
+SOURCES = src/main.cpp src/LoadGuard.cpp src/GlassDecoration.cpp src/GlassPassElement.cpp src/GlassRenderer.cpp src/GlassLayerSurface.cpp src/GlassLayerPassElement.cpp src/GlassLayerCompositeElement.cpp src/BackgroundDamageObserver.cpp src/PluginConfig.cpp src/ShaderManager.cpp src/Diagnostics.cpp src/GlassSubsurfaceState.cpp src/GlassSubsurfacePassElement.cpp src/GlassSubsurfaceCompositeElement.cpp src/ItemHints.cpp src/MemfdLoad.cpp src/GlassSnapshotElement.cpp src/Frost.cpp src/Contour.cpp src/GeometryEvents.cpp
 OBJ = $(SOURCES:.cpp=.o)
 HEADERS = $(wildcard src/*.hpp)
 
@@ -88,7 +88,24 @@ $(TARGET): $(OBJ) $(ITEM_HELPER_BLOB_OBJ)
 	@$(CXX) $(LDFLAGS) $(OBJ) $(ITEM_HELPER_BLOB_OBJ) -o $@ $(LIBS)
 	@echo "Done!"
 
+# ── tests (no Hyprland needed) ───────────────────────────────────────────────
+TEST_DIR = tests/build
+
+$(TEST_DIR):
+	@mkdir -p $@
+
+$(TEST_DIR)/libmemfd-test-a.so: tests/MemfdTestLibrary.c | $(TEST_DIR)
+	@$(CC) -shared -fPIC -Wl,-z,noexecstack $< -o $@
+$(TEST_DIR)/libmemfd-test-b.so: tests/MemfdTestLibrary.c | $(TEST_DIR)
+	@$(CC) -shared -fPIC -Wl,-z,noexecstack -DSECOND $< -o $@
+$(TEST_DIR)/memfd-load-test: tests/MemfdLoadTest.cpp src/MemfdLoad.cpp src/MemfdLoad.hpp | $(TEST_DIR)
+	@$(CXX) -g -O1 -std=c++23 -fsanitize=address,undefined tests/MemfdLoadTest.cpp src/MemfdLoad.cpp -o $@ -ldl
+
+test: $(TEST_DIR)/memfd-load-test $(TEST_DIR)/libmemfd-test-a.so $(TEST_DIR)/libmemfd-test-b.so
+	$(TEST_DIR)/memfd-load-test $(TEST_DIR)/libmemfd-test-a.so $(TEST_DIR)/libmemfd-test-b.so
+
 clean:
 	rm -f $(OBJ) $(TARGET) $(ITEM_HELPER_BLOB_OBJ) $(HELPER_OBJ) $(HELPER_SO) $(PROTOCOL_HEADER) $(PROTOCOL_CODE)
+	rm -rf $(TEST_DIR)
 
-.PHONY: all clean
+.PHONY: all clean test

@@ -75,7 +75,7 @@ class CGlassDecoration : public IHyprWindowDecoration {
   private:
     PHLWINDOWREF m_window;
     SP<Render::IFramebuffer> m_sampleFramebuffer;
-    Vector2D     m_samplePaddingRatio;
+    GlassRenderer::SSampleMap m_sampleMap;
 
     // Last geometry seen in updateWindow(), to detect real moves/resizes
     Vector2D m_lastPosition;

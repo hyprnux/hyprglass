@@ -41,6 +41,7 @@ hl.plugin.load("/path/to/hyprglass.so")
 git clone https://github.com/hyprnux/hyprglass && cd hyprglass
 git checkout hyprland-0.57   # branch of your Hyprland version; stay on main for hyprland-git
 make
+make test   # optional, needs no Hyprland
 hyprctl plugin load $(pwd)/hyprglass.so
 ```
 
@@ -106,6 +107,7 @@ hyprctl getoption plugin:hyprglass:layers:enabled   # "set: true" once your valu
 | `blur_fold` | bool | `true` | Fewer blur passes with an identical look. Set to `false` to always run `blur_iterations` passes at the configured radius. |
 | `default_theme` | string | `dark` | Default theme: `dark` or `light` |
 | `default_preset` | string | `default` | Default preset name |
+| `events.geometry` | bool | `true` | Send `hyprglass>>geometry,ADDRESS,X,Y,W,H` on socket2 each time a floating window moves or resizes. Set to `false` if nothing reads it. |
 
 ### Overridable settings
 
@@ -152,9 +154,11 @@ Settings resolve through: **preset chain** (theme variant, shared, inherited) th
 | `vibrancy` | float | — | `0.15` | `0.12` | Selective saturation boost |
 | `vibrancy_darkness` | float | — | `0.0` | `0.0` | Holds vibrancy back in dark areas: 0 boosts everywhere, 1 leaves black untouched, above 1 desaturates dark areas |
 | `adaptive_dim` | float | — | `0.4` | `0.0` | Dims bright areas behind the glass (white is white 0 -to- 1 white becomes black) |
-| `adaptive_boost` | float | — | `0.0` | `0.4` | Boosts dark areas behind the glass (black is black 0 -to- 1 black becomes white) |
+| `adaptive_boost` | float | — | `0.0` | `0.4` | Boosts dark areas behind the glass (0 black stays black, 1 black becomes grey, 2 white) |
 
 `—` in Global Default = falls through to per-theme default. `—` in Dark/Light = inherits global value.
+
+A negative value means "not set": the next level applies. For an angle, write `270`, not `-90`.
 
 Ranges in parentheses are the usual span, not limits: only `blur_iterations`, `self_sample`, `focus_light`, `frost`, `fresnel_reflection`, `edge_thickness_px` (at most half the smaller side) and `edge_height` (at most 500) are clamped, and the built-in presets go past some of them (`glass` uses `refraction_strength = 8.0`).
 
@@ -347,6 +351,36 @@ hg.layer("eww-bar", { shape = { inset = 6, radius = -1 } })
 hg.layer("quickshell:card", { shape = { inset = { 24, 0, 24, 0 }, radius = 16 } })
 ```
 
+**Popups:** `popups = { enabled = true }` also puts glass behind a glassed layer's popups, the menus and tooltips a dock or bar opens. Each popup gets its own glass, placed by `mask_mode` like a layer: a popup that requests blur gets glass exactly there, the others where their content is visible.
+
+- The `popups` table takes `enabled`, `preset`, `mask_mode`, `mask_threshold` and `mask_feather`; `hg.layer` also takes `shape`, applied to each popup's box and never taken from the layer
+- An unset value takes the first one set in: `hg.layer(ns, { popups })`, `layers.popups`, `hg.layer(ns)`, `layers`
+- With `manage_blur` on, the glass replaces the `blur_popups` layer rule; with it off, a popup that rule blurs keeps Hyprland's blur and gets no glass
+- A closing popup fades out without glass
+
+```lua
+-- every menu of every glassed layer, one look
+hg.preset("menu", { inherits = "subtle", refraction_strength = 0.3, glass_opacity = 0.9 })
+hg.config({ layers = { enabled = true, popups = { enabled = true, preset = "menu", mask_threshold = 0.1 } } })
+```
+
+```lua
+-- per-layer tuning, every layer still glassed
+hg.config({ layers = { enabled = true, popups = { enabled = true } } })
+hg.layer("*")
+hg.layer("dock", { mask_feather = 0.45, popups = { mask_mode = "contour", mask_threshold = 0.15 } })          -- an outline per menu
+hg.layer("waybar", { preset = "subtle", popups = { preset = "clear", shape = { inset = 8, radius = 10 } } })  -- trims GTK's 8 px menu shadow
+hg.layer("quickshell:bar", { mask_mode = "region", popups = { mask_mode = "alpha" } })                      -- the bar requests blur, its menus do not
+hg.layer("debug-panel", { popups = { enabled = false } })                                                   -- glass on the panel, not on its menus
+```
+
+```lua
+-- one layer's popups only, every layer still glassed
+hg.config({ layers = { enabled = true } })
+hg.layer("*")
+hg.layer("aerix:dock", { popups = { enabled = true } })
+```
+
 #### Per-layer settings
 
 Every layer gets glass until you list one. `hg.layer(namespace, { ... })` whitelists a layer namespace (`hyprctl layers` shows them) and sets what differs for it; once a namespace is listed, only the listed layers get glass.
@@ -360,7 +394,7 @@ hg.layer("swaync")
 hg.layer("quickshell:bezel", { preset = "ui", mask_threshold = 0.3 })
 hg.layer("quickshell:bar", { mask_mode = "region" })
 hg.layer("quickshell:notifications", { mask_mode = "contour", mask_threshold = 0.15 })
-hg.layer("dock", { mask_feather = 0.45 })
+hg.layer("dock", { mask_feather = 0.45, popups = { enabled = true } })           -- glass behind its menus too
 hg.layer("eww-bar", { shape = { inset = 6, radius = -1 } })                     -- pill, 6 px inside the layer
 hg.layer("quickshell:card", { shape = { inset = { 24, 0, 24, 0 }, radius = 16 } }) -- top, right, bottom, left
 hg.layer("debug-panel", { exclude = true })
@@ -374,6 +408,7 @@ hg.layer("debug-panel", { exclude = true })
 | `mask_mode` | string | `"auto"`, `"region"`, `"alpha"` or `"contour"`. Per-layer override of `layers.mask_mode` |
 | `mask_feather` | float | Per-layer override of `layers.mask_feather` |
 | `shape` | table | Fixed glass shape: `{ inset = px or { top, right, bottom, left }, radius = px }`, both optional (`0`); `radius = -1` = pill |
+| `popups` | table | `{ enabled, preset, mask_mode, mask_threshold, mask_feather, shape }` for this layer's popups, see [Popups](#layer-surfaces) |
 | `exclude` | bool | Blacklist this namespace instead of whitelisting it |
 
 To tune one layer while every other layer keeps glass, whitelist them all with `hg.layer("*")`. It takes no settings: those for every layer go in the `layers` table of `hg.config`. `exclude` still wins over `"*"`.
@@ -398,6 +433,11 @@ Options of the `layers` table in `hg.config`.
 | `force_live_resample` | bool | `false` | Experimental: re-render layer glass every frame regardless of changes, ignoring `live_resample_fps`. Heavy GPU/battery cost |
 | `mask_mode` | string | `auto` | Where the glass goes: `auto` = where the app requests blur, else where content is visible; `region` = only where the app requests blur; `alpha` = only where content is visible; `contour` = where content is visible, with the edge following each shape the app draws |
 | `mask_feather` | float | `0` | Soft edges: glass fades in over this much alpha above `mask_threshold` (e.g. `0.45` for a rounded dock). `0` = hard edge. Ignored where the app requests a blur region |
+| `popups.enabled` | bool | `false` | Glass behind the popups (menus, tooltips) of glassed layers. Overridable per layer |
+| `popups.preset` | string | `""` | Preset for every layer's popups. `""` = the layer's preset |
+| `popups.mask_mode` | string | `""` | `mask_mode` for every layer's popups. `""` = the layer's |
+| `popups.mask_threshold` | float | `-1` | `mask_threshold` for every layer's popups. `-1` = the layer's |
+| `popups.mask_feather` | float | `-1` | `mask_feather` for every layer's popups. `-1` = the layer's |
 | `manage_blur` | bool | `true` | Replace Hyprland's own blur with glass on glassed layers (the `ignore_alpha` layer rule then has no effect, use `mask_threshold`). Set to `false` to keep Hyprland's blur |
 
 > Layer support hooks into Hyprland's internal render pipeline. This is version-sensitive and may break across Hyprland updates.
@@ -553,7 +593,7 @@ hyprctl -j hyprglass status      # same, as JSON
 hyprglass 0.9.1: active
   version check: match
   shaders: ready
-  windows: on   layers: hook missing   subsurfaces: off
+  windows: on   layers: hook missing   popups: off   subsurfaces: off
   hyprglass_item_v1 protocol: active
 ```
 
@@ -563,6 +603,7 @@ hyprglass 0.9.1: active
   "features": {
     "windows": {"enabled": true, "active": true, "reason": null},
     "layers": {"enabled": true, "active": false, "reason": "hook_missing"},
+    "popups": {"enabled": false, "active": false, "reason": "disabled"},
     "subsurfaces": {"enabled": false, "active": false, "reason": "disabled"}
   }
 }
@@ -576,9 +617,9 @@ hyprglass 0.9.1: active
 | `active` | `true` when at least one feature is active. |
 | `shaders` | `ready`, `pending` (compiled at the first glass draw) or `failed` (glass stays off until the plugin is reloaded). |
 | `itemProtocol` | `hyprglass_item_v1` is offered to clients. |
-| `features.*.enabled` | The setting: `enabled`, `layers.enabled`, `subsurfaces.enabled`. |
+| `features.*.enabled` | The setting: `enabled`, `layers.enabled`, `layers.popups.enabled` (or any `hg.layer` that enables popups), `subsurfaces.enabled`. |
 | `features.*.active` | The feature draws glass. `windows` is active with `enabled = false` while a window tagged `hyprglass_enabled` is open. |
-| `features.*.reason` | `null` when active, else `disabled`, `hook_missing` (after a Hyprland update, or another plugin hooked it first: reinstall or report it), `shaders_failed`, or for `subsurfaces`, `window_glass_off` (items only draw on windows that have glass). |
+| `features.*.reason` | `null` when active, else `disabled`, `hook_missing` (after a Hyprland update, or another plugin hooked it first: reinstall or report it), `shaders_failed`, for `popups`, `layers_off` (popups only draw on glassed layers), or for `subsurfaces`, `window_glass_off` (items only draw on windows that have glass). |
 
 A paused hyprglass (see [Troubleshooting](#troubleshooting)) draws nothing and has no `hyprctl hyprglass` command: `hyprctl hyprglass status` answers `unknown request`. `hyprctl plugin list` (or `hyprctl -j plugin list`) gives the reason as its description, `Paused (<reason>): <message>`, where `<reason>` is `hyprland_version`, `dependencies` or `duplicate`:
 

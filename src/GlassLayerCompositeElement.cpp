@@ -2,7 +2,6 @@
 #include "GlassLayerSurface.hpp"
 #include "GlassRenderer.hpp"
 #include "Globals.hpp"
-#include "LayerGeometry.hpp"
 
 CGlassLayerCompositeElement::CGlassLayerCompositeElement(const SGlassLayerCompositeData& data)
     : m_data(data) {}
@@ -18,14 +17,9 @@ std::optional<CBox> CGlassLayerCompositeElement::boundingBox(Render::CRenderCont
     if (!m_data.layerState)
         return std::nullopt;
 
-    auto layerSurface = m_data.layerState->getLayerSurface();
-    if (!layerSurface)
-        return std::nullopt;
-
     // Same helper as CGlassLayerPassElement::boundingBox(), so the pre- and
-    // post-surface elements never disagree about the layer's box.
-    const auto monitor = ctx.m_data.pMonitor.lock();
-    return LayerGeometry::computePaddedLogicalLayerBox(layerSurface, monitor, GlassRenderer::SAMPLE_PADDING_PX);
+    // post-surface elements never disagree about the glass box.
+    return m_data.layerState->paddedLogicalBox(ctx.m_data.pMonitor.lock());
 }
 
 bool CGlassLayerCompositeElement::needsLiveBlur(Render::CRenderContext&) {

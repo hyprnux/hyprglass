@@ -23,8 +23,8 @@
 //     CRenderPass::add() hook time and threaded through the pre/post
 //     elements' own data (see GlassSubsurfacePassElement/CompositeElement);
 //   - the item's own rendered-surface redirect target is one of
-//     g_pGlobalState->subsurfaceTempFramebuffers, keyed by the item's
-//     monitor and shared/reused serially by every glassed item on that
+//     g_pGlobalState->sharedTempFramebuffers, keyed by the item's
+//     monitor and shared/reused serially by every glassed item and layer popup on that
 //     monitor in the frame (not owned per-instance here) — see Globals.hpp
 //     for why that's safe.
 // Preset hint as seen by one draw: what the client asked for, and whether it
@@ -77,7 +77,7 @@ class CGlassSubsurfaceState {
     WP<CWLSurfaceResource>   m_surface;
     PHLWINDOWREF             m_window;
     SP<Render::IFramebuffer> m_sampleFramebuffer; // box-sized, per-item (small)
-    Vector2D                 m_samplePaddingRatio;
+    GlassRenderer::SSampleMap m_sampleMap;
     bool                     m_hasCachedSample = false;
 
     // The pixelBox the cached sample was taken at, to force a resample when the item itself moves

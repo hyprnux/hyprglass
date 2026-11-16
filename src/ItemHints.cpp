@@ -1,5 +1,6 @@
 #include "ItemHints.hpp"
 #include "Globals.hpp"
+#include "MemfdLoad.hpp"
 #include "item-helper/hyprglass_item_helper_api.h"
 
 #include <hyprland/src/Compositor.hpp>
@@ -10,6 +11,7 @@
 #include <hyprutils/signal/Listener.hpp>
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -91,7 +93,7 @@ namespace {
 
         const auto blobSize = static_cast<size_t>(hyprglassItemHelperBlobEnd - hyprglassItemHelperBlobStart);
 
-        int fd = memfd_create("hyprglass-item-helper", MFD_CLOEXEC);
+        int fd = memfd_create("hyprglass-item-helper", MFD_CLOEXEC | MFD_ALLOW_SEALING);
         if (fd < 0) {
             warnProtocolUnavailable("memfd_create failed");
             return false;
@@ -109,12 +111,19 @@ namespace {
             written += static_cast<size_t>(n);
         }
 
-        const auto fdPath = std::format("/proc/self/fd/{}", fd);
-        void* handle = dlopen(fdPath.c_str(), RTLD_NOW | RTLD_GLOBAL | RTLD_NODELETE);
-        close(fd); // dlopen has its own reference to the file by this point
+        // Sealed before it is loaded: nothing can rewrite it through /proc/<pid>/fd meanwhile.
+        if (fcntl(fd, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL) != 0) {
+            close(fd);
+            warnProtocolUnavailable("failed to seal the helper memfd");
+            return false;
+        }
 
+        // Under a name no loaded library has: another plugin may have loaded its own helper from a memfd that
+        // had this number, and glibc would hand that library back for the same name.
+        void* handle = MemfdLoad::loadLibrary(fd, RTLD_NOW | RTLD_GLOBAL | RTLD_NODELETE);
         if (!handle) {
-            warnProtocolUnavailable(std::format("dlopen failed: {}", dlerror()));
+            const char* error = dlerror();
+            warnProtocolUnavailable(std::format("dlopen failed: {}", error ? error : "no usable /proc/self/fd name"));
             return false;
         }
 
