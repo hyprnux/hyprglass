@@ -2,7 +2,6 @@
 #include "GlassLayerSurface.hpp"
 #include "GlassRenderer.hpp"
 #include "Globals.hpp"
-#include "LayerGeometry.hpp"
 #include "PluginConfig.hpp"
 
 CGlassLayerPassElement::CGlassLayerPassElement(const SGlassLayerPassData& data)
@@ -24,12 +23,7 @@ std::optional<CBox> CGlassLayerPassElement::paddedLogicalBox(Render::CRenderCont
     if (!m_data.layerState)
         return std::nullopt;
 
-    auto layerSurface = m_data.layerState->getLayerSurface();
-    if (!layerSurface)
-        return std::nullopt;
-
-    const auto monitor = ctx.m_data.pMonitor.lock();
-    return LayerGeometry::computePaddedLogicalLayerBox(layerSurface, monitor, GlassRenderer::SAMPLE_PADDING_PX);
+    return m_data.layerState->paddedLogicalBox(ctx.m_data.pMonitor.lock());
 }
 
 std::optional<CBox> CGlassLayerPassElement::boundingBox(Render::CRenderContext& ctx) {
@@ -54,7 +48,7 @@ bool CGlassLayerPassElement::needsLiveBlur(Render::CRenderContext& ctx) {
         return false;
 
     const auto monitor  = ctx.m_data.pMonitor.lock();
-    const auto layerBox = LayerGeometry::computeLayerBox(m_data.layerState->getLayerSurface(), monitor);
+    const auto layerBox = m_data.layerState->pixelBox(monitor);
     if (!layerBox)
         return false;
 

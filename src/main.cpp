@@ -1,5 +1,6 @@
 #include "BackgroundDamageObserver.hpp"
 #include "Diagnostics.hpp"
+#include "GeometryEvents.hpp"
 #include "GlassDecoration.hpp"
 #include "GlassLayerCompositeElement.hpp"
 #include "GlassLayerPassElement.hpp"
@@ -12,6 +13,7 @@
 #include "Globals.hpp"
 #include "Hash.hpp"
 #include "ItemHints.hpp"
+#include "LayerGeometry.hpp"
 #include "LoadGuard.hpp"
 #include "PluginConfig.hpp"
 #include "RenderGuards.hpp"
@@ -24,6 +26,7 @@
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
+#include <hyprland/src/desktop/view/Popup.hpp>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/managers/SessionLockManager.hpp>
@@ -37,11 +40,15 @@
 #include <hyprland/src/config/supplementary/propRefresher/PropRefresher.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <hyprutils/utils/ScopeGuard.hpp>
 
 #include <algorithm>
 #include <cstdlib>
 #include <dlfcn.h>
+#include <format>
 #include <optional>
+#include <string_view>
+#include <vector>
 
 static void clearLayerGlassOnClose(PHLLS layerSurface) {
     if (!g_pGlobalState || !layerSurface)
@@ -51,7 +58,7 @@ static void clearLayerGlassOnClose(PHLLS layerSurface) {
     // can remain in the damage history while Hyprland switches to its close
     // snapshot path, showing stale/black pixels for a frame.
     std::erase_if(g_pGlobalState->layerSurfaces, [&](const auto& pair) {
-        return pair.first == layerSurface.get() || pair.second->getLayerSurface() == layerSurface;
+        return pair.first.layer == layerSurface.get() || pair.second->getLayerSurface() == layerSurface;
     });
 
     if (auto monitor = layerSurface->m_monitor.lock())
@@ -64,7 +71,7 @@ static void onMonitorGone(PHLMONITOR monitor) {
 
     // The monitor is gone, so its framebuffers can never be reused: drop them
     // instead of keeping dead entries around indefinitely.
-    g_pGlobalState->subsurfaceTempFramebuffers.erase(monitor->m_id);
+    g_pGlobalState->sharedTempFramebuffers.erase(monitor->m_id);
     g_pGlobalState->backgroundSnapshots.erase(monitor->m_id);
 }
 
@@ -299,6 +306,8 @@ static void onRenderStage(const Event::SRenderStageEvent event) {
             // swept here instead — once per monitor frame, far cheaper than
             // the CRenderPass::add hook this state is populated from.
             std::erase_if(g_pGlobalState->subsurfaceGlass, [](const auto& pair) { return pair.first.expired(); });
+            // same for a closed popup's glass: layer.closed covers only the layer
+            std::erase_if(g_pGlobalState->layerSurfaces, [](const auto& pair) { return pair.first.popup && !pair.second->popup(); });
             if (event.context)
                 beginXraySnapshotFrame(event.context->get());
             break;
@@ -337,6 +346,33 @@ static bool shouldGlassLayer(PHLLS layerSurface) {
         return true;
 
     return include.contains(ns);
+}
+
+// hg.layer(ns, { popups = { enabled } }), else layers.popups.enabled.
+static bool popupGlassEnabled(const PHLLS& layerSurface) {
+    if (!layerSurface)
+        return false;
+
+    const auto& settings = g_pGlobalState->layerNamespaceSettings;
+    if (const auto it = settings.find(layerSurface->m_namespace); it != settings.end() && it->second.popups.enabled)
+        return *it->second.popups.enabled;
+
+    const auto& enabled = g_pGlobalState->config.layersPopups.enabled;
+    return enabled && **enabled;
+}
+
+// Lazy state of a layer, or of one of its popups, replacing a stale entry whose weak
+// ref died (a new object allocated at the same address).
+static std::shared_ptr<CGlassLayerSurface> layerGlassState(const PHLLS& layerSurface, const SP<Desktop::View::CPopup>& popup = nullptr) {
+    auto&                              layerStates = g_pGlobalState->layerSurfaces;
+    const SGlobalState::SLayerGlassKey key{layerSurface.get(), popup.get()};
+
+    auto it = layerStates.find(key);
+    if (it == layerStates.end())
+        it = layerStates.emplace(key, std::make_shared<CGlassLayerSurface>(layerSurface, popup)).first;
+    else if (!it->second->getLayerSurface() || (popup && !it->second->popup()))
+        it->second = std::make_shared<CGlassLayerSurface>(layerSurface, popup);
+    return it->second;
 }
 
 // Makes shouldBlur(PHLLS) return false for one renderLayer() call by mutating the
@@ -411,8 +447,9 @@ static void releaseContourFields(bool everything) {
             continue;
 
         const auto layerSurface = state->getLayerSurface();
-        const bool stale = everything || !layersOn || !layerSurface || !shouldGlassLayer(layerSurface) ||
-                           state->resolveMaskSource() != CGlassLayerSurface::EMaskSource::CONTOUR;
+        const bool popupsOff    = state->target() == CGlassLayerSurface::ETarget::POPUP && !popupGlassEnabled(layerSurface);
+        const bool stale        = everything || !layersOn || !layerSurface || !shouldGlassLayer(layerSurface) || popupsOff ||
+                                  state->resolveMaskSource() != CGlassLayerSurface::EMaskSource::CONTOUR;
         if (stale)
             state->releaseContour();
     }
@@ -459,21 +496,39 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, Render::CRenderContext
     if (g_pGlobalState->contourScratch.users > 0 && !(config.layersEnabled && **config.layersEnabled))
         releaseContourFields(true);
 
-    // Only inject glass on the main surface pass, not popups
-    if (!popups && config.layersEnabled && **config.layersEnabled && shouldGlassLayer(layerSurface)) {
-        // Lazy-create per-layer state, replacing stale entries whose weak ref died
-        // (can happen when a new CLayerSurface is allocated at the same address)
-        auto* rawPtr = layerSurface.get();
-        auto& layerStates = g_pGlobalState->layerSurfaces;
-        auto it = layerStates.find(rawPtr);
-        if (it != layerStates.end() && !it->second->getLayerSurface()) {
-            it->second = std::make_shared<CGlassLayerSurface>(layerSurface);
-        } else if (it == layerStates.end()) {
-            it = layerStates.emplace(rawPtr, std::make_shared<CGlassLayerSurface>(layerSurface)).first;
+    const bool layerGlassed = config.layersEnabled && **config.layersEnabled && shouldGlassLayer(layerSurface);
+
+    // Popups pass: while the scope is open, hkRenderPassAdd glasses each popup Hyprland
+    // queues for this layer. A workspace scene picks its popups differently (shouldRenderPopup()).
+    if (popups) {
+        const bool wanted = layerGlassed && !workspaceScene && g_pGlobalState->renderPassAddHook && layerSurface->mapped() &&
+                            popupGlassEnabled(layerSurface);
+        std::vector<Desktop::View::CPopup*> drawn;
+        if (wanted) {
+            g_pGlobalState->popupScope = SGlobalState::SPopupGlassScope{
+                .layer = layerSurface, .manageBlur = config.layersManageBlur && **config.layersManageBlur, .drawn = {}};
+            Hyprutils::Utils::CScopeGuard closeScope([&drawn] {
+                if (g_pGlobalState->popupScope)
+                    drawn = std::move(g_pGlobalState->popupScope->drawn);
+                g_pGlobalState->popupScope.reset();
+            });
+            ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, ctx, layerSurface, monitor, now, popups, lockscreen, workspaceScene);
+        } else {
+            ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, ctx, layerSurface, monitor, now, popups, lockscreen, workspaceScene);
         }
 
+        // frees the sample framebuffers of popups no longer glassed; the destructor damages where their glass was
+        std::erase_if(g_pGlobalState->layerSurfaces, [&](const auto& pair) {
+            return pair.first.layer == layerSurface.get() && pair.first.popup && std::ranges::find(drawn, pair.first.popup) == drawn.end();
+        });
+        return;
+    }
+
+    if (layerGlassed) {
+        const auto state = layerGlassState(layerSurface);
+
         if (!layerSurface->mapped()) {
-            it->second->releaseContour();
+            state->releaseContour();
             ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, ctx, layerSurface, monitor, now, popups, lockscreen, workspaceScene);
             return;
         }
@@ -486,10 +541,10 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, Render::CRenderContext
 
         // nothing to glass this frame (region mode without a bound region, or an
         // explicit empty region): render as Hyprland normally would
-        const auto maskSource = it->second->resolveMaskSource();
+        const auto maskSource = state->resolveMaskSource();
         // a layer that was drawn with contour and no longer is gives its field back
         if (maskSource != CGlassLayerSurface::EMaskSource::CONTOUR)
-            it->second->releaseContour();
+            state->releaseContour();
         if (maskSource == CGlassLayerSurface::EMaskSource::NONE) {
             ((renderLayerFn)g_pGlobalState->renderLayerHook->m_original)(thisptr, ctx, layerSurface, monitor, now, popups, lockscreen, workspaceScene);
             return;
@@ -497,12 +552,12 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, Render::CRenderContext
 
         // Requested here, while the pass is built: a pre-surface element that
         // simplify() discards still keeps the snapshot alive.
-        const bool xray = it->second->resolveXray();
+        const bool xray = state->resolveXray();
         if (xray)
             requestXraySnapshot(monitor);
 
         // Pre-surface: sample+blur background, redirect currentFB → temp FBO
-        CGlassLayerPassElement::SGlassLayerPassData preData{it->second, alpha, xray};
+        CGlassLayerPassElement::SGlassLayerPassData preData{state, alpha, xray};
         g_pHyprRenderer->currentPass(ctx).add(makeUnique<CGlassLayerPassElement>(preData));
 
         const bool manageBlur = config.layersManageBlur && **config.layersManageBlur;
@@ -519,10 +574,10 @@ static void hkRenderLayer(Render::IHyprRenderer* thisptr, Render::CRenderContext
         blurSuppression.reset();
 
         // Post-surface: restore currentFB, apply glass masked by temp FBO alpha, blit surface
-        CGlassLayerCompositeElement::SGlassLayerCompositeData postData{it->second, alpha, maskSource};
+        CGlassLayerCompositeElement::SGlassLayerCompositeData postData{state, alpha, maskSource};
         g_pHyprRenderer->currentPass(ctx).add(makeUnique<CGlassLayerCompositeElement>(postData));
 
-        it->second->damageIfMoved();
+        state->damageIfMoved();
         return;
     }
 
@@ -562,6 +617,61 @@ static bool subsurfaceGlassEnabledForWindow(const PHLWINDOW& window) {
     return deco && deco->isGlassEnabled();
 }
 
+// One popup element of the layer whose popups call hkRenderLayer has open: glass
+// before it and the composite after it, as an item gets. Hyprland's own blur is
+// dropped from this element only (manage_blur): it would paint an opaque
+// backdrop into the temp FBO and hide the glass.
+static void bracketLayerPopup(Render::CRenderPass* pass, UP<IPassElement>&& el) {
+    auto& scope = *g_pGlobalState->popupScope;
+    auto& data  = static_cast<CSurfacePassElement*>(el.get())->m_data;
+    // manage_blur off keeps Hyprland's blur, which covers the glass anyway. A
+    // popup's blur is always live and reads currentFB, so inside the redirect
+    // it would blur the empty temp FBO: the popup is left to Hyprland.
+    if (!scope.manageBlur && data.blur) {
+        callOriginalRenderPassAdd(pass, std::move(el));
+        return;
+    }
+
+    const auto  monitor   = data.pMonitor.lock();
+    const auto  wlSurface = data.surface ? Desktop::View::CWLSurface::fromResource(data.surface) : nullptr;
+    const auto  view      = wlSurface ? wlSurface->view() : nullptr;
+    const auto  popup     = view ? Desktop::View::CPopup::fromView(view) : nullptr;
+    const float alpha     = std::clamp(data.alpha * data.fadeAlpha, 0.0f, 1.0f);
+    if (!monitor || !popup || alpha < 0.001f) {
+        callOriginalRenderPassAdd(pass, std::move(el));
+        return;
+    }
+
+    const auto state = layerGlassState(scope.layer, popup);
+    scope.drawn.push_back(popup.get());
+
+    const auto maskSource = state->resolveMaskSource();
+    if (maskSource != CGlassLayerSurface::EMaskSource::CONTOUR)
+        state->releaseContour();
+    if (maskSource == CGlassLayerSurface::EMaskSource::NONE) {
+        callOriginalRenderPassAdd(pass, std::move(el));
+        return;
+    }
+
+    // Requested here, while the pass is built, as for a layer.
+    const bool xray = state->resolveXray();
+    if (xray)
+        requestXraySnapshot(monitor);
+
+    callOriginalRenderPassAdd(pass, makeUnique<CGlassLayerPassElement>(CGlassLayerPassElement::SGlassLayerPassData{state, alpha, xray}));
+
+    if (scope.manageBlur) {
+        data.blur           = false;
+        data.discardMode    = static_cast<uint8_t>(data.discardMode & ~DISCARD_ALPHA);
+        data.discardOpacity = 0.0f;
+    }
+    callOriginalRenderPassAdd(pass, std::move(el));
+
+    callOriginalRenderPassAdd(pass, makeUnique<CGlassLayerCompositeElement>(CGlassLayerCompositeElement::SGlassLayerCompositeData{state, alpha, maskSource}));
+
+    state->damageIfMoved();
+}
+
 static void hkRenderPassAdd(Render::CRenderPass* pass, UP<IPassElement>&& el) {
     // Hot path: every pass element of every kind (windows, layers, popups,
     // rects, cursors, snapshots...), on every monitor, every frame, funnels
@@ -572,6 +682,16 @@ static void hkRenderPassAdd(Render::CRenderPass* pass, UP<IPassElement>&& el) {
     if (!el || el->type() != EK_SURFACE) {
         callOriginalRenderPassAdd(pass, std::move(el));
         return;
+    }
+
+    // Open only inside hkRenderLayer's popups call for a glassed layer, which did the
+    // snapshot, foreign-render and lock checks. Same cast as below.
+    if (const auto& scope = g_pGlobalState->popupScope) {
+        const auto& data = static_cast<CSurfacePassElement*>(el.get())->m_data;
+        if (data.popup && data.pLS == scope->layer) {
+            bracketLayerPopup(pass, std::move(el));
+            return;
+        }
     }
 
     // Feature off (never enabled, or turned off this session): skip every
@@ -669,21 +789,27 @@ static void hkRenderPassAdd(Render::CRenderPass* pass, UP<IPassElement>&& el) {
 }
 
 // Only warn about the missing CRenderPass::add hook once config is actually
-// loaded and the feature is turned on — called after every config reload so
-// a user who enables subsurfaces later still gets told.
-static void notifySubsurfaceHookFailure() {
-    if (!g_pGlobalState || g_pGlobalState->renderPassAddHook || g_pGlobalState->subsurfaceHookFailureNotified)
+// loaded and a feature that needs it is turned on — called after every config
+// reload so a user who enables subsurfaces or popups later still gets told.
+static void notifyRenderPassAddHookFailure() {
+    if (!g_pGlobalState || g_pGlobalState->renderPassAddHook || g_pGlobalState->renderPassAddHookFailureNotified)
         return;
 
-    const auto& config = g_pGlobalState->config;
-    if (!(config.subsurfacesEnabled && **config.subsurfacesEnabled))
+    const auto& config      = g_pGlobalState->config;
+    const bool  subsurfaces = config.subsurfacesEnabled && **config.subsurfacesEnabled;
+    const bool  popups      = anyPopupGlassConfigured(config, g_pGlobalState->layerNamespaceSettings);
+    if (!subsurfaces && !popups)
         return;
 
-    g_pGlobalState->subsurfaceHookFailureNotified = true;
+    const std::string_view disabled = subsurfaces && popups ? "subsurface item glass and layer popup glass disabled" :
+        subsurfaces                                         ? "subsurface item glass disabled" :
+                                                              "layer popup glass disabled";
+    const std::string_view reason   = g_pGlobalState->renderPassAddSymbolFound ? "symbol found, hook failed — possibly already hooked by another plugin" :
+                                                                                 "symbol not found";
+
+    g_pGlobalState->renderPassAddHookFailureNotified = true;
     HyprlandAPI::addNotificationV2(PHANDLE, {
-        {"text", std::string(g_pGlobalState->renderPassAddSymbolFound ?
-            "[hyprglass] Could not hook CRenderPass::add (symbol found, hook failed — possibly already hooked by another plugin) — subsurface item glass disabled" :
-            "[hyprglass] Could not hook CRenderPass::add (symbol not found) — subsurface item glass disabled")},
+        {"text", std::format("[hyprglass] Could not hook CRenderPass::add ({}) — {}", reason, disabled)},
         {"time", (uint64_t)5000},
         {"color", CHyprColor{1.0, 0.8, 0.2, 1.0}},
     });
@@ -835,6 +961,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen(
         [](Event::SRenderStageEvent event) { onRenderStage(event); }));
 
+    // Every moved or resized window damages a frame, so the frame's first stage sees the change.
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen(
+        [](Event::SRenderStageEvent event) {
+            if (event.stage != RENDER_PRE)
+                return;
+            const auto& config = g_pGlobalState->config;
+            if (config.eventsGeometry && **config.eventsGeometry)
+                GeometryEvents::scan();
+            else
+                GeometryEvents::clear();
+        }));
+
     // Render-order fingerprint: restart the running hash at RENDER_BEGIN with the
     // monitor's fade-outs, then at RENDER_LAST_MOMENT compare it to last frame's and
     // bump scene generation on a change. Both fire inside renderMonitor() strictly
@@ -886,7 +1024,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         releaseContourFields(false);
         // config values are only final here: Hyprland reloads the config after PLUGIN_INIT returns
         refreshSurfaceObserver();
-        notifySubsurfaceHookFailure();
+        notifyRenderPassAddHookFailure();
         // every reload restores the user's value
         scheduleShadowsForWindowGlass();
     }));
@@ -947,7 +1085,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         }
     }
 
-    // the failure notification waits for the config: see notifySubsurfaceHookFailure()
+    // the failure notification waits for the config: see notifyRenderPassAddHookFailure()
     g_pGlobalState->renderPassAddSymbolFound = renderPassAddAddress != nullptr;
 
     // No reloadConfig(): Hyprland reloads the config after every plugin load.
@@ -957,7 +1095,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     commitPendingLayers();
     validateConfig();
     refreshSurfaceObserver();
-    notifySubsurfaceHookFailure();
+    notifyRenderPassAddHookFailure();
 
     // Last: a PLUGIN_INIT that throws is unloaded without PLUGIN_EXIT, which
     // would leave the persistent helper calling back into this library.
@@ -1013,6 +1151,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
         g_pGlobalState->renderPassAddHook = nullptr;
     }
 
+    g_pGlobalState->popupScope.reset();
     g_pGlobalState->layerSurfaces.clear();
     g_pGlobalState->subsurfaceGlass.clear();
     g_pGlobalState->shaderManager.destroy();

@@ -466,12 +466,9 @@ bool CGlassDecoration::wantsBackgroundResample(Render::CRenderContext& ctx, PHLM
     const float blurStrength              = resolvePresetFloat(resolveContext, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
     const int   downscale                 = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-    const int fullWidth  = static_cast<int>(windowBox.w) + 2 * GlassRenderer::SAMPLE_PADDING_PX;
-    const int fullHeight = static_cast<int>(windowBox.h) + 2 * GlassRenderer::SAMPLE_PADDING_PX;
-    const int requiredWidth  = std::max(1, fullWidth / downscale);
-    const int requiredHeight = std::max(1, fullHeight / downscale);
+    const auto required = GlassRenderer::sampleMapFor(windowBox, source->m_size, downscale);
 
-    if (m_sampleFramebuffer->m_size.x != requiredWidth || m_sampleFramebuffer->m_size.y != requiredHeight ||
+    if (m_sampleFramebuffer->m_size.x != required.width || m_sampleFramebuffer->m_size.y != required.height ||
         m_sampleFramebuffer->m_drmFormat != source->m_drmFormat)
         return true;
 
@@ -580,13 +577,13 @@ void CGlassDecoration::renderPass(Render::CRenderContext& ctx, PHLMONITOR monito
             float blurStrength   = resolvePresetFloat(resolveContext, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
             int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
 
-            GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, xray ? snapshot : source, windowBox, m_samplePaddingRatio, downscale);
+            GlassRenderer::sampleBackground(ctx, m_sampleFramebuffer, xray ? snapshot : source, windowBox, m_sampleMap, downscale);
 
             // Only here, on a real (non-cached) sample: blending onto a cache-hit
             // frame would double-composite our own content over an already-blurred FBO.
             if (m_lastSelfSample > 0.0f)
                 GlassRenderer::blendOwnContent(ctx, m_sampleFramebuffer, window, monitor, windowBox,
-                                               downscale, m_lastSelfSample, cornerRadius, roundingPower);
+                                               m_sampleMap, m_lastSelfSample, cornerRadius, roundingPower);
 
             float blurRadius     = blurStrength * 12.0f / downscale;
             int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(resolveContext, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
@@ -676,7 +673,7 @@ void CGlassDecoration::renderPass(Render::CRenderContext& ctx, PHLMONITOR monito
     GlassRenderer::applyGlassEffect(ctx, m_sampleFramebuffer, source,
                                      windowBox, glassAlpha,
                                      std::array<float, 4>{cornerRadius, cornerRadius, cornerRadius, cornerRadius},
-                                     roundingPower, m_samplePaddingRatio, resolveContext, nullptr, focusLight,
+                                     roundingPower, m_sampleMap, resolveContext, nullptr, focusLight,
                                      frostInput.copy ? &frostInput : nullptr);
 }
 

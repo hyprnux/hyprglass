@@ -37,7 +37,8 @@ bool CShaderManager::compileGlassProgram(SGlassProgram& glass, GlassFeatureMask 
     glassUniforms.glassOpacity        = glGetUniformLocation(program, "glassOpacity");
     glassUniforms.edgeThickness       = glGetUniformLocation(program, "edgeThickness");
     glassUniforms.invBezelWidthPx     = glGetUniformLocation(program, "invBezelWidthPx");
-    glassUniforms.uvPadding           = glGetUniformLocation(program, "uvPadding");
+    glassUniforms.texUVOffset         = glGetUniformLocation(program, "texUVOffset");
+    glassUniforms.texUVScale          = glGetUniformLocation(program, "texUVScale");
     glassUniforms.tintColor           = glGetUniformLocation(program, "tintColor");
     glassUniforms.tintAlpha           = glGetUniformLocation(program, "tintAlpha");
     glassUniforms.lensDistortion      = glGetUniformLocation(program, "lensDistortion");

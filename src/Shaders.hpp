@@ -34,7 +34,8 @@ uniform sampler2D tex;
 uniform vec2 fullSize;
 uniform vec2 invFullSize;      // = 1.0 / fullSize, hoisted out of the per-pixel divisions below
 uniform vec4 radii;            // per-corner radius: top-left, top-right, bottom-right, bottom-left
-uniform vec2 uvPadding;
+uniform vec2 texUVOffset;      // box UV -> sample texture UV: the texture holds the box's part on screen, padded
+uniform vec2 texUVScale;
 
 uniform float refractionStrength;
 uniform float noiseStrength;
@@ -97,7 +98,7 @@ uniform vec2 glassUVScale;
 uniform vec2 glassUVOffset;
 
 // Maps this fragment's own box UV into the sample texture's normalized space
-// before uvPadding is applied. Identity (offset 0, scale 1) unless the sample
+// before toTexUV(). Identity (offset 0, scale 1) unless the sample
 // texture covers a smaller area than this box — PROTOCOL_REGION layers only,
 // where the background is only ever sampled/blurred inside the blur region's
 // bounding box (see GlassRenderer::sampleBackground callers in GlassLayerSurface.cpp).
@@ -161,7 +162,7 @@ vec2 toSampleBoxUV(vec2 wuv) {
 }
 
 vec2 toTexUV(vec2 wuv) {
-    return wuv * (1.0 - 2.0 * uvPadding) + uvPadding;
+    return wuv * texUVScale + texUVOffset;
 }
 
 vec4 sampleBlurred(vec2 wuv) {
