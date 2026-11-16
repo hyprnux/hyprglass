@@ -1,9 +1,36 @@
 
+## [v1.2.0](https://github.com/Hyprnux/hyprglass/compare/v1.1.1...v1.2.0) - 2026-11-16
+
+### Bug Fixes
+
+* a negative tint, opacity or refraction falls back to the default
+* item glass works alongside other plugins and in a sandboxed Hyprland
+* a huge window, bar or menu no longer crashes Hyprland
+
+### Build System
+
+* update hyprland compatibility to v0.57.2
+* update hyprland compatibility to v0.57.1
+
+### Documentation
+
+* adaptive_boost describes what it really does
+
+### Features
+
+* a socket2 event for each move or resize of a floating window
+* glass behind the menus and tooltips of glassed bars ([#107](https://github.com/Hyprnux/hyprglass/issues/107))
+
+
 ## [v1.1.1](https://github.com/Hyprnux/hyprglass/compare/v1.1.0...v1.1.1) - 2026-11-03
 
 ### Bug Fixes
 
 * glass refreshes over video and other GPU-rendered backgrounds ([#102](https://github.com/Hyprnux/hyprglass/issues/102))
+
+### Chores
+
+* **release:** v1.1.1 [skip ci]
 
 
 ## [v1.1.0](https://github.com/Hyprnux/hyprglass/compare/v1.0.0...v1.1.0) - 2026-10-30
