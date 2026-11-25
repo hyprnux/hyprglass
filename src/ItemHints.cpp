@@ -205,7 +205,7 @@ std::optional<SItemHints> ItemHints::forSurface(CWLSurfaceResource* surface) {
     hints.y      = state.y;
     hints.width  = state.width;
     hints.height = state.height;
-    hints.radii  = {state.radii[0], state.radii[1], state.radii[2], state.radii[3]};
+    hints.radii  = Math::SCornerRadii(state.radii[0], state.radii[1], state.radii[2], state.radii[3]);
 
     return hints;
 }

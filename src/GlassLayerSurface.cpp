@@ -15,6 +15,7 @@
 #include <hyprland/src/protocols/LayerShell.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/helpers/math/CornerRadii.hpp>
 #include <hyprutils/math/Misc.hpp>
 
 CGlassLayerSurface::CGlassLayerSurface(PHLLS layerSurface, WP<Desktop::View::CPopup> popup)
@@ -824,7 +825,7 @@ void CGlassLayerSurface::compositeAndRestore(Render::CRenderContext& ctx, PHLMON
     GlassRenderer::applyGlassEffect(ctx,
                                      m_sampleFramebuffer, target,
                                      box, alpha,
-                                     std::array<float, 4>{cornerRadius, cornerRadius, cornerRadius, cornerRadius},
+                                     Math::SCornerRadii(cornerRadius),
                                      roundingPower, m_sampleMap, resolveContext,
                                      &maskInfo);
 }

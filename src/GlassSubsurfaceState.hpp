@@ -68,7 +68,7 @@ class CGlassSubsurfaceState {
     [[nodiscard]] bool         hasDrawnOnce() const { return m_hasDrawnOnce; }
     [[nodiscard]] const std::string& lastMonitorName() const { return m_lastMonitorName; }
     [[nodiscard]] const CBox&        lastGlassBox() const { return m_lastGlassBox; }
-    [[nodiscard]] const std::array<float, 4>& lastRadii() const { return m_lastRadii; }
+    [[nodiscard]] const Math::SCornerRadii& lastRadii() const { return m_lastRadii; }
     [[nodiscard]] float              lastRoundingPower() const { return m_lastRoundingPower; }
     [[nodiscard]] const std::string& lastResolvedPreset() const { return m_lastResolvedPreset; }
     [[nodiscard]] const SPresetHintOutcome&  lastPresetHint() const { return m_lastPresetHint; }
@@ -98,13 +98,13 @@ class CGlassSubsurfaceState {
 
     // Set at the end of compositeAndRestore() for `hyprctl hyprglass items`
     // (see the public accessors above); never read on the render path itself.
-    bool                  m_hasDrawnOnce = false;
-    std::string           m_lastMonitorName;
-    CBox                  m_lastGlassBox;
-    std::array<float, 4>  m_lastRadii{};
-    float                 m_lastRoundingPower = 2.0f;
-    std::string           m_lastResolvedPreset;
-    SPresetHintOutcome    m_lastPresetHint;
+    bool                m_hasDrawnOnce = false;
+    std::string         m_lastMonitorName;
+    CBox                m_lastGlassBox;
+    Math::SCornerRadii  m_lastRadii;
+    float               m_lastRoundingPower = 2.0f;
+    std::string         m_lastResolvedPreset;
+    SPresetHintOutcome  m_lastPresetHint;
 
     [[nodiscard]] bool        resolveThemeIsDark() const;
     [[nodiscard]] std::string resolvePresetName(SPresetHintOutcome* hintOutcome = nullptr) const;

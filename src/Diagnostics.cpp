@@ -168,7 +168,7 @@ std::string jsonBox(double x, double y, double width, double height) {
 
 template <typename T>
 std::string jsonRadii(const T& radii) {
-    return std::format("[{:.1f}, {:.1f}, {:.1f}, {:.1f}]", radii[0], radii[1], radii[2], radii[3]);
+    return std::format("[{:.1f}, {:.1f}, {:.1f}, {:.1f}]", radii.topLeft, radii.topRight, radii.bottomRight, radii.bottomLeft);
 }
 
 std::string windowField(const PHLWINDOWREF& windowRef) {
@@ -259,7 +259,7 @@ std::string formatItems(IPC::Socket1::eOutputFormat format) {
 
         if (hints && shapeMode == eItemShapeMode::EXPLICIT) {
             out += std::format("      hint rect: {:.1f},{:.1f} {:.1f}x{:.1f}px  radii {:.1f},{:.1f},{:.1f},{:.1f} (logical px)\n", hints->x,
-                                hints->y, hints->width, hints->height, hints->radii[0], hints->radii[1], hints->radii[2], hints->radii[3]);
+                                hints->y, hints->width, hints->height, hints->radii.topLeft, hints->radii.topRight, hints->radii.bottomRight, hints->radii.bottomLeft);
         }
 
         if (entry.state->hasDrawnOnce()) {
@@ -267,7 +267,7 @@ std::string formatItems(IPC::Socket1::eOutputFormat format) {
             const auto& radii = entry.state->lastRadii();
             out += std::format(
                 "      last drawn: box {:.1f},{:.1f} {:.1f}x{:.1f}px  radii {:.1f},{:.1f},{:.1f},{:.1f}  roundingPower {:.2f} (physical px)\n",
-                box.x, box.y, box.w, box.h, radii[0], radii[1], radii[2], radii[3], entry.state->lastRoundingPower());
+                box.x, box.y, box.w, box.h, radii.topLeft, radii.topRight, radii.bottomRight, radii.bottomLeft, entry.state->lastRoundingPower());
         } else {
             out += "      last drawn: -\n";
         }

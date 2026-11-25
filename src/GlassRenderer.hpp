@@ -8,6 +8,7 @@
 #include <GLES3/gl32.h>
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
+#include <hyprland/src/helpers/math/CornerRadii.hpp>
 #include <hyprutils/math/Box.hpp>
 #include <hyprutils/math/Region.hpp>
 #include <hyprutils/math/Vector2D.hpp>
@@ -171,7 +172,7 @@ void sampleBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sam
 // blur that follows works on a mix of the desktop and the window's own content.
 // box and map: the framebuffer-space box sampleBackground() was given and the map it wrote.
 void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW window,
-                      PHLMONITOR monitor, const CBox& box, const SSampleMap& map, float amount, float cornerRadius, float roundingPower);
+                      PHLMONITOR monitor, const CBox& box, const SSampleMap& map, float amount, const Math::SCornerRadii& cornerRadii, float roundingPower);
 
 // callerFramebuffer is re-bound after the blur ping-pong; the viewport is
 // restored from its size so it always matches the re-bound framebuffer.
@@ -213,7 +214,7 @@ struct SFrostInput {
 void applyGlassEffect(Render::CRenderContext& ctx,
                        SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> targetFramebuffer,
                        const CBox& box,
-                       float alpha, const std::array<float, 4>& radii, float roundingPower,
+                       float alpha, const Math::SCornerRadii& radii, float roundingPower,
                        const SSampleMap& sampleMap, const SResolveContext& resolveContext,
                        const SMaskInfo* mask = nullptr, float focusLight = 0.0f, const SFrostInput* frost = nullptr);
 

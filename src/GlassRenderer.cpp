@@ -203,7 +203,7 @@ void sampleBackground(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sam
 }
 
 void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& sampleFramebuffer, PHLWINDOW window,
-                      PHLMONITOR monitor, const CBox& box, const SSampleMap& map, float amount, float cornerRadius, float roundingPower) {
+                      PHLMONITOR monitor, const CBox& box, const SSampleMap& map, float amount, const Math::SCornerRadii& cornerRadii, float roundingPower) {
     if (amount <= 0.0f || !sampleFramebuffer || !window || !monitor)
         return;
 
@@ -315,7 +315,7 @@ void blendOwnContent(Render::CRenderContext& ctx, SP<Render::IFramebuffer>& samp
                 .box           = map.toSample(framebufferBox),
                 .a             = amount,
                 .damage        = fullDamage,
-                .round         = mainSurface ? static_cast<int>(cornerRadius * map.scaleX) : 0,
+                .round         = mainSurface ? cornerRadii * map.scaleX : Math::SCornerRadii(),
                 .roundingPower = roundingPower,
                 .allowCustomUV = customUV,
                 .surface       = surface,
@@ -477,7 +477,7 @@ static constexpr int CONTOUR_TEXTURE_UNIT = 3; // layers only, so never at the s
 void applyGlassEffect(Render::CRenderContext& ctx,
                        SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFramebuffer> targetFramebuffer,
                        const CBox& box,
-                       float alpha, const std::array<float, 4>& radii, float roundingPower,
+                       float alpha, const Math::SCornerRadii& radii, float roundingPower,
                        const SSampleMap& sampleMap, const SResolveContext& resolveContext,
                        const SMaskInfo* mask, float focusLight, const SFrostInput* frost) {
     if (!sampleFramebuffer || !targetFramebuffer)
@@ -705,9 +705,9 @@ void applyGlassEffect(Render::CRenderContext& ctx,
         glUniform2f(uniforms.sampleUVScale, 1.0f, 1.0f);
     }
 
-    glUniform4f(uniforms.radii, radii[0], radii[1], radii[2], radii[3]);
+    glUniform4f(uniforms.radii, radii.topLeft, radii.topRight, radii.bottomRight, radii.bottomLeft);
     shader->setUniformFloat(SHADER_ROUNDING_POWER, safeRoundingPower);
-
+  
     glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
 
     // Only finalDamage is copied to the screen, and elementDamage (which finalDamage is a
