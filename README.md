@@ -35,6 +35,110 @@ Or persist it in your config:
 hl.plugin.load("/path/to/hyprglass.so")
 ```
 
+### Nix
+
+The flake allows usage of HyprGlass with both the official flake and the nixpkgs version of Hyprland.
+The plugin is automatically built against the appropriate Hyprland version.
+
+#### Using Hyprland flake
+
+##### flake.nix
+
+```nix
+{
+    inputs = {
+      hyprland.url = "github:hyprwm/Hyprland";
+
+      hyprglass = {
+        url = "github:hyprnux/hyprglass";
+        inputs.hyprland.follows = "hyprland";
+        inputs.nixpkgs.follows = "hyprland/nixpkgs";
+      };
+    };
+}
+```
+
+##### home.nix
+
+```nix
+{
+  home.packages = [
+    inputs.hyprglass.packages.${pkgs.stdenv.hostPlatform.system}.hyprglass
+  ];
+
+  # Or using home-manager module
+  wayland.windowManager.hyprland.plugins = [
+    inputs.hyprglass.packages.${pkgs.stdenv.hostPlatform.system}.hyprglass
+  ];
+}
+```
+
+#### Using nixpkgs version
+
+##### flake.nix
+
+```nix
+{
+    inputs = {
+      hyprglass = {
+        url = "github:hyprnux/hyprglass";
+        inputs.nixpkgs.follows = "nixpkgs";
+      };
+    };
+}
+```
+
+##### home.nix
+
+```nix
+{
+  home.packages = [
+    inputs.hyprglass.packages.${pkgs.stdenv.hostPlatform.system}.hyprglass-nixpkgs
+  ];
+
+  # Or using home-manager module
+  wayland.windowManager.hyprland.plugins = [
+    inputs.hyprglass.packages.${pkgs.stdenv.hostPlatform.system}.hyprglass-nixpkgs
+  ];
+}
+```
+
+#### Using as a nixpkgs overlay
+
+##### flake.nix
+
+```nix
+{
+  # Inputs as described above
+
+  outputs = { self, nixpkgs, hyprglass, ... }:
+  {
+    nixosConfigurations.my-hostname = nixpkgs.lib.nixosSystem {
+      modules = [
+        {
+          nixpkgs.overlays = [ hyprglass.overlays.default ];
+        }
+      ];
+    };
+  };
+}
+```
+
+##### home.nix
+
+```nix
+{
+  home.packages = [
+    pkgs.hyprlandPlugins.hyprglass
+  ];
+
+  # Or using home-manager module
+  wayland.windowManager.hyprland.plugins = [
+    pkgs.hyprlandPlugins.hyprglass
+  ];
+}
+```
+
 ### Manual build
 
 ```bash
