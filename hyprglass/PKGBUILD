@@ -24,7 +24,7 @@ unset _d
 # hyprnux-rebuild-with: hyprland aquamarine
 pkgname=hyprglass
 pkgver=1.2.0
-pkgrel=14
+pkgrel=15
 _tag_commit=56714382e7ee6a46826bc8586f6d68b662c60c8a # v1.2.0
 pkgdesc="Liquid glass for Hyprland windows, layers and the Hyprnux shell"
 arch=('x86_64')
