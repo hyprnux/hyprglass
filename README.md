@@ -45,6 +45,54 @@ make test   # optional, needs no Hyprland
 hyprctl plugin load $(pwd)/hyprglass.so
 ```
 
+### Arch Linux (Hyprnux repository)
+
+The Hyprnux repository has a `hyprglass` package, rebuilt with every Hyprland update. Add the repository (next section), then:
+
+```bash
+sudo pacman -S hyprglass
+```
+
+The plugin is installed at `/usr/lib/hyprglass/hyprglass.so`. Hyprnux loads it by itself; elsewhere, load it from your config:
+
+```lua
+hl.plugin.load("/usr/lib/hyprglass/hyprglass.so")
+```
+
+## Add the Hyprnux repository
+
+Hyprnux has its own pacman repository, named `hyprnux-testing`. It is signed, so pacman can check every package. You add it once per machine, in three steps:
+
+1. **Show the key and check the fingerprint.** Get the repository key and look at it:
+
+   ```bash
+   curl -fsSLO https://www.hyprnux.org/hyprnux.gpg
+   gpg --show-keys hyprnux.gpg
+   ```
+
+   `pub` is the first line of the key's description; the line under it must read:
+
+   ```text
+   BF3FA18AE63F226028A83A2E3DA59F85B9821E2C
+   ```
+
+   That line is the key's fingerprint, its identifier. If yours is different, stop.
+
+2. **Trust the key.** Tell pacman to trust it:
+
+   ```bash wrap
+   sudo pacman-key --add hyprnux.gpg
+   sudo pacman-key --lsign-key BF3FA18AE63F226028A83A2E3DA59F85B9821E2C
+   ```
+
+3. **Add the repository to `pacman.conf`.** Add this to `/etc/pacman.conf`, above the line `[core]`. Hyprnux's own packages are found first, because pacman takes a package from the first repository that has it.
+
+   ```ini
+   [hyprnux-testing]
+   SigLevel = Required DatabaseRequired
+   Server = https://repo.hyprnux.org/$repo/os/$arch
+   ```
+
 ## Configuration
 
 ### Config
