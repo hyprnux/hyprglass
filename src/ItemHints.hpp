@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <hyprland/src/helpers/math/CornerRadii.hpp>
 
 class CWLSurfaceResource;
 
@@ -15,10 +16,10 @@ enum class eItemShapeMode : uint8_t {
 };
 
 struct SItemHints {
-    std::string           preset; // empty = no preset hint
-    eItemShapeMode        shapeMode = eItemShapeMode::NONE;
-    double                x = 0.0, y = 0.0, width = 0.0, height = 0.0; // surface-local logical px, EXPLICIT only
-    std::array<double, 4> radii{};                                     // top-left, top-right, bottom-right, bottom-left (logical px), EXPLICIT only
+    std::string        preset; // empty = no preset hint
+    eItemShapeMode     shapeMode = eItemShapeMode::NONE;
+    double             x = 0.0, y = 0.0, width = 0.0, height = 0.0; // surface-local logical px, EXPLICIT only
+    Math::SCornerRadii radii{};
 };
 
 namespace ItemHints {

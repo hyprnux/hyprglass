@@ -20,6 +20,7 @@
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/helpers/math/CornerRadii.hpp>
 
 CGlassDecoration::CGlassDecoration(PHLWINDOW window)
     : IHyprWindowDecoration(window), m_window(window) {
@@ -519,7 +520,7 @@ void CGlassDecoration::renderPass(Render::CRenderContext& ctx, PHLMONITOR monito
     // Hyprland renders internal-fullscreen windows unrounded (dontRound), we need to
     // match, or the glass would show rounded gaps at the screen corners
     const bool fsUnrounded = Fullscreen::controller()->getFullscreenModes(window).internal == Fullscreen::FSMODE_FULLSCREEN;
-    float cornerRadius  = fsUnrounded ? 0.0f : window->presentation().rounding() * monitorScale;
+    auto cornerRadii    = fsUnrounded ? Math::SCornerRadii(0.0f) : window->presentation().rounding() * monitorScale;
     float roundingPower = window->presentation().roundingPower();
 
     // Resolved here, not inside the cache branch below, so it stays fresh on a
@@ -583,7 +584,7 @@ void CGlassDecoration::renderPass(Render::CRenderContext& ctx, PHLMONITOR monito
             // frame would double-composite our own content over an already-blurred FBO.
             if (m_lastSelfSample > 0.0f)
                 GlassRenderer::blendOwnContent(ctx, m_sampleFramebuffer, window, monitor, windowBox,
-                                               m_sampleMap, m_lastSelfSample, cornerRadius, roundingPower);
+                                               m_sampleMap, m_lastSelfSample, cornerRadii, roundingPower);
 
             float blurRadius     = blurStrength * 12.0f / downscale;
             int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(resolveContext, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
@@ -672,7 +673,7 @@ void CGlassDecoration::renderPass(Render::CRenderContext& ctx, PHLMONITOR monito
 
     GlassRenderer::applyGlassEffect(ctx, m_sampleFramebuffer, source,
                                      windowBox, glassAlpha,
-                                     std::array<float, 4>{cornerRadius, cornerRadius, cornerRadius, cornerRadius},
+                                     cornerRadii,
                                      roundingPower, m_sampleMap, resolveContext, nullptr, focusLight,
                                      frostInput.copy ? &frostInput : nullptr);
 }

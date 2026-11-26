@@ -9,24 +9,24 @@
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
+#include <hyprland/src/helpers/math/CornerRadii.hpp>
 
 // CSS border-radius overlap rule: if two radii sharing an edge would sum to
 // more than that edge's length, every radius (not just that pair) shrinks by
 // the smallest offending edge's own ratio, keeping all four in proportion.
-static void clampRadiiToBox(std::array<float, 4>& radii, float width, float height) {
+static void clampRadiiToBox(Math::SCornerRadii& radii, float width, float height) {
     float      ratio     = 1.0f;
     const auto shrinkFor = [&](float a, float b, float edge) {
         if (a + b > edge && a + b > 0.0f)
             ratio = std::min(ratio, edge / (a + b));
     };
-    shrinkFor(radii[0], radii[1], width);  // top:    top-left + top-right
-    shrinkFor(radii[1], radii[2], height); // right:  top-right + bottom-right
-    shrinkFor(radii[2], radii[3], width);  // bottom: bottom-right + bottom-left
-    shrinkFor(radii[3], radii[0], height); // left:   bottom-left + top-left
+    shrinkFor(radii.topLeft,     radii.topRight,    width);  // top
+    shrinkFor(radii.topRight,    radii.bottomRight, height); // right
+    shrinkFor(radii.bottomRight, radii.bottomLeft,  width);  // bottom
+    shrinkFor(radii.bottomLeft,  radii.topLeft,     height); // left
 
     if (ratio < 1.0f)
-        for (float& r : radii)
-            r *= ratio;
+        radii = radii * ratio;
 }
 
 CGlassSubsurfaceState::CGlassSubsurfaceState(WP<CWLSurfaceResource> surface, PHLWINDOWREF window)
@@ -269,7 +269,7 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
     // that box; >= 0 = the exact logical px, scaled by monitor scale like
     // every other logical-px size). EXPLICIT and INHERIT_WINDOW override the
     // box and radii below with the client's own hint.
-    std::array<float, 4> radii{0.0f, 0.0f, 0.0f, 0.0f};
+    Math::SCornerRadii radii;
     bool                 haveGlassBox = false;
 
     const auto surface = m_surface.lock();
@@ -285,8 +285,7 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
 
         if (std::isfinite(hintPixelBox.x) && std::isfinite(hintPixelBox.y) && std::isfinite(hintPixelBox.w) && std::isfinite(hintPixelBox.h) &&
             hintPixelBox.w > 0.0 && hintPixelBox.h > 0.0) {
-            radii = {static_cast<float>(hints->radii[0]) * scale, static_cast<float>(hints->radii[1]) * scale,
-                     static_cast<float>(hints->radii[2]) * scale, static_cast<float>(hints->radii[3]) * scale};
+            radii = hints->radii * scale;
             clampRadiiToBox(radii, static_cast<float>(hintPixelBox.w), static_cast<float>(hintPixelBox.h));
 
             hintPixelBox.round();
@@ -301,8 +300,7 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
                 maskInfo.glassBoxSizePx   = Vector2D(windowBox->w, windowBox->h);
                 haveGlassBox              = true;
 
-                const float windowRadius = window->presentation().rounding() * static_cast<float>(monitor->m_scale);
-                radii                    = {windowRadius, windowRadius, windowRadius, windowRadius};
+                radii = window->presentation().rounding() * static_cast<float>(monitor->m_scale);
                 roundingPower            = window->presentation().roundingPower();
             }
         }
@@ -322,7 +320,7 @@ void CGlassSubsurfaceState::compositeAndRestore(Render::CRenderContext& ctx, PHL
             const float configuredRadius = config.subsurfacesRadius ? static_cast<float>(**config.subsurfacesRadius) : -1.0f;
             const float radius = configuredRadius < 0.0f ? static_cast<float>(std::min(glassExtents.w, glassExtents.h)) / 2.0f :
                                                              configuredRadius * static_cast<float>(monitor->m_scale);
-            radii = {radius, radius, radius, radius};
+            radii = Math::SCornerRadii(radius);
         }
         // else: extents degenerate (shouldn't happen — the hook bails on an empty
         // region before this state is ever touched) — leave the sentinel default,
